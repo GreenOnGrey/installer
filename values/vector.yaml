@@ -1,0 +1,44 @@
+# Vector (роль Agent, DaemonSet): логи всех контейнеров всех namespace (R9) →
+# VictoriaLogs через Elasticsearch-совместимый эндпоинт.
+role: Agent
+service: { enabled: false }
+serviceHeadless: { enabled: false }
+containerPorts:
+  - { name: prom-exporter, containerPort: 9090, protocol: TCP }
+customConfig:
+  data_dir: /vector-data-dir
+  api: { enabled: false }
+  sources:
+    k8s: { type: kubernetes_logs }
+    internal: { type: internal_metrics }
+  transforms:
+    shape:
+      type: remap
+      inputs: [k8s]
+      source: |
+        .namespace = .kubernetes.pod_namespace
+        .pod = .kubernetes.pod_name
+        .container = .kubernetes.container_name
+        .node = .kubernetes.pod_node_name
+        del(.kubernetes)
+        del(.file)
+  sinks:
+    victorialogs:
+      type: elasticsearch
+      inputs: [shape]
+      endpoints: ["http://victoria-logs-victoria-logs-single-server:9428/insert/elasticsearch/"]
+      mode: bulk
+      api_version: v8
+      compression: gzip
+      healthcheck: { enabled: false }
+      query:
+        _msg_field: message
+        _time_field: timestamp
+        _stream_fields: namespace,pod,container
+      buffer: { type: memory, max_events: 5000 }
+    metrics:
+      type: prometheus_exporter
+      inputs: [internal]
+      address: 0.0.0.0:9090
+resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { cpu: 300m, memory: 256Mi } }
+podAnnotations: { prometheus.io/scrape: "true", prometheus.io/port: "9090" }

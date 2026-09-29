@@ -1,0 +1,16 @@
+# vmagent — сбор метрик (R8). Задания сбора (config.scrape_configs) собираются
+# hammurapi-infra.sh из values/scrape/*.yaml: задания встроенных хранилищ
+# включаются только в режиме internal.
+mode: deployment
+remoteWrite:
+  - url: http://victoria-metrics-victoria-metrics-single-server:8428/api/v1/write
+extraArgs:
+  envflag.enable: true
+  envflag.prefix: VM_
+  # Метка кластера нужна дашборду «Kubernetes / Views / Global».
+  remoteWrite.label: cluster=hammurapi
+  promscrape.dropOriginalLabels: true
+resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { cpu: 200m, memory: 256Mi } }
+podAnnotations: { prometheus.io/scrape: "true", prometheus.io/port: "8429" }
+config:
+  global: { scrape_interval: 30s, scrape_timeout: 10s }

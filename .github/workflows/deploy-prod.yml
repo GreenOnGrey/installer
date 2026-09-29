@@ -1,0 +1,114 @@
+# Выкатка тега релиза на прод — демо-стенд в Google Cloud (R18).
+# Срабатывает на push тега vX.Y.Z; для повторной выкатки или возврата на
+# прежнюю версию — ручной запуск с тегом. Автоматического отката нет.
+# Конфигурация и секреты прода остаются на машине (/opt/hammurapi-infra) и в
+# workflow не передаются; GitHub хранит только доступ к машине.
+name: deploy-prod
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag: { description: "Тег для выкатки (vX.Y.Z)", required: true, type: string }
+concurrency: { group: deploy-prod, cancel-in-progress: false }
+permissions: { contents: read, id-token: write }   # id-token — для gcp-iap
+
+env:
+  DEPLOY_TRANSPORT: ${{ vars.DEPLOY_TRANSPORT || 'ssh' }}
+  PROD_DIR: /opt/hammurapi-infra
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Определить тег и коммит
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag || github.ref_name }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          tag=$(.github/scripts/resolve-tag.sh "$INPUT_TAG")
+          git fetch --tags --force --quiet
+          sha=$(git rev-list -n 1 "refs/tags/$tag") || { echo "::error::тег $tag не найден"; exit 1; }
+          [[ $ACTOR =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::недопустимое имя $ACTOR"; exit 1; }
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
+          echo "Выкатка $tag ($sha), инициатор $ACTOR"
+
+      - name: Доступ к машине (ssh)
+        if: env.DEPLOY_TRANSPORT == 'ssh'
+        env:
+          PROD_HOST: ${{ vars.PROD_HOST }}
+          PROD_USER: ${{ vars.PROD_USER }}
+          PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
+        run: .github/scripts/ssh-setup.sh
+
+      - name: Доступ к машине (gcp-iap, Workload Identity Federation)
+        if: env.DEPLOY_TRANSPORT == 'gcp-iap'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: gcloud
+        if: env.DEPLOY_TRANSPORT == 'gcp-iap'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Выкатка
+        id: up
+        env:
+          GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+          GCP_ZONE: ${{ vars.GCP_ZONE }}
+          GCP_INSTANCE: ${{ vars.GCP_INSTANCE }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          .github/scripts/remote.sh "cd $PROD_DIR && git fetch --tags --force --quiet \
+            && git checkout --quiet --detach $TAG \
+            && DEPLOYED_BY=$ACTOR ./hammurapi-infra.sh up --no-color"
+
+      - name: Статус
+        if: always() && steps.tag.outcome == 'success'
+        env:
+          GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+          GCP_ZONE: ${{ vars.GCP_ZONE }}
+          GCP_INSTANCE: ${{ vars.GCP_INSTANCE }}
+        run: |
+          .github/scripts/remote.sh "cd $PROD_DIR && ./hammurapi-infra.sh status --json --no-color 2>/dev/null" >status.json || true
+          {
+            echo "## Прод: ${{ steps.tag.outputs.tag }}"
+            echo
+            if jq -e . status.json >/dev/null 2>&1; then
+              jq -r '"Развёрнуто: \(.version.tag // "?") (\(.version.commit // "?")), \(.version.deployedAt // "?"), \(.version.deployedBy // "?")",
+                "Кластер: \(.profile.status), Kubernetes \(.profile.kubernetes)",
+                "Память: \(.resources.requestedPercent) % minikube запрошено компонентами", "",
+                "| Проверка | Итог | Сообщение |", "|---|---|---|",
+                (.checks[] | "| \(.name) | \(if .ok then "✓" else "✗" end) | \(.message) |")' status.json
+            else
+              echo "status недоступен"
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Артефакт status
+        if: always() && steps.tag.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with: { name: status, path: status.json, if-no-files-found: ignore }
+
+      - name: Диагностика при ошибке
+        if: failure() && steps.up.outcome == 'failure'
+        env:
+          GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+          GCP_ZONE: ${{ vars.GCP_ZONE }}
+          GCP_INSTANCE: ${{ vars.GCP_INSTANCE }}
+        run: |
+          .github/scripts/remote.sh "cd $PROD_DIR/logs && tar -czf - \"\$(ls -1t | head -1)\"" >deploy-logs.tar.gz
+
+      - name: Артефакт deploy-logs
+        if: failure() && steps.up.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with: { name: deploy-logs, path: deploy-logs.tar.gz, if-no-files-found: warn }

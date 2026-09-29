@@ -1,0 +1,4 @@
+config/local.env
+logs/
+.work/
+charts/hammurapi-dashboards/files/

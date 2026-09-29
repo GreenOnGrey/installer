@@ -1,0 +1,29 @@
+# Режим каждого хранилища: internal — разворачивается в кластере, external —
+# сервис с тем же именем указывает на внешний хост (R12).
+postgres:
+  mode: internal
+  external: { host: "", port: 5432, isIP: false }
+  image: ""                 # POSTGRES_IMAGE
+  storage: 10Gi
+  database: hammurapi
+  owner: hammurapi
+  resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
+
+kafka:
+  mode: internal
+  version: ""               # KAFKA_VERSION
+  storage: 10Gi
+  external: { host: "", port: 9092, isIP: false }
+  heap: 512m
+  resources: { requests: { cpu: 200m, memory: 1Gi }, limits: { cpu: "1", memory: 1536Mi } }
+  exporterResources: { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 100m, memory: 128Mi } }
+
+s3:
+  mode: internal
+  external: { host: "", port: 443, isIP: false }
+  # Встроенное объектное хранилище: SeaweedFS all-in-one, S3 на порту 8333.
+  selector:
+    app.kubernetes.io/name: seaweedfs
+    app.kubernetes.io/instance: seaweedfs
+    app.kubernetes.io/component: seaweedfs-all-in-one
+  targetPort: 8333

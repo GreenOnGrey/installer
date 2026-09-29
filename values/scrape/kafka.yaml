@@ -1,0 +1,20 @@
+    # --- Kafka (Strimzi): брокер (JMX-экспортёр) и kafka-exporter ---
+    - job_name: kafka
+      kubernetes_sd_configs: [{ role: pod, namespaces: { names: [storages] } }]
+      relabel_configs:
+        - { source_labels: [__meta_kubernetes_pod_label_strimzi_io_kind], regex: Kafka, action: keep }
+        - { source_labels: [__meta_kubernetes_pod_label_strimzi_io_broker_role], regex: "true", action: keep }
+        - { source_labels: [__meta_kubernetes_pod_container_port_name], regex: tcp-prometheus, action: keep }
+        - { regex: __meta_kubernetes_pod_label_(strimzi_io_.+), action: labelmap }
+        - { source_labels: [__meta_kubernetes_namespace], target_label: namespace }
+        - { source_labels: [__meta_kubernetes_pod_name], target_label: kubernetes_pod_name }
+        - { source_labels: [__meta_kubernetes_pod_node_name], target_label: node_name }
+        - { source_labels: [__meta_kubernetes_pod_host_ip], target_label: node_ip }
+    - job_name: kafka-exporter
+      kubernetes_sd_configs: [{ role: pod, namespaces: { names: [storages] } }]
+      relabel_configs:
+        - { source_labels: [__meta_kubernetes_pod_label_strimzi_io_name], regex: hammurapi-kafka-exporter, action: keep }
+        - { source_labels: [__meta_kubernetes_pod_container_port_name], regex: tcp-prometheus, action: keep }
+        - { regex: __meta_kubernetes_pod_label_(strimzi_io_.+), action: labelmap }
+        - { source_labels: [__meta_kubernetes_namespace], target_label: namespace }
+        - { source_labels: [__meta_kubernetes_pod_name], target_label: kubernetes_pod_name }

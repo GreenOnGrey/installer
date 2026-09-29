@@ -1,0 +1,19 @@
+{{- if eq .Values.postgres.mode "internal" }}
+# Postgres через CloudNativePG: один экземпляр, пользователь и база из секрета
+# postgres-credentials (создаёт hammurapi-infra.sh), метрики на порту 9187.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: hammurapi-pg
+  labels: {{- include "storages.labels" . | nindent 4 }}
+spec:
+  instances: 1
+  imageName: {{ required "postgres.image обязателен" .Values.postgres.image | quote }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgres.database }}
+      owner: {{ .Values.postgres.owner }}
+      secret: { name: postgres-credentials }
+  storage: { size: {{ .Values.postgres.storage }} }
+  resources: {{- toYaml .Values.postgres.resources | nindent 4 }}
+{{- end }}

@@ -1,0 +1,11 @@
+{{- if eq .Values.kafka.mode "internal" }}
+# Правила JMX Prometheus Exporter из примеров Strimzi (packaging/examples/metrics).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-metrics
+  labels: {{- include "storages.labels" . | nindent 4 }}
+data:
+  kafka-metrics.yaml: |
+{{ .Files.Get "files/kafka-metrics.yaml" | indent 4 }}
+{{- end }}

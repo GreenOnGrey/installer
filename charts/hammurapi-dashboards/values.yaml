@@ -1,0 +1,4 @@
+# Папка в Grafana, в которую sidecar кладёт дашборды.
+folder: Hammurapi Infra
+# JSON дашбордов лежат в dashboards/ корня репозитория; hammurapi-infra.sh и
+# тесты копируют их в files/ перед установкой чарта (Helm не читает файлы вне чарта).

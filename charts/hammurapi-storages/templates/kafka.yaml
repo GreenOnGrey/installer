@@ -1,0 +1,30 @@
+{{- if eq .Values.kafka.mode "internal" }}
+# Kafka в режиме KRaft: одна нода с ролями controller и broker (node pool
+# single), листенер plain 9092 без аутентификации, метрики JMX и kafkaExporter.
+# Topic и User Operator не включаются — экономия ресурсов.
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: hammurapi
+  labels: {{- include "storages.labels" . | nindent 4 }}
+spec:
+  kafka:
+    version: {{ required "kafka.version обязателен" .Values.kafka.version | quote }}
+    listeners:
+      - { name: plain, port: 9092, type: internal, tls: false }
+    config:
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+      default.replication.factor: 1
+      min.insync.replicas: 1
+      auto.create.topics.enable: true
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef: { name: kafka-metrics, key: kafka-metrics.yaml }
+  kafkaExporter:
+    topicRegex: ".*"
+    groupRegex: ".*"
+    resources: {{- toYaml .Values.kafka.exporterResources | nindent 6 }}
+{{- end }}

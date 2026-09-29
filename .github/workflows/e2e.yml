@@ -1,0 +1,38 @@
+# End-to-end на временной машине Google Cloud (QA, уровень E). Только ручной
+# запуск: перед релизом репозитория и при изменении версий, values/ или charts/.
+name: e2e
+on:
+  workflow_dispatch:
+    inputs:
+      zone: { description: "Зона Google Cloud", default: europe-west1-b, type: string }
+      keep: { description: "Не удалять машину после прогона", default: false, type: boolean }
+concurrency: { group: e2e, cancel-in-progress: false }
+permissions: { contents: read, id-token: write }
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    environment: e2e
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: e2e
+        env:
+          GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+          GCP_ZONE: ${{ inputs.zone }}
+          KEEP: ${{ inputs.keep && '1' || '0' }}
+          REPORT: ${{ github.workspace }}/e2e-report.md
+        run: |
+          mkdir -p .work
+          tests/e2e/e2e.sh
+      - name: Отчёт
+        if: always()
+        run: '[ -f e2e-report.md ] && cat e2e-report.md >>"$GITHUB_STEP_SUMMARY" || true'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: e2e-report, path: e2e-report.md, if-no-files-found: ignore }

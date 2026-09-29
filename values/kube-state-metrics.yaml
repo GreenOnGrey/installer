@@ -1,0 +1,2 @@
+fullnameOverride: kube-state-metrics
+resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 100m, memory: 128Mi } }

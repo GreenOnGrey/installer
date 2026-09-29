@@ -1,0 +1,44 @@
+# Grafana (R7). Пароль администратора — из секрета grafana-admin; анонимный
+# доступ и регистрация выключены. Источники данных с фиксированными UID,
+# дашборды — ConfigMap с меткой grafana_dashboard (чарт hammurapi-dashboards).
+admin: { existingSecret: grafana-admin, userKey: admin-user, passwordKey: admin-password }
+persistence: { enabled: true, size: 1Gi }
+service: { type: ClusterIP, port: 80 }
+grafana.ini:
+  # Плагин VictoriaLogs ставится до старта сервера (нужен доступ в интернет);
+  # hammurapi-infra.sh задаёт plugins.preinstall_sync из VL_PLUGIN_VERSION.
+  plugins: { preinstall_sync: "" }
+  auth.anonymous: { enabled: false }
+  users: { allow_sign_up: false }
+  analytics: { reporting_enabled: false, check_for_updates: false, check_for_plugin_updates: false }
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: VictoriaMetrics
+        uid: victoriametrics
+        type: prometheus
+        access: proxy
+        url: http://victoria-metrics-victoria-metrics-single-server:8428
+        isDefault: true
+        editable: false
+      - name: VictoriaLogs
+        uid: victorialogs
+        type: victoriametrics-logs-datasource
+        access: proxy
+        url: http://victoria-logs-victoria-logs-single-server:9428
+        editable: false
+sidecar:
+  dashboards:
+    enabled: true
+    label: grafana_dashboard
+    labelValue: "1"
+    folderAnnotation: grafana_folder
+    searchNamespace: observability
+    provider: { foldersFromFilesStructure: true, allowUiUpdates: false }
+  resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { cpu: 100m, memory: 128Mi } }
+initChownData:
+  resources: { requests: { cpu: 10m, memory: 16Mi }, limits: { cpu: 50m, memory: 32Mi } }
+testFramework: { enabled: false }
+resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { cpu: 300m, memory: 256Mi } }
+podAnnotations: { prometheus.io/scrape: "true", prometheus.io/port: "3000" }

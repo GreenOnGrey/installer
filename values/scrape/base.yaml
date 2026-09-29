@@ -1,0 +1,48 @@
+    # --- Кластер: kubelet, cadvisor, API-сервер, ноды, объекты Kubernetes ---
+    - job_name: kubelet
+      scheme: https
+      tls_config: { insecure_skip_verify: true }
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      kubernetes_sd_configs: [{ role: node }]
+      relabel_configs:
+        - { source_labels: [__meta_kubernetes_node_name], target_label: node }
+    - job_name: cadvisor
+      scheme: https
+      metrics_path: /metrics/cadvisor
+      honor_labels: true
+      tls_config: { insecure_skip_verify: true }
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      kubernetes_sd_configs: [{ role: node }]
+      relabel_configs:
+        - { source_labels: [__meta_kubernetes_node_name], target_label: node }
+    - job_name: apiserver
+      scheme: https
+      tls_config: { insecure_skip_verify: true }
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      kubernetes_sd_configs: [{ role: endpoints, namespaces: { names: [default] } }]
+      relabel_configs:
+        - { source_labels: [__meta_kubernetes_service_name], regex: kubernetes, action: keep }
+    - job_name: node-exporter
+      kubernetes_sd_configs: [{ role: endpoints, namespaces: { names: [observability] } }]
+      relabel_configs:
+        - { source_labels: [__meta_kubernetes_service_name], regex: node-exporter.*, action: keep }
+        - { source_labels: [__meta_kubernetes_endpoint_node_name], target_label: node }
+    - job_name: kube-state-metrics
+      honor_labels: true
+      kubernetes_sd_configs: [{ role: endpoints, namespaces: { names: [observability] } }]
+      relabel_configs:
+        - { source_labels: [__meta_kubernetes_service_name], regex: kube-state-metrics, action: keep }
+        - { source_labels: [__meta_kubernetes_endpoint_port_name], regex: http, action: keep }
+    # --- Сам стек: поды observability с аннотацией prometheus.io/scrape ---
+    - job_name: stack
+      kubernetes_sd_configs: [{ role: pod, namespaces: { names: [observability] } }]
+      relabel_configs:
+        - { source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape], regex: "true", action: keep }
+        - { source_labels: [__meta_kubernetes_pod_phase], regex: Running, action: keep }
+        # Одна цель на под: порт контейнера, указанный в аннотации.
+        - { source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port, __meta_kubernetes_pod_container_port_number], action: keep_if_equal }
+        - { source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path], regex: (.+), target_label: __metrics_path__ }
+        - { source_labels: [__meta_kubernetes_namespace], target_label: namespace }
+        - { source_labels: [__meta_kubernetes_pod_name], target_label: pod }
+        - { source_labels: [__meta_kubernetes_pod_container_name], target_label: container }
+        - { source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name], target_label: app }

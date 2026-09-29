@@ -1,0 +1,11 @@
+{{- include "storages.service" (dict "root" . "name" "postgres" "values" .Values.postgres
+      "portName" "postgres" "port" 5432 "targetPort" 5432
+      "selector" (dict "cnpg.io/cluster" "hammurapi-pg" "cnpg.io/instanceRole" "primary")) }}
+---
+{{ include "storages.service" (dict "root" . "name" "kafka" "values" .Values.kafka
+      "portName" "kafka" "port" 9092 "targetPort" 9092
+      "selector" (dict "strimzi.io/cluster" "hammurapi" "strimzi.io/kind" "Kafka" "strimzi.io/broker-role" "true")) }}
+---
+{{ include "storages.service" (dict "root" . "name" "s3" "values" .Values.s3
+      "portName" "s3" "port" 9000 "targetPort" .Values.s3.targetPort
+      "selector" .Values.s3.selector) }}

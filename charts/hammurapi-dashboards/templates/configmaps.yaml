@@ -1,0 +1,22 @@
+{{- $folder := .Values.folder }}
+{{- $files := .Files.Glob "files/*.json" }}
+{{- if not $files }}
+{{- fail "нет files/*.json: скопируйте дашборды из dashboards/ (см. hammurapi-infra.sh)" }}
+{{- end }}
+{{- range $path, $_ := $files }}
+{{- $name := base $path | trimSuffix ".json" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-{{ $name }}
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: hammurapi-infra
+    app.kubernetes.io/managed-by: {{ $.Release.Service }}
+  annotations:
+    grafana_folder: {{ $folder | quote }}
+data:
+  {{ base $path }}: |-
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}

@@ -1,0 +1,20 @@
+{{- if eq .Values.kafka.mode "internal" }}
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: single
+  labels:
+    {{- include "storages.labels" . | nindent 4 }}
+    strimzi.io/cluster: hammurapi
+spec:
+  replicas: 1
+  roles: [controller, broker]
+  storage:
+    type: persistent-claim
+    size: {{ .Values.kafka.storage }}
+    deleteClaim: false
+  resources: {{- toYaml .Values.kafka.resources | nindent 4 }}
+  jvmOptions:
+    "-Xms": {{ .Values.kafka.heap }}
+    "-Xmx": {{ .Values.kafka.heap }}
+{{- end }}

@@ -1,0 +1,4 @@
+# Оператор Strimzi: наблюдает только собственный namespace (storages).
+watchNamespaces: []
+watchAnyNamespace: false
+resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: 500m, memory: 384Mi } }
