@@ -87,16 +87,19 @@ S3_PATH_STYLE=false
 
 Прод — такая же машина, на которую workflow `deploy-prod` выкатывает теги.
 
-1. Пользователь выкатки — владелец рабочей копии, с `sudo` без пароля:
+1. Пользователь выкатки (например, `github`, созданный из ключа в метаданных ВМ) — с `sudo` без
+   пароля и владельцем каталога прода:
 
    ```sh
-   sudo git clone https://github.com/GeenOnGrey/hammurapi-infra.git /opt/hammurapi-infra
-   sudo chown -R deploy:deploy /opt/hammurapi-infra
+   sudo install -d -o github -g github /opt/hammurapi-infra
    ```
 
-   Для приватного репозитория добавьте на машину deploy key только на чтение.
-2. `config/local.env` и файлы секретов внешних хранилищ кладутся на машину один раз и между
-   выкатками не меняются; в GitHub они не хранятся.
+   Клонировать репозиторий на машину не нужно: workflow сам передаёт выгрузку тега по SSH и
+   раскладывает её в `/opt/hammurapi-infra/releases/<тег>` (ссылка `current` — на развёрнутый).
+   Доступ машины к GitHub не требуется — deploy keys запрещены политикой организации.
+2. `/opt/hammurapi-infra/local.env` и файлы секретов внешних хранилищ кладутся на машину один
+   раз и между выкатками не меняются; в GitHub они не хранятся. Журналы — в
+   `/opt/hammurapi-infra/logs`.
 3. Доступ из GitHub Actions — одним из способов:
    - **`ssh`** (по умолчанию, не зависит от облака): ключ пользователя выкатки в секрете
      `PROD_SSH_KEY`, отпечаток хоста в `PROD_KNOWN_HOSTS`

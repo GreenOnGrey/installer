@@ -157,11 +157,14 @@ deploy_all() {
   ok "все релизы развёрнуты"
 }
 
-# write_version — развёрнутый тег и коммит в ConfigMap (R18).
+# write_version — развёрнутый тег и коммит в ConfigMap (R18). На проде кода
+# из git нет (выгрузка тега от workflow) — тег и коммит приходят в INFRA_TAG и
+# INFRA_COMMIT; в рабочей копии git они берутся из неё.
 write_version() {
   local tag commit
-  tag=$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null || echo dev)
-  commit=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)
+  tag=${INFRA_TAG:-$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null || echo dev)}
+  commit=${INFRA_COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)}
+  commit=${commit:0:7}
   kc -n "$NS_OBSERVABILITY" create configmap hammurapi-infra-version \
     --from-literal="tag=$tag" --from-literal="commit=$commit" \
     --from-literal="deployedAt=$(now_utc)" --from-literal="deployedBy=${DEPLOYED_BY:-$(id -un)}" \

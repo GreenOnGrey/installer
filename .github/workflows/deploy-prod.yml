@@ -24,6 +24,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
 
       - name: Определить тег и коммит
         id: tag
@@ -67,10 +68,14 @@ jobs:
           GCP_INSTANCE: ${{ vars.GCP_INSTANCE }}
           TAG: ${{ steps.tag.outputs.tag }}
           ACTOR: ${{ github.actor }}
+          SHA: ${{ steps.tag.outputs.sha }}
+        # Машине прода не нужен доступ к GitHub (deploy keys запрещены политикой
+        # организации): раннер передаёт ей выгрузку тега по тому же SSH.
         run: |
-          bash .github/scripts/remote.sh "cd $PROD_DIR && git fetch --tags --force --quiet \
-            && git checkout --quiet --detach $TAG \
-            && DEPLOYED_BY=$ACTOR bash ./hammurapi-infra.sh up --no-color"
+          remote() { bash .github/scripts/remote.sh "$@"; }
+          remote "mkdir -p $PROD_DIR && cat >$PROD_DIR/deploy-remote.sh" <.github/scripts/deploy-remote.sh
+          git archive --format=tar.gz "refs/tags/$TAG" | remote "bash $PROD_DIR/deploy-remote.sh unpack $PROD_DIR $TAG"
+          remote "bash $PROD_DIR/deploy-remote.sh up $PROD_DIR $TAG $SHA $ACTOR"
 
       - name: Статус
         if: always() && steps.tag.outcome == 'success'
@@ -79,7 +84,7 @@ jobs:
           GCP_ZONE: ${{ vars.GCP_ZONE }}
           GCP_INSTANCE: ${{ vars.GCP_INSTANCE }}
         run: |
-          bash .github/scripts/remote.sh "cd $PROD_DIR && bash ./hammurapi-infra.sh status --json --no-color 2>/dev/null" >status.json || true
+          bash .github/scripts/remote.sh "bash $PROD_DIR/deploy-remote.sh status $PROD_DIR ${{ steps.tag.outputs.tag }}" >status.json || true
           {
             echo "## Прод: ${{ steps.tag.outputs.tag }}"
             echo
