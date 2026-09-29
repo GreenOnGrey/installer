@@ -46,13 +46,24 @@ load helpers
 }
 
 @test "DPL-09: проверка ключа хоста не отключается" {
-  export SSH_DIR=$BATS_TEST_TMPDIR/ssh PROD_HOST=203.0.113.10 PROD_USER=deploy PROD_SSH_KEY=key
+  ssh-keygen -q -t ed25519 -N '' -f "$BATS_TEST_TMPDIR/k"
+  export SSH_DIR=$BATS_TEST_TMPDIR/ssh PROD_HOST=203.0.113.10 PROD_USER=deploy
+  PROD_SSH_KEY=$(cat "$BATS_TEST_TMPDIR/k")
+  export PROD_SSH_KEY
   PROD_KNOWN_HOSTS="203.0.113.10 ssh-ed25519 AAAA" run bash "$ROOT/.github/scripts/ssh-setup.sh"
   [ "$status" -eq 0 ]
+  [[ $output == *"$(cut -d' ' -f1-2 "$BATS_TEST_TMPDIR/k.pub")"* ]]
   grep -q 'StrictHostKeyChecking yes' "$SSH_DIR/config"
   not_grep -qi 'StrictHostKeyChecking no' "$SSH_DIR/config"
   grep -q "UserKnownHostsFile $SSH_DIR/deploy_known_hosts" "$SSH_DIR/config"
   not_grep -rqi 'StrictHostKeyChecking=no' "$ROOT/.github"
+}
+
+@test "DPL-09: нечитаемый ключ — ошибка до подключения" {
+  export SSH_DIR=$BATS_TEST_TMPDIR/ssh PROD_HOST=h PROD_USER=u PROD_SSH_KEY=not-a-key PROD_KNOWN_HOSTS="h ssh-ed25519 AAAA"
+  run bash "$ROOT/.github/scripts/ssh-setup.sh"
+  [ "$status" -eq 1 ]
+  [[ $output == *"PROD_SSH_KEY не читается"* ]]
 }
 
 @test "DPL-09: без отпечатка хоста подключение запрещено" {
