@@ -31,7 +31,7 @@ jobs:
           INPUT_TAG: ${{ inputs.tag || github.ref_name }}
           ACTOR: ${{ github.actor }}
         run: |
-          tag=$(.github/scripts/resolve-tag.sh "$INPUT_TAG")
+          tag=$(bash .github/scripts/resolve-tag.sh "$INPUT_TAG")
           git fetch --tags --force --quiet
           sha=$(git rev-list -n 1 "refs/tags/$tag") || { echo "::error::тег $tag не найден"; exit 1; }
           [[ $ACTOR =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::недопустимое имя $ACTOR"; exit 1; }
@@ -46,7 +46,7 @@ jobs:
           PROD_USER: ${{ vars.PROD_USER }}
           PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
           PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
-        run: .github/scripts/ssh-setup.sh
+        run: bash .github/scripts/ssh-setup.sh
 
       - name: Доступ к машине (gcp-iap, Workload Identity Federation)
         if: env.DEPLOY_TRANSPORT == 'gcp-iap'
@@ -68,9 +68,9 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
           ACTOR: ${{ github.actor }}
         run: |
-          .github/scripts/remote.sh "cd $PROD_DIR && git fetch --tags --force --quiet \
+          bash .github/scripts/remote.sh "cd $PROD_DIR && git fetch --tags --force --quiet \
             && git checkout --quiet --detach $TAG \
-            && DEPLOYED_BY=$ACTOR ./hammurapi-infra.sh up --no-color"
+            && DEPLOYED_BY=$ACTOR bash ./hammurapi-infra.sh up --no-color"
 
       - name: Статус
         if: always() && steps.tag.outcome == 'success'
@@ -79,7 +79,7 @@ jobs:
           GCP_ZONE: ${{ vars.GCP_ZONE }}
           GCP_INSTANCE: ${{ vars.GCP_INSTANCE }}
         run: |
-          .github/scripts/remote.sh "cd $PROD_DIR && ./hammurapi-infra.sh status --json --no-color 2>/dev/null" >status.json || true
+          bash .github/scripts/remote.sh "cd $PROD_DIR && bash ./hammurapi-infra.sh status --json --no-color 2>/dev/null" >status.json || true
           {
             echo "## Прод: ${{ steps.tag.outputs.tag }}"
             echo
@@ -106,7 +106,7 @@ jobs:
           GCP_ZONE: ${{ vars.GCP_ZONE }}
           GCP_INSTANCE: ${{ vars.GCP_INSTANCE }}
         run: |
-          .github/scripts/remote.sh "cd $PROD_DIR/logs && tar -czf - \"\$(ls -1t | head -1)\"" >deploy-logs.tar.gz
+          bash .github/scripts/remote.sh "cd $PROD_DIR/logs && tar -czf - \"\$(ls -1t | head -1)\"" >deploy-logs.tar.gz
 
       - name: Артефакт deploy-logs
         if: failure() && steps.up.outcome == 'failure'

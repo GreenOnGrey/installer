@@ -29,7 +29,7 @@ jobs:
           REPORT: ${{ github.workspace }}/e2e-report.md
         run: |
           mkdir -p .work
-          tests/e2e/e2e.sh
+          bash tests/e2e/e2e.sh
       - name: Отчёт
         if: always()
         run: '[ -f e2e-report.md ] && cat e2e-report.md >>"$GITHUB_STEP_SUMMARY" || true'

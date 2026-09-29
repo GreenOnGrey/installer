@@ -49,4 +49,4 @@ jobs:
           sudo curl -fsSL "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/yq_linux_amd64" -o /usr/local/bin/yq
           sudo chmod +x /usr/local/bin/yq
       - name: Манифесты для 8 комбинаций режимов хранилищ
-        run: tests/manifests.sh
+        run: bash tests/manifests.sh

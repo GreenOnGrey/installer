@@ -63,7 +63,7 @@ git -C "$ROOT" archive --format=tar.gz --prefix="$REMOTE_DIR/" HEAD >"$ROOT/.wor
 g compute scp "$ROOT/.work/e2e.tar.gz" "$INSTANCE:e2e.tar.gz" --zone "$GCP_ZONE" "${IAP_ARGS[@]}"
 g compute ssh "$INSTANCE" --zone "$GCP_ZONE" "${IAP_ARGS[@]}" --command "tar -xzf e2e.tar.gz && rm e2e.tar.gz"
 
-H=./hammurapi-infra.sh
+H="bash ./hammurapi-infra.sh"
 stage UP-01 "up на чистой машине (цель ≤ 20 мин)" "$H up --no-color"
 stage CMD-01 "status --json" "$H status --json --no-color | jq -e '.ok and (.checks | length) >= 6'"
 stage CMD-02 "creds: адреса и пароли всех хранилищ и Grafana" \
