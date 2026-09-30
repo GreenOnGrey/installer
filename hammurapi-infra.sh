@@ -99,7 +99,11 @@ collect_diagnostics() {
   kc get pods -A -o wide >"$dir/pods.txt" 2>&1 || true
   for ns in "$NS_STORAGES" "$NS_OBSERVABILITY"; do
     while read -r pod; do
-      [[ -n $pod ]] && kc -n "$ns" describe pod "$pod" >"$dir/describe-$ns-$pod.txt" 2>&1 || true
+      [[ -n $pod ]] || continue
+      kc -n "$ns" describe pod "$pod" >"$dir/describe-$ns-$pod.txt" 2>&1 || true
+      # Логи всех контейнеров: текущий запуск и предыдущий (для CrashLoopBackOff).
+      kc -n "$ns" logs "$pod" --all-containers --prefix --tail=300 >"$dir/logs-$ns-$pod.txt" 2>&1 || true
+      kc -n "$ns" logs "$pod" --all-containers --prefix --tail=300 --previous >"$dir/logs-$ns-$pod-previous.txt" 2>&1 || true
     done < <(kc -n "$ns" get pods --no-headers 2>/dev/null |
       awk '{split($2, r, "/"); if (r[1] != r[2] && $3 != "Completed") print $1}')
   done

@@ -45,7 +45,9 @@ case $mode in
     true
     ;;
   status)
-    cd "$dir/current" 2>/dev/null || { echo '{"error":"нет развёрнутого релиза"}'; exit 1; }
+    # После неудачной выкатки current ещё нет — состояние кластера всё равно полезно.
+    cd "$dir/current" 2>/dev/null || cd "$dir/releases/$tag" 2>/dev/null ||
+      { echo '{"error":"нет выгрузки релиза на машине"}'; exit 1; }
     cfg=()
     [[ -f $dir/local.env ]] && cfg=(--config "$dir/local.env")
     bash ./hammurapi-infra.sh status --json --no-color "${cfg[@]}" 2>/dev/null

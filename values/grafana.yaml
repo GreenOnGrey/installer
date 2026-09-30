@@ -36,9 +36,19 @@ sidecar:
     folderAnnotation: grafana_folder
     searchNamespace: observability
     provider: { foldersFromFilesStructure: true, allowUiUpdates: false }
-  resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { cpu: 100m, memory: 128Mi } }
+  # Замер на стенде: до 100 МиБ, троттлинг CPU 79% при лимите 100m.
+  resources: { requests: { cpu: 20m, memory: 96Mi }, limits: { cpu: 200m, memory: 192Mi } }
 initChownData:
   resources: { requests: { cpu: 10m, memory: 16Mi }, limits: { cpu: 50m, memory: 32Mi } }
 testFramework: { enabled: false }
-resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { cpu: 300m, memory: 256Mi } }
+# Grafana 13 тяжелее, чем закладывала архитектура (300m / 256Mi): на стенде память
+# доходила до 254 МиБ, CPU троттлился 31%, старт с установкой плагина не укладывался
+# в liveness-пробу — CrashLoopBackOff и таймаут helm --wait.
+resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 768Mi } }
+# Первый старт ставит плагин VictoriaLogs и мигрирует базу — даём ему время.
+livenessProbe:
+  httpGet: { path: /api/health, port: grafana }
+  initialDelaySeconds: 180
+  timeoutSeconds: 30
+  failureThreshold: 10
 podAnnotations: { prometheus.io/scrape: "true", prometheus.io/port: "3000" }

@@ -88,12 +88,14 @@ jobs:
           {
             echo "## Прод: ${{ steps.tag.outputs.tag }}"
             echo
-            if jq -e . status.json >/dev/null 2>&1; then
+            if jq -e '.profile' status.json >/dev/null 2>&1; then
               jq -r '"Развёрнуто: \(.version.tag // "?") (\(.version.commit // "?")), \(.version.deployedAt // "?"), \(.version.deployedBy // "?")",
-                "Кластер: \(.profile.status), Kubernetes \(.profile.kubernetes)",
-                "Память: \(.resources.requestedPercent) % minikube запрошено компонентами", "",
+                "Кластер: \(.profile.status // "?"), Kubernetes \(.profile.kubernetes // "?")",
+                "Память: \(.resources.requestedPercent // "?") % minikube запрошено компонентами", "",
                 "| Проверка | Итог | Сообщение |", "|---|---|---|",
-                (.checks[] | "| \(.name) | \(if .ok then "✓" else "✗" end) | \(.message) |")' status.json
+                ((.checks // [])[] | "| \(.name) | \(if .ok then "✓" else "✗" end) | \(.message) |")' status.json
+            elif jq -e '.error' status.json >/dev/null 2>&1; then
+              echo "status: $(jq -r .error status.json)"
             else
               echo "status недоступен"
             fi
