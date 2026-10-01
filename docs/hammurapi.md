@@ -134,16 +134,15 @@ workflow приватного `hammurapi-infra` нельзя вызвать из
 
 ## 4. Релизы и выкатка
 
-1. Тег релиза `vX.Y.Z` в `hammurapi-infra` публикует чарты (`publish-charts.yml`) —
-   `oci://ghcr.io/greenongrey/charts/hammurapi-{core,web}:X.Y.Z`: версия чартов совпадает с
-   версией стенда. Тег, выпущенный раньше, публикуется ручным запуском `publish-charts` с этим
-   тегом.
-2. Выкатите `hammurapi-infra` с `bin/hammurapi-deploy` на стенд (тег `vX.Y.Z` →
-   `deploy-prod.yml`): на машине скрипт берётся из `/opt/hammurapi-infra/current`.
-3. Тег `vX.Y.Z` в `hammurapi`, если менялся `deploy-component.yml`.
-4. В `hammurapi-core` и `hammurapi-web` в `deploy/versions.env` задайте `DEPLOY_WORKFLOW_REF`
-   (тег `hammurapi` из п. 3) и `CHART_VERSION` (п. 1), выполните `deploy/sync-ref.sh`.
-5. Тег `vX.Y.Z` в `hammurapi-core`, затем в `hammurapi-web`.
+1. Тег релиза `vX.Y.Z` в `hammurapi-infra` запускает `deploy-prod.yml`: сначала публикуются
+   чарты `oci://ghcr.io/greenongrey/charts/hammurapi-{core,web}:X.Y.Z` (версия чартов совпадает с
+   версией стенда), затем, только при успехе, тег выкатывается на стенд вместе с
+   `bin/hammurapi-deploy` — на машине скрипт берётся из `/opt/hammurapi-infra/current`. Ручной
+   запуск с тегом (повтор или откат) уже опубликованные версии чартов не перезаписывает.
+2. Тег `vX.Y.Z` в `hammurapi`, если менялся `deploy-component.yml`.
+3. В `hammurapi-core` и `hammurapi-web` в `deploy/versions.env` задайте `DEPLOY_WORKFLOW_REF`
+   (тег `hammurapi` из п. 2) и `CHART_VERSION` (п. 1), выполните `deploy/sync-ref.sh`.
+4. Тег `vX.Y.Z` в `hammurapi-core`, затем в `hammurapi-web`.
 
 | Что | Как |
 |---|---|

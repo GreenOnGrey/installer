@@ -1,6 +1,8 @@
-# Выкатка тега релиза на прод — демо-стенд в Google Cloud (R18).
-# Срабатывает на push тега vX.Y.Z; для повторной выкатки или возврата на
-# прежнюю версию — ручной запуск с тегом. Автоматического отката нет.
+# Релиз hammurapi-infra (R18; PLT.INFRA-0002, R15): по тегу vX.Y.Z сначала
+# публикуются чарты hammurapi-core и hammurapi-web с версией X.Y.Z, затем — только
+# при успехе — тег выкатывается на прод (демо-стенд в Google Cloud).
+# Для повторной выкатки или возврата на прежнюю версию — ручной запуск с тегом:
+# уже опубликованные версии чартов не перезаписываются. Автоматического отката нет.
 # Конфигурация и секреты прода остаются на машине (/opt/hammurapi-infra) и в
 # workflow не передаются; GitHub хранит только доступ к машине.
 name: deploy-prod
@@ -18,7 +20,53 @@ env:
   PROD_DIR: /opt/hammurapi-infra
 
 jobs:
+  # Чарты hammurapi-core и hammurapi-web в oci://ghcr.io/<организация>/charts: версия
+  # чартов совпадает с версией стенда (техспека PLT.INFRA-0002, п. 11).
+  publish-charts:
+    runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
+    permissions: { contents: read, packages: write }
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Тег
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          [[ $INPUT_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::тег «$INPUT_TAG» не в формате vX.Y.Z"; exit 1; }
+          echo "tag=$INPUT_TAG" >>"$GITHUB_OUTPUT"
+          echo "version=${INPUT_TAG#v}" >>"$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { ref: "refs/tags/${{ steps.tag.outputs.tag }}" }
+      - name: Helm
+        run: |
+          set -a; source config/versions.env; set +a
+          curl -fsSL "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz" -o /tmp/helm.tgz
+          echo "$HELM_SHA256  /tmp/helm.tgz" | sha256sum -c -
+          tar -xzf /tmp/helm.tgz -C /tmp && sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
+      - name: lint, package, push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          repo="oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"
+          printf '%s' "$GH_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          mkdir -p dist
+          echo "## Чарты $VERSION" >>"$GITHUB_STEP_SUMMARY"
+          for chart in hammurapi-core hammurapi-web; do
+            # Повторная выкатка (откат) того же тега: версия уже в реестре — не перезаписываем.
+            if helm show chart "$repo/$chart" --version "$VERSION" >/dev/null 2>&1; then
+              echo "- $repo/$chart:$VERSION — уже опубликован" >>"$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            helm lint "charts/$chart" --set image.tag=v0.0.0 --set publicBaseDomain=example.org
+            helm package "charts/$chart" --version "$VERSION" --app-version "$VERSION" -d dist
+            helm push "dist/$chart-$VERSION.tgz" "$repo"
+            echo "- $repo/$chart:$VERSION" >>"$GITHUB_STEP_SUMMARY"
+          done
+
   deploy:
+    needs: publish-charts
     runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
     environment: production
     timeout-minutes: 60
