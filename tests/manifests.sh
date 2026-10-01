@@ -5,9 +5,9 @@
 # Нужны: helm ≥ 3.17, kubeconform, jq, yq (mikefarah). Сеть — для чартов.
 #   tests/manifests.sh            # все проверки
 #   SKIP_REPOS=1 tests/manifests.sh   # без helm repo add/update
-set -euo pipefail
 # SC2034: переменные конфигурации читают подключённые функции lib/*.sh.
 # shellcheck disable=SC2034
+set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 OUT=${OUT:-$ROOT/.work/manifests}
@@ -20,6 +20,8 @@ source "$ROOT/lib/external.sh"
 source "$ROOT/lib/checks.sh"
 # shellcheck source=../lib/deploy.sh
 source "$ROOT/lib/deploy.sh"
+# shellcheck source=../lib/public.sh
+source "$ROOT/lib/public.sh"
 setup_color
 load_config "$ROOT" /dev/null
 KUBE_VERSION=${K8S_VERSION#v}
@@ -103,7 +105,8 @@ check_storage_services() {
 check_scrape_jobs() {
   local jobs expected
   jobs=$(yq -r '.config.scrape_configs[].job_name' "$1/vmagent-scrape.yaml" | sort | tr '\n' ' ')
-  expected=$(expected_jobs | sort | tr '\n' ' ')
+  # hammurapi — всегда в конфигурации, но не обязателен в проверках стенда.
+  expected=$({ expected_jobs; echo hammurapi; } | sort | tr '\n' ' ')
   if [[ $jobs == "$expected" ]]; then pass "MET-02 $2: задания сбора $jobs"; else fail "MET-02 $2: задания «$jobs», ожидались «$expected»"; fi
 }
 
@@ -149,6 +152,118 @@ crd_schemas() {
         jq --arg v "$v" '.spec.versions[] | select(.name == $v) | .schema.openAPIV3Schema' <<<"$crd" >"$schemas/$group/${kind}_$v.json"
       done
     done
+}
+
+# --- PLT.INFRA-0002: чарты Hammurapi и публичный доступ ---
+
+# kubeconform_file <файл> <метка>
+kubeconform_file() {
+  local out
+  if out=$(kubeconform -strict -summary -kubernetes-version "$KUBE_VERSION" -skip CustomResourceDefinition \
+    -schema-location default -schema-location "$OUT/schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" \
+    -ignore-missing-schemas "$1" 2>&1); then
+    pass "QUAL-02 $2: kubeconform — $(tail -1 <<<"$out")"
+  else
+    fail "QUAL-02 $2: kubeconform"
+    echo "$out" | head -10 | sed 's/^/      /'
+  fi
+}
+
+hammurapi_charts() {
+  printf '\nчарты Hammurapi\n'
+  local dir=$OUT/hammurapi c f bad
+  mkdir -p "$dir"
+  for c in hammurapi-core hammurapi-web; do
+    f=$dir/$c.yaml
+    if ! helm lint "$ROOT/charts/$c" --set image.tag=v1.8.0 --set publicBaseDomain=34-12-5-6.sslip.io >/dev/null 2>&1 ||
+      ! helm template "$c" "$ROOT/charts/$c" -n hammurapi --kube-version "$KUBE_VERSION" \
+        --set image.tag=v1.8.0 --set publicBaseDomain=34-12-5-6.sslip.io >"$f" 2>&1; then
+      fail "QUAL-02 $c: helm lint/template"
+      continue
+    fi
+    kubeconform_file "$f" "$c"
+    # CH-04: запросы, лимиты, пробы у долгоживущих контейнеров, runAsNonRoot.
+    bad=$(docs_json "$f" | jq -r '
+      select(.kind | IN("Deployment", "Job", "CronJob"))
+      | .kind as $k
+      | (if $k == "CronJob" then .spec.jobTemplate.spec.template.spec else .spec.template.spec end) as $s
+      | "\($k)/\(.metadata.name)" as $o
+      | $s.containers[]
+      | [ (if (.resources.requests.cpu // "") == "" or (.resources.limits.memory // "") == "" then "ресурсы" else empty end),
+          (if $k == "Deployment" and (.readinessProbe == null or .livenessProbe == null) then "пробы" else empty end),
+          (if ((.securityContext.runAsNonRoot // $s.securityContext.runAsNonRoot // false) | not) then "runAsNonRoot" else empty end) ]
+      | select(length > 0) | "\($o): \(join(", "))"')
+    if [[ -n $bad ]]; then fail "CH-04 $c: $(echo "$bad" | tr '\n' ' ')"; else pass "CH-04 $c: запросы, лимиты, пробы, runAsNonRoot"; fi
+  done
+  # CH-07: Ingress api — только публичные префиксы; служебные порты не публикуются.
+  local paths ports
+  paths=$(docs_json "$dir/hammurapi-core.yaml" | jq -r 'select(.kind == "Ingress" and .metadata.name == "api") | .spec.rules[].http.paths[].path' | sort | tr '\n' ' ')
+  ports=$(docs_json "$dir/hammurapi-core.yaml" | jq -r 'select(.kind == "Ingress") | .spec.rules[].http.paths[].backend.service.port.name' | sort -u | tr '\n' ' ')
+  if [[ $paths == "/admin/api/ /api/ /hooks/ " && $ports == "http " ]]; then
+    pass "CH-07: Ingress api — /api/, /admin/api/, /hooks/ на порт http"
+  else
+    fail "CH-07: пути «$paths», порты «$ports»"
+  fi
+  # R15: права worker на Job — только в hammurapi-runners.
+  if docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Role" and .metadata.namespace == "hammurapi-runners")
+      | .rules[] | select(.apiGroups == ["batch"]) | .resources == ["jobs"] and (.verbs | index("create"))' >/dev/null &&
+    ! docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "ClusterRole" or .kind == "ClusterRoleBinding")' >/dev/null; then
+    pass "CH-03: worker создаёт Job только в hammurapi-runners"
+  else
+    fail "CH-03: права worker на Job"
+  fi
+  # Web получает адрес API на своём домене.
+  if docs_json "$dir/hammurapi-web.yaml" | jq -e 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[]
+      | select(.name == "API_BASE_URL" and .value == "https://api.34-12-5-6.sslip.io")' >/dev/null; then
+    pass "R17: web — API_BASE_URL https://api.<домен>"
+  else
+    fail "R17: web без API_BASE_URL"
+  fi
+}
+
+public_access_charts() {
+  printf '\nпубличный доступ\n'
+  local dir=$OUT/public
+  mkdir -p "$dir"
+  if ! helm template traefik traefik/traefik --version "$TRAEFIK_CHART_VERSION" -n ingress --kube-version "$KUBE_VERSION" \
+    -f "$ROOT/values/traefik.yaml" --set-string service.spec.loadBalancerIP=192.168.49.200 >"$dir/traefik.yaml" 2>&1; then
+    fail "traefik: helm template: $(head -3 "$dir/traefik.yaml")"
+  else
+    kubeconform_file "$dir/traefik.yaml" traefik
+    local args
+    args=$(docs_json "$dir/traefik.yaml" | jq -r 'select(.kind == "Deployment") | .spec.template.spec.containers[0].args[]')
+    if grep -q 'redirections.entryPoint.scheme=https' <<<"$args" && grep -q 'allowACMEByPass=true' <<<"$args" &&
+      docs_json "$dir/traefik.yaml" | jq -e 'select(.kind == "TLSStore") | .spec.defaultCertificate.secretName == "hammurapi-public"' >/dev/null; then
+      pass "R19: HTTP → HTTPS, HTTP-01 мимо перенаправления, сертификат по умолчанию hammurapi-public"
+    else
+      fail "R19: настройки Traefik"
+    fi
+  fi
+  if ! helm template cert-manager jetstack/cert-manager --version "$CERT_MANAGER_CHART_VERSION" -n cert-manager \
+    --kube-version "$KUBE_VERSION" -f "$ROOT/values/cert-manager.yaml" >"$dir/cert-manager.yaml" 2>&1; then
+    fail "cert-manager: helm template: $(head -3 "$dir/cert-manager.yaml")"
+  else
+    kubeconform_file "$dir/cert-manager.yaml" cert-manager
+  fi
+  RUN_DIR=$dir
+  local missing
+  missing=$(docs_json "$dir"/traefik.yaml "$dir"/cert-manager.yaml | jq -r '
+    select(.kind | IN("Deployment", "Job")) | "\(.kind)/\(.metadata.name)" as $o
+    | .spec.template.spec.containers[]
+    | select((.resources.requests.memory // "") == "" or (.resources.limits.memory // "") == "") | "\($o)/\(.name)"')
+  if [[ -n $missing ]]; then fail "RES-01 публичный доступ: $(echo "$missing" | tr '\n' ' ')"; else pass "RES-01 публичный доступ: запросы и лимиты"; fi
+  # Ingress Grafana с GitHub OAuth (R20).
+  PUBLIC_DOMAIN=34-12-5-6.sslip.io GRAFANA_GITHUB_CLIENT_ID=Iv1.x
+  grafana_public_values "$dir/grafana-public.yaml"
+  if helm template grafana grafana-community/grafana --version "$GRAFANA_CHART_VERSION" -n observability \
+    --kube-version "$KUBE_VERSION" -f "$ROOT/values/grafana.yaml" -f "$dir/grafana-public.yaml" >"$dir/grafana.yaml" 2>&1 &&
+    docs_json "$dir/grafana.yaml" | jq -e 'select(.kind == "Ingress") | .spec.rules[0].host == "grafana.34-12-5-6.sslip.io"' >/dev/null &&
+    docs_json "$dir/grafana.yaml" | jq -e 'select(.kind == "Deployment") | .spec.template.spec.containers[] | select(.name == "grafana")
+      | .envFrom[]? | select(.secretRef.name == "grafana-github-oauth")' >/dev/null; then
+    pass "R20: Ingress grafana.<домен>, секрет OAuth GitHub"
+  else
+    fail "R20: Grafana с публичным доступом: $(head -3 "$dir/grafana.yaml")"
+  fi
 }
 
 main() {
@@ -209,6 +324,9 @@ main() {
   printf '\nлокальные чарты\n'
   if helm lint "$ROOT/charts/hammurapi-storages" --set kafka.version=4 --set postgres.image=x >/dev/null &&
     helm lint "$OUT/iii/work/hammurapi-dashboards" >/dev/null; then pass "QUAL-02: helm lint локальных чартов"; else fail "QUAL-02: helm lint"; fi
+
+  hammurapi_charts
+  public_access_charts
 
   if ((FAILURES)); then
     printf '\n%sНе прошло проверок: %d%s\n' "$C_RED" "$FAILURES" "$C_RESET"

@@ -1,0 +1,36 @@
+# Публикация чартов Hammurapi (PLT.INFRA-0002, R15, техспека п. 11): по тегу
+# charts-vX.Y.Z оба чарта — hammurapi-core и hammurapi-web — проходят lint,
+# упаковываются с версией из тега и публикуются в oci://ghcr.io/<организация>/charts.
+name: publish-charts
+on:
+  push:
+    tags: ["charts-v*.*.*"]
+permissions: { contents: read }
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Helm
+        run: |
+          set -a; source config/versions.env; set +a
+          curl -fsSL "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz" -o /tmp/helm.tgz
+          echo "$HELM_SHA256  /tmp/helm.tgz" | sha256sum -c -
+          tar -xzf /tmp/helm.tgz -C /tmp && sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
+      - name: lint, package, push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=${GITHUB_REF_NAME#charts-v}
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::тег $GITHUB_REF_NAME не в формате charts-vX.Y.Z"; exit 1; }
+          repo="oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"
+          printf '%s' "$GH_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          mkdir -p dist
+          for chart in hammurapi-core hammurapi-web; do
+            helm lint "charts/$chart" --set image.tag=v0.0.0 --set publicBaseDomain=example.org
+            helm package "charts/$chart" --version "$version" --app-version "$version" -d dist
+            helm push "dist/$chart-$version.tgz" "$repo"
+            echo "- $repo/$chart:$version" >>"$GITHUB_STEP_SUMMARY"
+          done

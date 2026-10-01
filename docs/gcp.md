@@ -20,11 +20,12 @@ gcloud compute instances create hammurapi-demo \
   --metadata enable-oslogin=TRUE
 ```
 
-Порты наружу открывать не нужно: Grafana открывается через SSH-туннель.
+Без публичного доступа порты наружу открывать не нужно: Grafana открывается через SSH-туннель.
+С `PUBLIC_ACCESS=true` откройте TCP 80 и 443 — см. [hammurapi.md](hammurapi.md#11-межсетевой-экран-google-cloud).
 
 ```sh
 gcloud compute ssh hammurapi-demo --zone europe-west1-b -- -L 3000:localhost:3000
-git clone https://github.com/GeenOnGrey/hammurapi-infra.git && cd hammurapi-infra
+git clone https://github.com/GreenOnGrey/hammurapi-infra.git && cd hammurapi-infra
 ./hammurapi-infra.sh up
 kubectl --context hammurapi -n observability port-forward svc/grafana 3000:80
 ```
@@ -118,10 +119,10 @@ gcloud iam workload-identity-pools create github --location global
 gcloud iam workload-identity-pools providers create-oidc hammurapi-infra --location global \
   --workload-identity-pool github --issuer-uri https://token.actions.githubusercontent.com \
   --attribute-mapping google.subject=assertion.sub,attribute.repository=assertion.repository \
-  --attribute-condition "assertion.repository == 'GeenOnGrey/hammurapi-infra'"
+  --attribute-condition "assertion.repository == 'GreenOnGrey/hammurapi-infra'"
 gcloud iam service-accounts add-iam-policy-binding deploy@PROJECT.iam.gserviceaccount.com \
   --role roles/iam.workloadIdentityUser \
-  --member "principalSet://iam.googleapis.com/projects/NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/GeenOnGrey/hammurapi-infra"
+  --member "principalSet://iam.googleapis.com/projects/NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/GreenOnGrey/hammurapi-infra"
 ```
 
 ## e2e

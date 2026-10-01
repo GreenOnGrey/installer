@@ -1,0 +1,40 @@
+# Образ core вместе с агентом; тег задаёт выкатка (hammurapi-deploy).
+image: { repository: ghcr.io/greenongrey/hammurapi-core, tag: "", pullPolicy: IfNotPresent }
+imagePullSecrets: [{ name: ghcr-pull }]
+
+# Базовый домен: web.<домен>, api.<домен>. Обязателен.
+publicBaseDomain: ""
+
+# Секреты и конфигурация создаёт hammurapi-deploy до Helm: чарт получает только
+# ссылки, значения не попадают в историю релизов (R14).
+existingSecrets:
+  config: hammurapi-secrets        # GitHub App, секрет вебхуков, ключ шифрования, окружение агента
+  configMap: hammurapi-config      # несекретная конфигурация из GitHub
+  postgres: postgres-conn          # копии секретов стенда из storages
+  kafka: kafka-conn
+  s3: s3-conn
+
+# Дополнительные несекретные переменные окружения.
+config: {}
+
+runners:
+  namespace: hammurapi-runners
+  maxParallel: 2
+  agentSecret: hammurapi-runner-agent   # переменные агента в namespace задач
+
+ingress:
+  className: traefik
+  # Только публичные префиксы; служебные :9100 и внутренний :8081 не маршрутизируются.
+  paths: [/api/, /admin/api/, /hooks/]
+
+cleaner:
+  schedule: "0 3 * * *"
+
+resources:
+  api:       { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
+  worker:    { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
+  migrate:   { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
+  cleaner:   { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
+  runnerJob: { requests: { cpu: 500m, memory: 1Gi }, limits: { cpu: "2", memory: 4Gi } }
+
+podAnnotations: { prometheus.io/scrape: "true", prometheus.io/port: "9100" }

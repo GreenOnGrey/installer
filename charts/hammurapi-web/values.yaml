@@ -1,0 +1,11 @@
+# Образ web; тег задаёт выкатка (hammurapi-deploy).
+image: { repository: ghcr.io/greenongrey/hammurapi-web, tag: "", pullPolicy: IfNotPresent }
+imagePullSecrets: [{ name: ghcr-pull }]
+
+# Базовый домен: SPA на web.<домен>, API — на api.<домен>. Обязателен.
+publicBaseDomain: ""
+
+ingress:
+  className: traefik
+
+resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { cpu: 200m, memory: 128Mi } }

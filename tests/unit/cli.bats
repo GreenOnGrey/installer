@@ -66,7 +66,8 @@ setup() {
   MEM_REQUESTED=$((3 * 1024 * 1024 * 1024)) MEM_ALLOCATABLE=$((12 * 1024 * 1024 * 1024))
   run print_summary
   [ "$status" -eq 0 ]
-  [[ $output == *"Стенд готов за 14 мин 32 с"* ]]
+  # Время считается от SECONDS: на медленной машине тест идёт дольше секунды.
+  [[ $output =~ Стенд\ готов\ за\ 14\ мин\ 3[2-9]\ с ]]
   [[ $output == *"v1.4.0"* ]]
   [[ $output == *"postgres.storages.svc:5432"* && $output == *"kafka.storages.svc:9092"* && $output == *"s3.storages.svc:9000"* ]]
   [[ $output == *"Kafka $KAFKA_VERSION"* && $output == *"grafana"*"13.2.7"* ]]

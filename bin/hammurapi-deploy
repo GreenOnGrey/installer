@@ -1,0 +1,390 @@
+#!/usr/bin/env bash
+# hammurapi-deploy <component> <tag> <chart_version> [--allow-key-rotation]
+#
+# Выкатка Hammurapi на стенд (PLT.INFRA-0002, техспека п. 3). Запускается
+# переиспользуемым workflow deploy-component.yml по SSH на машине стенда.
+#   component       hammurapi-core | hammurapi-web
+#   stdin           JSON с конфигурацией и секретами (п. 3.1); читается в память,
+#                   на диск, в аргументы команд и журнал не попадает
+#   stdout/stderr   журнал; последняя строка stdout — JSON-итог
+#                   { status, component, tag, revision, firstInstall, publicBaseDomain, … }
+#
+# Коды: 17 уже идёт выкатка компонента; 20 стенд не готов или нет публичного
+# доступа; 21 web без core; 22 namespace; 23 секреты и конфигурация; 24 изменён
+# ключ шифрования токенов; 25 релиз Helm (--atomic вернул прежнюю ревизию);
+# 26 GitHub App; 27 готовность подов.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+# shellcheck source=../lib/common.sh
+source "$ROOT/lib/common.sh"
+
+readonly E_STAND=20 E_NO_CORE=21 E_NS=22 E_SECRETS=23 E_KEY=24 E_HELM=25 E_APP=26 E_READY=27
+NS=${HAMMURAPI_NAMESPACE:-hammurapi}
+RUNNERS_NS=${HAMMURAPI_RUNNERS_NAMESPACE:-hammurapi-runners}
+CHART_REPO=${CHART_REPO:-oci://ghcr.io/greenongrey/charts}
+REGISTRY=${REGISTRY:-ghcr.io}
+GITHUB_API=${GITHUB_API:-https://api.github.com}
+DEPLOY_LOCK_DIR=${DEPLOY_LOCK_DIR:-/var/lock}
+STATUS_CMD=${STATUS_CMD:-"$ROOT/hammurapi-infra.sh"}
+
+COMPONENT="" TAG="" CHART_VERSION="" ALLOW_KEY_ROTATION=0
+FIRST_INSTALL=false BASE_DOMAIN="" REVISION="" DIAG="" PAYLOAD="" HELM_REG=""
+FAIL_MSG=""
+
+usage() {
+  echo "использование: hammurapi-deploy <hammurapi-core|hammurapi-web> <vX.Y.Z> <версия чарта> [--allow-key-rotation]" >&2
+  exit "$E_USAGE"
+}
+
+# fail <код> <сообщение> — запоминает причину для итога и завершает работу.
+fail() {
+  FAIL_MSG=$2
+  die "$1" "$2"
+}
+
+# result — итог последней строкой stdout, и при успехе, и при ошибке.
+result() {
+  local code=$1 status=success
+  ((code == 0)) || status=failure
+  [[ -n $HELM_REG ]] && rm -f "$HELM_REG"
+  jq -cn --arg s "$status" --arg c "$COMPONENT" --arg t "$TAG" --arg r "$REVISION" \
+    --argjson first "$FIRST_INSTALL" --arg d "$BASE_DOMAIN" --arg chart "$CHART_VERSION" \
+    --argjson code "$code" --arg e "$FAIL_MSG" --arg diag "$DIAG" \
+    '{status: $s, component: $c, tag: $t, chartVersion: $chart, revision: $r, firstInstall: $first,
+      publicBaseDomain: $d, code: $code}
+     + (if $s == "failure" then {error: (if $e == "" then "код \($code)" else $e end), diagnostics: $diag} else {} end)'
+}
+
+parse_args() {
+  (($# >= 3)) || usage
+  COMPONENT=$1 TAG=$2 CHART_VERSION=$3
+  shift 3
+  while (($#)); do
+    case $1 in
+      --allow-key-rotation) ALLOW_KEY_ROTATION=1 ;;
+      *) usage ;;
+    esac
+    shift
+  done
+  case $COMPONENT in hammurapi-core | hammurapi-web) ;; *) usage ;; esac
+  [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$E_USAGE" "тег «$TAG» не в формате vX.Y.Z"
+  [[ $CHART_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$E_USAGE" "версия чарта «$CHART_VERSION» не в формате X.Y.Z"
+}
+
+acquire_deploy_lock() {
+  exec 8>>"$DEPLOY_LOCK_DIR/hammurapi-deploy-$COMPONENT.lock"
+  flock -n 8 || fail "$E_LOCKED" "уже выполняется выкатка $COMPONENT на этой машине"
+}
+
+# payload <jq-путь> — значение из JSON stdin (jq читает из pipe, не из аргументов).
+payload() { printf '%s' "$PAYLOAD" | jq -r "$1 // empty"; }
+
+read_payload() {
+  if [[ -t 0 ]]; then
+    PAYLOAD='{}'
+  else
+    PAYLOAD=$(cat)
+    [[ -n $PAYLOAD ]] || PAYLOAD='{}'
+  fi
+  printf '%s' "$PAYLOAD" | jq -e 'type == "object"' >/dev/null 2>&1 || fail "$E_SECRETS" "stdin: ожидается JSON-объект"
+}
+
+# --- 1. Стенд ---
+
+check_stand() {
+  step stand
+  local st cfg=()
+  # Конфигурация стенда на проде — вне выгрузки релиза (/opt/hammurapi-infra/local.env).
+  [[ -f ${HAMMURAPI_INFRA_CONFIG:-} ]] && cfg=(--config "$HAMMURAPI_INFRA_CONFIG")
+  st=$(bash "$STATUS_CMD" status --json --no-color "${cfg[@]}" 2>/dev/null) || true
+  if ! jq -e . >/dev/null 2>&1 <<<"$st"; then
+    fail "$E_STAND" "стенд не отвечает: hammurapi-infra.sh status --json"
+  fi
+  if [[ $(jq -r '.ok' <<<"$st") != true ]]; then
+    fail "$E_STAND" "стенд не готов: $(jq -r '[.checks[] | select(.ok | not) | "\(.name): \(.message)"] | join("; ")' <<<"$st")"
+  fi
+  if [[ $(jq -r '.public.enabled' <<<"$st") != true ]]; then
+    fail "$E_STAND" "публичный доступ стенда выключен: PUBLIC_ACCESS=true в конфигурации hammurapi-infra и up"
+  fi
+  BASE_DOMAIN=$(jq -r '.public.baseDomain // empty' <<<"$st")
+  [[ -n $BASE_DOMAIN ]] || fail "$E_STAND" "стенд не сообщил базовый домен"
+  ok "стенд готов, домен $BASE_DOMAIN"
+}
+
+# --- 2. Порядок компонентов ---
+
+check_order() {
+  if hm status hammurapi-core -n "$NS" >/dev/null 2>&1; then
+    [[ $COMPONENT == hammurapi-core ]] && FIRST_INSTALL=false
+  else
+    [[ $COMPONENT == hammurapi-web ]] && fail "$E_NO_CORE" "сначала выкатите hammurapi-core"
+    FIRST_INSTALL=true
+  fi
+  if [[ $COMPONENT == hammurapi-web ]] && ! hm status hammurapi-web -n "$NS" >/dev/null 2>&1; then
+    FIRST_INSTALL=true
+  fi
+}
+
+# --- 3. Namespace ---
+
+ensure_namespaces() {
+  step namespaces
+  local ns
+  for ns in "$NS" "$RUNNERS_NS"; do
+    kc create namespace "$ns" --dry-run=client -o yaml | apply_stdin || fail "$E_NS" "не удалось создать namespace $ns"
+  done
+}
+
+# --- 4. Секреты и конфигурация ---
+
+# apply_json — манифест из stdin (JSON) в kubectl apply: значения не попадают в аргументы.
+apply_json() { kc apply -f - >/dev/null; }
+
+ghcr_pull() {
+  local token
+  token=$(payload .ghcrPullToken)
+  if [[ -z $token ]]; then
+    kc -n "$NS" get secret ghcr-pull >/dev/null 2>&1 || fail "$E_SECRETS" "нет ghcrPullToken и секрета ghcr-pull"
+    return
+  fi
+  local ns
+  for ns in "$NS" "$RUNNERS_NS"; do
+    printf '%s' "$token" | jq -Rc --arg ns "$ns" --arg reg "$REGISTRY" '
+      {auths: {($reg): {username: "hammurapi", password: ., auth: ("hammurapi:" + . | @base64)}}} as $cfg
+      | {apiVersion: "v1", kind: "Secret", type: "kubernetes.io/dockerconfigjson",
+         metadata: {name: "ghcr-pull", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
+         data: {".dockerconfigjson": ($cfg | tojson | @base64)}}' | apply_json ||
+      fail "$E_SECRETS" "не удалось записать ghcr-pull в $ns"
+  done
+  # Поды задач runner создаются без imagePullSecrets — секрет берётся из ServiceAccount.
+  kc -n "$RUNNERS_NS" patch serviceaccount default --type merge \
+    -p '{"imagePullSecrets":[{"name":"ghcr-pull"}]}' >/dev/null || fail "$E_SECRETS" "не удалось настроить ServiceAccount $RUNNERS_NS/default"
+}
+
+check_key_fingerprint() {
+  local fp saved
+  fp=$(payload .secrets.TOKEN_ENCRYPTION_KEY | sha256sum | awk '{print $1}')
+  saved=$(kc -n "$NS" get configmap hammurapi-key-fingerprint -o jsonpath='{.data.sha256}' 2>/dev/null || true)
+  if [[ -n $saved && $saved != "$fp" ]]; then
+    ((ALLOW_KEY_ROTATION)) || fail "$E_KEY" "ключ шифрования изменён: сохранённые токены пользователей станут нечитаемыми; для намеренной смены — allow_key_rotation"
+    warn "ключ шифрования токенов изменён (allow_key_rotation): пользователи войдут заново"
+  fi
+  kc -n "$NS" create configmap hammurapi-key-fingerprint --from-literal="sha256=$fp" --dry-run=client -o yaml | apply_stdin
+}
+
+copy_conn_secrets() {
+  local name
+  for name in postgres-conn kafka-conn s3-conn; do
+    kc -n "$NS_STORAGES" get secret "$name" -o json 2>/dev/null |
+      jq -c --arg ns "$NS" '
+        {apiVersion: "v1", kind: "Secret", type: "Opaque",
+         metadata: {name: .metadata.name, namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
+         data: .data}
+        # Для core: S3_ENDPOINT — host:port без схемы, S3_USE_SSL — по схеме.
+        | if .metadata.name == "s3-conn" then
+            (.data.endpoint | @base64d) as $e
+            | .data.endpoint_host = ($e | sub("^https?://"; "") | sub("/.*$"; "") | @base64)
+            | .data.use_ssl = ((if ($e | startswith("https://")) then "true" else "false" end) | @base64)
+          else . end' | apply_json || fail "$E_SECRETS" "не удалось скопировать $name из $NS_STORAGES"
+  done
+}
+
+require_payload() {
+  local missing=() k
+  for k in "$@"; do
+    [[ -n $(payload "$k") ]] || missing+=("${k#.}")
+  done
+  ((${#missing[@]} == 0)) || fail "$E_SECRETS" "в конфигурации нет: ${missing[*]}"
+}
+
+sync_core_config() {
+  step secrets
+  require_payload .config.GIT_REPO .config.GITHUB_APP_ID .config.GITHUB_CLIENT_ID .config.BOOTSTRAP_ADMINS \
+    .config.ACP_AGENT_COMMAND .secrets.GITHUB_APP_PRIVATE_KEY .secrets.GITHUB_CLIENT_SECRET \
+    .secrets.WEBHOOK_SECRET .secrets.TOKEN_ENCRYPTION_KEY
+  check_key_fingerprint
+  app_jwt
+  APP_SLUG=$(github GET /app | jq -r '.slug // empty')
+  [[ -n $APP_SLUG ]] || fail "$E_APP" "GitHub App недоступен: проверьте HAMMURAPI_GITHUB_APP_ID и ключ"
+
+  # Несекретная конфигурация → ConfigMap hammurapi-config.
+  printf '%s' "$PAYLOAD" | jq -c --arg ns "$NS" --arg bot "${APP_SLUG}[bot]" '
+    {apiVersion: "v1", kind: "ConfigMap",
+     metadata: {name: "hammurapi-config", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
+     data: ({GIT_PROVIDER: "github", HAMMURAPI_BOT_LOGIN: $bot} + (.config // {} | with_entries(.value |= tostring)))}' |
+    apply_json || fail "$E_SECRETS" "не удалось записать hammurapi-config"
+
+  # Секреты → Secret hammurapi-secrets; ACP_AGENT_ENV построчно → через «;».
+  printf '%s' "$PAYLOAD" | jq -c --arg ns "$NS" '
+    (.secrets // {}) as $s
+    | {apiVersion: "v1", kind: "Secret", type: "Opaque",
+       metadata: {name: "hammurapi-secrets", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
+       stringData: ($s | del(.DEPLOY_CALLBACK_SECRET)
+         | .ACP_AGENT_ENV = ((.ACP_AGENT_ENV // "") | split("\n") | map(sub("\r$"; "") | select(length > 0)) | join(";"))
+         | .GITHUB_APP_PRIVATE_KEY = (.GITHUB_APP_PRIVATE_KEY | gsub("\\\\n"; "\n")))}' |
+    apply_json || fail "$E_SECRETS" "не удалось записать hammurapi-secrets"
+
+  # Переменные агента для задач runner (envFrom в Job) — в их namespace.
+  printf '%s' "$PAYLOAD" | jq -c --arg ns "$RUNNERS_NS" '
+    {apiVersion: "v1", kind: "Secret", type: "Opaque",
+     metadata: {name: "hammurapi-runner-agent", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
+     stringData: ((.secrets.ACP_AGENT_ENV // "") | split("\n") | map(sub("\r$"; "") | select(test("^[A-Za-z_][A-Za-z0-9_]*=")))
+       | map(capture("^(?<k>[^=]+)=(?<v>.*)$") | {(.k): .v}) | add // {})}' |
+    apply_json || fail "$E_SECRETS" "не удалось записать hammurapi-runner-agent"
+
+  copy_conn_secrets
+  ok "конфигурация и секреты синхронизированы с GitHub"
+}
+
+# --- GitHub App ---
+
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+# app_jwt — JWT приложения (RS256, 9 минут); ключ передаётся openssl через /dev/fd.
+app_jwt() {
+  local now header body unsigned sig
+  now=$(date +%s)
+  header=$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)
+  body=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' $((now - 60)) $((now + 540)) "$(payload .config.GITHUB_APP_ID)" | b64url)
+  unsigned="$header.$body"
+  sig=$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign <(payload .secrets.GITHUB_APP_PRIVATE_KEY | sed 's/\\n/\n/g') | b64url) ||
+    fail "$E_APP" "не удалось подписать JWT ключом GitHub App"
+  APP_JWT="$unsigned.$sig"
+}
+
+# github <метод> <путь> [тело JSON из stdin] — API GitHub от имени приложения;
+# заголовок с JWT передаётся curl через /dev/fd, а не аргументом.
+github() {
+  local method=$1 path=$2 data=()
+  [[ $method != GET ]] && data=(--data-binary @-)
+  curl -fsS --max-time 30 -X "$method" "${data[@]}" \
+    -H @<(printf 'Authorization: Bearer %s\nAccept: application/vnd.github+json\nX-GitHub-Api-Version: 2022-11-28\n' "$APP_JWT") \
+    "$GITHUB_API$path"
+}
+
+configure_app() {
+  step github-app
+  local repo inst perms url state
+  repo=$(payload .config.GIT_REPO)
+  url="https://api.$BASE_DOMAIN/hooks/v1/git"
+  state=$(kc -n "$NS" get configmap hammurapi-deploy-state -o jsonpath='{.data.webhookUrl}' 2>/dev/null || true)
+  if [[ $FIRST_INSTALL != true && $state == "$url" ]]; then
+    debug "адрес вебхука GitHub App не менялся"
+    return
+  fi
+  # Адрес и секрет вебхука приложения (R13); секрет — в теле из jq, не в аргументах.
+  printf '%s' "$PAYLOAD" | jq -c --arg url "$url" '{url: $url, content_type: "json", secret: .secrets.WEBHOOK_SECRET, insecure_ssl: "0"}' |
+    github PATCH /app/hook/config >/dev/null || fail "$E_APP" "не удалось записать адрес вебхука GitHub App"
+  inst=$(github GET "/repos/$repo/installation" 2>/dev/null | jq -r '.id // empty') || true
+  [[ -n $inst ]] || fail "$E_APP" "нет доступа к $repo: установите приложение — https://github.com/apps/$APP_SLUG/installations/new"
+  perms=$(github GET "/app/installations/$inst" | jq -c '{c: .permissions.contents, p: .permissions.pull_requests, e: (.events // [])}')
+  if [[ $(jq -r '.c == "write" and .p == "write"' <<<"$perms") != true ]]; then
+    fail "$E_APP" "у GitHub App на $repo нет прав contents: write и pull_requests: write"
+  fi
+  if [[ $(jq -r '(.e | index("push")) != null and (.e | index("pull_request")) != null' <<<"$perms") != true ]]; then
+    fail "$E_APP" "GitHub App не подписан на события push и pull_request"
+  fi
+  kc -n "$NS" create configmap hammurapi-deploy-state --from-literal="webhookUrl=$url" --dry-run=client -o yaml | apply_stdin
+  ok "GitHub App: вебхук $url, доступ к $repo"
+}
+
+# --- 5. Helm ---
+
+helm_login() {
+  local token
+  token=$(payload .ghcrPullToken)
+  [[ -n $token ]] || token=$(kc -n "$NS" get secret ghcr-pull -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null |
+    base64 -d | jq -r --arg r "$REGISTRY" '.auths[$r].password // empty')
+  [[ -n $token ]] || fail "$E_HELM" "нет токена чтения реестра для чарта"
+  # Учётные данные реестра — в tmpfs на время выкатки.
+  HELM_REG=$(mktemp -p /dev/shm hammurapi-helm-XXXXXX.json 2>/dev/null || mktemp)
+  export HELM_REGISTRY_CONFIG=$HELM_REG
+  printf '%s' "$token" | helm registry login "$REGISTRY" --username hammurapi --password-stdin >/dev/null 2>&1 ||
+    fail "$E_HELM" "не удалось войти в $REGISTRY"
+}
+
+diagnostics() {
+  local dir ts
+  ts=$(date -u +%Y%m%dT%H%M%SZ)
+  dir=$(mktemp -d)
+  {
+    kc -n "$NS" get events --sort-by=.lastTimestamp
+  } >"$dir/events.txt" 2>&1 || true
+  kc -n "$NS" get pods -o wide >"$dir/pods.txt" 2>&1 || true
+  kc -n "$NS" describe pods >"$dir/describe-pods.txt" 2>&1 || true
+  hm history "$COMPONENT" -n "$NS" >"$dir/helm-history.txt" 2>&1 || true
+  kc -n "$NS" logs job/hammurapi-migrate --tail=500 >"$dir/migrate.log" 2>&1 || true
+  kc -n "$NS" logs deploy/api --all-containers --tail=300 >"$dir/api.log" 2>&1 || true
+  kc -n "$NS" logs deploy/worker --all-containers --tail=300 >"$dir/worker.log" 2>&1 || true
+  local logs=${DEPLOY_LOGS:-/opt/hammurapi-infra/logs}
+  [[ -d $logs && -w $logs ]] || logs=$ROOT/logs
+  mkdir -p "$logs"
+  DIAG=$logs/deploy-$COMPONENT-$ts.tar.gz
+  tar -czf "$DIAG" -C "$dir" . && rm -rf "$dir"
+}
+
+helm_deploy() {
+  step helm
+  helm_login
+  local image
+  image=$(payload .image)
+  local args=(upgrade --install "$COMPONENT" "$CHART_REPO/$COMPONENT" --version "$CHART_VERSION"
+    -n "$NS" --set-string "image.tag=$TAG" --set-string "publicBaseDomain=$BASE_DOMAIN"
+    --atomic --wait --timeout "${HELM_TIMEOUT:-10m}")
+  [[ -n $image ]] && args+=(--set-string "image.repository=$image")
+  log "helm upgrade --install $COMPONENT $TAG (чарт $CHART_VERSION)"
+  if ! hm "${args[@]}" >&2; then
+    diagnostics
+    fail "$E_HELM" "релиз $COMPONENT $TAG не развёрнут, Helm вернул прежнюю ревизию; диагностика: $DIAG"
+  fi
+  REVISION=$(hm status "$COMPONENT" -n "$NS" -o json 2>/dev/null | jq -r '.version // empty')
+}
+
+# --- 7. Готовность ---
+
+wait_ready() {
+  step ready
+  local d deploys=(web)
+  [[ $COMPONENT == hammurapi-core ]] && deploys=(api worker)
+  for d in "${deploys[@]}"; do
+    if ! kc -n "$NS" rollout status "deploy/$d" --timeout=5m >/dev/null 2>&1; then
+      diagnostics
+      fail "$E_READY" "$d не готов; диагностика: $DIAG"
+    fi
+  done
+  ok "$COMPONENT $TAG готов (ревизия $REVISION)"
+}
+
+on_exit() {
+  local rc=$?
+  result "$rc"
+  exit "$rc"
+}
+
+main() {
+  trap on_exit EXIT
+  # Цвета до первого сообщения: die при ошибке в аргументах их использует.
+  COLOR=0
+  setup_color
+  parse_args "$@"
+  HAMMURAPI_INFRA_CONFIG=${HAMMURAPI_INFRA_CONFIG:-/opt/hammurapi-infra/local.env}
+  load_config "$ROOT" "$HAMMURAPI_INFRA_CONFIG"
+  acquire_deploy_lock
+  read_payload
+  check_stand
+  check_order
+  ensure_namespaces
+  step secrets
+  if [[ $COMPONENT == hammurapi-core ]]; then
+    sync_core_config
+  fi
+  ghcr_pull
+  helm_deploy
+  if [[ $COMPONENT == hammurapi-core ]]; then
+    configure_app
+  fi
+  wait_ready
+}
+
+main "$@"

@@ -1,0 +1,70 @@
+# worker: Kafka, движок workflow, сессии агента; создаёт Job задач runner в
+# отдельном namespace (исполнитель k8s) — поэтому свой ServiceAccount.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: worker
+  labels: {{- include "core.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hammurapi-worker-runners
+  namespace: {{ .Values.runners.namespace }}
+  labels: {{- include "core.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hammurapi-worker-runners
+  namespace: {{ .Values.runners.namespace }}
+  labels: {{- include "core.labels" . | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: hammurapi-worker-runners }
+subjects:
+  - { kind: ServiceAccount, name: worker, namespace: {{ .Release.Namespace }} }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels:
+    {{- include "core.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "core.selector" (dict "root" . "component" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "core.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+      annotations:
+        {{- toYaml .Values.podAnnotations | nindent 8 }}
+    spec:
+      serviceAccountName: worker
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- include "core.podSecurity" . | nindent 6 }}
+      containers:
+        - name: worker
+          image: {{ include "core.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["worker"]
+          ports:
+            - { name: service, containerPort: 9100 }
+          {{- include "core.env" . | nindent 10 }}
+          readinessProbe: { httpGet: { path: /readyz, port: service }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: service }, initialDelaySeconds: 20, periodSeconds: 10 }
+          resources: {{- toYaml .Values.resources.worker | nindent 12 }}
+          {{- include "core.containerSecurity" . | nindent 10 }}
+          {{- include "core.volumeMounts" . | nindent 10 }}
+      {{- include "core.volumes" . | nindent 6 }}

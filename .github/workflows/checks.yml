@@ -16,19 +16,28 @@ jobs:
   shellcheck:
     runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: shellcheck
         run: |
           curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VERSION/shellcheck-$SHELLCHECK_VERSION.linux.x86_64.tar.xz" | tar -xJ
           sc=./shellcheck-$SHELLCHECK_VERSION/shellcheck
           $sc -x hammurapi-infra.sh
-          $sc -x tests/manifests.sh tests/e2e/*.sh dashboards/normalize.sh .github/scripts/*.sh
+          $sc -x tests/manifests.sh tests/e2e/*.sh dashboards/normalize.sh .github/scripts/*.sh bin/hammurapi-deploy bin/ingress-forward
           $sc -s bash tests/unit/*.bats tests/unit/helpers.bash
+
+  actionlint:
+    runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: actionlint (QUAL-01)
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/914e7df21a07ef503a81201c76d2b11c789d3fca/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
 
   unit:
     runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: bats
         run: |
           git clone --quiet --depth 1 --branch "$BATS_VERSION" https://github.com/bats-core/bats-core.git /tmp/bats
@@ -37,7 +46,7 @@ jobs:
   manifests:
     runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Инструменты
         run: |
           set -a; source config/versions.env; set +a

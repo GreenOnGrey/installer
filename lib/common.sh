@@ -11,7 +11,7 @@ COLOR=${COLOR:-auto}
 RUN_DIR=${RUN_DIR:-}
 
 # Ключи, значения которых нельзя писать прямо в local.env (tech, п. 2).
-readonly SECRET_KEYS=(POSTGRES_PASSWORD KAFKA_PASSWORD S3_ACCESS_KEY S3_SECRET_KEY)
+readonly SECRET_KEYS=(POSTGRES_PASSWORD KAFKA_PASSWORD S3_ACCESS_KEY S3_SECRET_KEY GRAFANA_GITHUB_CLIENT_SECRET)
 
 setup_color() {
   if [[ $COLOR == auto ]]; then
@@ -120,15 +120,17 @@ secret_value() {
 
 require_param() {
   local mode_name=$1 key=$2
+  [[ $mode_name == *=* ]] || mode_name+="=external"
   if [[ -z ${!key:-} ]]; then
-    die "$E_USAGE" "$mode_name=external: не задан параметр $key"
+    die "$E_USAGE" "$mode_name: не задан параметр $key"
   fi
 }
 
 require_secret() {
   local mode_name=$1 key=$2
+  [[ $mode_name == *=* ]] || mode_name+="=external"
   if [[ -z $(secret_value "$key") ]]; then
-    die "$E_USAGE" "$mode_name=external: не задан $key (переменная окружения) или ${key}_FILE"
+    die "$E_USAGE" "$mode_name: не задан $key (переменная окружения) или ${key}_FILE"
   fi
 }
 
@@ -173,6 +175,32 @@ validate_config() {
     require_secret S3_MODE S3_SECRET_KEY
   fi
   [[ $MK_MEMORY =~ ^[0-9]+[gGmM]$ ]] || die "$E_USAGE" "MK_MEMORY: ожидается число с g или m, например 12g"
+  validate_public_config
+}
+
+# validate_public_config — параметры публичного доступа (PLT.INFRA-0002, R21).
+validate_public_config() {
+  case ${PUBLIC_ACCESS:-false} in
+    true) ;;
+    false) return 0 ;;
+    *) die "$E_USAGE" "PUBLIC_ACCESS должен быть true или false" ;;
+  esac
+  require_param PUBLIC_ACCESS=true ACME_EMAIL
+  [[ $ACME_EMAIL == *@*.* ]] || die "$E_USAGE" "ACME_EMAIL: нужен адрес электронной почты"
+  case ${ACME_ISSUER:-letsencrypt} in
+    letsencrypt | letsencrypt-staging) ;;
+    *) die "$E_USAGE" "ACME_ISSUER должен быть letsencrypt или letsencrypt-staging" ;;
+  esac
+  if [[ -n ${PUBLIC_BASE_DOMAIN:-} && ! $PUBLIC_BASE_DOMAIN =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$ ]]; then
+    die "$E_USAGE" "PUBLIC_BASE_DOMAIN: недопустимое имя «$PUBLIC_BASE_DOMAIN»"
+  fi
+  if [[ -n ${PUBLIC_IP:-} && ! $PUBLIC_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    die "$E_USAGE" "PUBLIC_IP: нужен IPv4-адрес"
+  fi
+  if [[ -n ${GRAFANA_GITHUB_CLIENT_ID:-} ]]; then
+    require_secret PUBLIC_ACCESS=true GRAFANA_GITHUB_CLIENT_SECRET
+    require_param PUBLIC_ACCESS=true GRAFANA_GITHUB_ORG
+  fi
 }
 
 # mem_mib <12g|12288m> — память minikube в МиБ.

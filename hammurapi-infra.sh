@@ -20,6 +20,8 @@ source "$ROOT/lib/external.sh"
 source "$ROOT/lib/checks.sh"
 # shellcheck source=lib/deploy.sh
 source "$ROOT/lib/deploy.sh"
+# shellcheck source=lib/public.sh
+source "$ROOT/lib/public.sh"
 
 usage() {
   cat <<'EOF'
@@ -152,6 +154,14 @@ Grafana:
 
 Пароли: ./hammurapi-infra.sh creds
 EOF
+  if public_enabled; then
+    cat <<EOF
+
+Публичный доступ (сертификат ${ACME_ISSUER:-letsencrypt}):
+  https://grafana.$PUBLIC_DOMAIN   https://web.$PUBLIC_DOMAIN   https://api.$PUBLIC_DOMAIN
+  порты 80/443 машины → Traefik $LB_IP; откройте их в межсетевом экране облака
+EOF
+  fi
 }
 
 mode_ru() { if [[ $1 == internal ]]; then echo встроенный; else echo внешний; fi; }
@@ -182,6 +192,17 @@ cmd_up() {
 }
 
 # --- status ---
+
+# public_status_json — публичный доступ по данным кластера (ConfigMap стенда).
+public_status_json() {
+  local data
+  data=$(kc -n ingress get configmap hammurapi-infra-public -o json 2>/dev/null | jq -c '.data // {}' 2>/dev/null || true)
+  if [[ -z $data || $data == "{}" ]]; then
+    echo '{"enabled":false}'
+  else
+    jq -c '{enabled: true, baseDomain, publicIp, lbIp, issuer}' <<<"$data"
+  fi
+}
 
 deployed_version() {
   kc -n "$NS_OBSERVABILITY" get configmap hammurapi-infra-version -o json 2>/dev/null | jq -c '.data' 2>/dev/null || echo null
@@ -216,20 +237,21 @@ checks_json() {
 }
 
 status_json() {
-  local profile_status=$1 running=$2 releases='[]' pods='[]' version=null
+  local profile_status=$1 running=$2 releases='[]' pods='[]' version=null public='{"enabled":false}'
   if [[ $running == 1 ]]; then
     releases=$(hm list -A -o json 2>/dev/null | jq -c '[.[] | {name, namespace, chart, app_version, status, revision}]' || echo '[]')
     pods=$(kc get pods -n "$NS_STORAGES" -o json 2>/dev/null; kc get pods -n "$NS_OBSERVABILITY" -o json 2>/dev/null)
     pods=$(jq -cs '[.[].items[] | {namespace: .metadata.namespace, name: .metadata.name, phase: .status.phase,
       ready: ([.status.containerStatuses[]?.ready] | all)}]' <<<"$pods")
     version=$(deployed_version)
+    public=$(public_status_json)
   fi
   jq -n --arg profile "$MK_PROFILE" --arg st "$profile_status" --arg k8s "$K8S_VERSION" \
-    --argjson version "$version" --argjson releases "$releases" --argjson pods "$pods" \
+    --argjson version "$version" --argjson releases "$releases" --argjson pods "$pods" --argjson public "$public" \
     --argjson checks "$(checks_json)" --argjson req "$MEM_REQUESTED" --argjson alloc "$MEM_ALLOCATABLE" \
     --arg pg "$POSTGRES_MODE" --arg kafka "$KAFKA_MODE" --arg s3 "$S3_MODE" \
     '{profile: {name: $profile, status: $st, kubernetes: $k8s}, version: $version,
-      storages: {postgres: $pg, kafka: $kafka, s3: $s3},
+      storages: {postgres: $pg, kafka: $kafka, s3: $s3}, public: $public,
       releases: $releases, pods: $pods, checks: $checks,
       resources: {requestedMemoryBytes: $req, allocatableMemoryBytes: $alloc,
         requestedPercent: (if $alloc > 0 then ($req * 100 / $alloc | floor) else 0 end)},

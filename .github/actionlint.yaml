@@ -1,0 +1,5 @@
+# actionlint: проверки после выкатки вызываются косвенно через check — SC2329 не ошибка.
+paths:
+  .github/workflows/deploy-component.yml:
+    ignore:
+      - 'SC2329'

@@ -45,7 +45,7 @@
 ## Быстрый старт
 
 ```sh
-git clone https://github.com/GeenOnGrey/hammurapi-infra.git
+git clone https://github.com/GreenOnGrey/hammurapi-infra.git
 cd hammurapi-infra
 ./hammurapi-infra.sh up
 ```
@@ -170,6 +170,18 @@ TCP-подключение: токен получает само приложе�
 | `GCP_WIF_PROVIDER`, `GCP_SERVICE_ACCOUNT` | переменные | `gcp-iap` | Workload Identity Federation |
 
 Подготовка машины прода — в [docs/gcp.md](docs/gcp.md#машина-прода).
+
+## Hammurapi: публичный доступ и выкатка
+
+С `PUBLIC_ACCESS=true` стенд публикует по HTTPS `web.`, `api.` и `grafana.<базовый домен>`
+(MetalLB, Traefik, сертификаты Let's Encrypt, по умолчанию домен `<IP>.sslip.io`); вход в
+Grafana — через GitHub для участников организации. `hammurapi-core` и `hammurapi-web`
+выкатываются на стенд своими пайплайнами через переиспользуемый workflow
+`deploy-component.yml` и скрипт `bin/hammurapi-deploy`; чарты — `charts/hammurapi-core` и
+`charts/hammurapi-web`, публикуются по тегу `charts-vX.Y.Z`.
+
+Настройка — межсетевой экран, OAuth-приложение для Grafana, GitHub App, секреты организации,
+первая установка и коды выкатки — в [docs/hammurapi.md](docs/hammurapi.md).
 
 ## Разработка
 

@@ -1,0 +1,31 @@
+# Traefik (PLT.INFRA-0002, R17, R19): ingress-контроллер, сервис LoadBalancer
+# (адрес выдаёт MetalLB; конкретный — service.spec.loadBalancerIP из up).
+# Маршрутизация — стандартные Ingress с классом traefik.
+deployment:
+  replicas: 1
+  podAnnotations: { prometheus.io/scrape: "true", prometheus.io/port: "9100" }
+ingressClass: { enabled: true, isDefaultClass: false, name: traefik }
+providers:
+  kubernetesIngress: { enabled: true }
+  kubernetesCRD: { enabled: true }   # нужен для TLSStore
+ports:
+  web:
+    # Проверки HTTP-01 cert-manager проходят мимо перенаправления.
+    allowACMEByPass: true
+    http:
+      redirections:
+        entryPoint: { to: websecure, scheme: https, permanent: true }
+  websecure:
+    http:
+      tls: { enabled: true }
+# Один сертификат на web., api., grafana. — сертификат по умолчанию: Ingress в
+# других namespace включают TLS без собственных секретов.
+tlsStore:
+  default:
+    defaultCertificate: { secretName: hammurapi-public }
+service:
+  spec:
+    type: LoadBalancer
+    externalTrafficPolicy: Local   # сохраняет адрес клиента
+accessLog: { enabled: true }
+resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }

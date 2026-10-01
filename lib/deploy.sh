@@ -10,6 +10,8 @@ declare -A HELM_REPOS=(
   [prometheus-community]=https://prometheus-community.github.io/helm-charts
   [vector]=https://helm.vector.dev
   [grafana-community]=https://grafana-community.github.io/helm-charts
+  [traefik]=https://traefik.github.io/charts
+  [jetstack]=https://charts.jetstack.io
 )
 
 # Выведенные из конфигурации версии релизов — для сводки.
@@ -108,6 +110,8 @@ vmagent_scrape_values() {
   {
     printf 'config:\n  scrape_configs:\n'
     cat "$ROOT/values/scrape/base.yaml"
+    # Hammurapi (PLT.INFRA-0002): не обязателен в проверках, пока не установлен.
+    cat "$ROOT/values/scrape/hammurapi.yaml"
     [[ $KAFKA_MODE == internal ]] && cat "$ROOT/values/scrape/kafka.yaml"
     [[ $POSTGRES_MODE == internal ]] && cat "$ROOT/values/scrape/postgres.yaml"
     [[ $S3_MODE == internal ]] && cat "$ROOT/values/scrape/s3.yaml"
@@ -137,9 +141,15 @@ deploy_observability() {
   vmagent_scrape_values "$RUN_DIR/vmagent-scrape.yaml"
   release vmagent "$ns" vm/victoria-metrics-agent "$VMAGENT_CHART_VERSION" vmagent.yaml -f "$RUN_DIR/vmagent-scrape.yaml"
   release vector "$ns" vector/vector "$VECTOR_CHART_VERSION" vector.yaml
+  # Публичный доступ: Ingress Grafana и вход через GitHub (PLT.INFRA-0002, R20).
+  local grafana_public=()
+  if public_enabled; then
+    grafana_public_values "$RUN_DIR/grafana-public.yaml"
+    grafana_public=(-f "$RUN_DIR/grafana-public.yaml")
+  fi
   release grafana "$ns" grafana-community/grafana "$GRAFANA_CHART_VERSION" grafana.yaml \
     --set-string "grafana\.ini.plugins.preinstall_sync=victoriametrics-logs-datasource@$VL_PLUGIN_VERSION" \
-    --set "persistence.size=$GRAFANA_STORAGE"
+    --set "persistence.size=$GRAFANA_STORAGE" "${grafana_public[@]}"
   stage_dashboards "$WORK_DIR/hammurapi-dashboards"
   release dashboards "$ns" "$WORK_DIR/hammurapi-dashboards" - -
   RELEASES[-1]="dashboards локальный"
@@ -150,10 +160,14 @@ deploy_all() {
   helm_repos
   deploy_operators
   ensure_secrets
+  ensure_public_secrets
   check_external
+  public_prepare
   step deploy
   deploy_storages
   deploy_observability
+  deploy_public
+  step deploy
   ok "все релизы развёрнуты"
 }
 

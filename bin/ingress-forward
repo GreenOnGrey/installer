@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# ingress-forward apply | remove | status — проброс TCP 80/443 внешнего
+# интерфейса машины на адрес Traefik, выданный MetalLB в Docker-сети minikube
+# (PLT.INFRA-0002, R17). Запускается systemd-юнитом hammurapi-ingress-forward
+# после docker.service и командой `up`.
+#   - DNAT в nat/PREROUTING: <внешний интерфейс>:80,443 → LB_IP;
+#   - разрешение в DOCKER-USER: Docker эту цепочку не трогает.
+# SNAT не нужен: ответы из Docker-сети идут через машину, conntrack возвращает
+# их клиенту, адрес клиента сохраняется. Все правила помечены комментарием и
+# перед добавлением удаляются — после перезапуска Docker дублей нет.
+set -euo pipefail
+
+COMMENT=hammurapi-ingress
+PORTS=80,443
+FORWARD_STATE=${FORWARD_STATE:-/var/lib/hammurapi-infra}
+IPTABLES=${IPTABLES:-iptables}
+
+log() { echo "ingress-forward: $*" >&2; }
+
+# lb_ip — LB_IP из окружения или из кэша, который пишет `up`: при загрузке
+# машины кластер ещё не поднят, а адрес MetalLB закреплён за Traefik.
+lb_ip() {
+  local ip=${LB_IP:-}
+  [[ -z $ip && -r $FORWARD_STATE/lb-ip ]] && ip=$(tr -d '[:space:]' <"$FORWARD_STATE/lb-ip")
+  [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  echo "$ip"
+}
+
+ext_if() {
+  local dev=${EXT_IF:-}
+  [[ -n $dev ]] || dev=$(ip -o -4 route show to default | awk '{print $5; exit}')
+  [[ -n $dev ]] || return 1
+  echo "$dev"
+}
+
+# remove_rules — удаляет все правила с комментарием из nat/PREROUTING и DOCKER-USER.
+remove_rules() {
+  local table chain rule spec args
+  for spec in "nat PREROUTING" "filter DOCKER-USER"; do
+    read -r table chain <<<"$spec"
+    # «|| true»: своих правил может не быть (первый apply) — это не ошибка при pipefail.
+    { "$IPTABLES" -t "$table" -S "$chain" 2>/dev/null || true; } | { grep -F -- "--comment $COMMENT" || true; } | while IFS= read -r rule; do
+      # «-A CHAIN …» из iptables -S → «-D CHAIN …»; в наших правилах нет пробелов в значениях.
+      read -ra args <<<"${rule#-A }"
+      "$IPTABLES" -t "$table" -D "${args[@]}"
+    done
+  done
+}
+
+apply_rules() {
+  local ip dev
+  ip=$(lb_ip) || { log "нет адреса Traefik (LB_IP или $FORWARD_STATE/lb-ip)"; exit 1; }
+  dev=$(ext_if) || { log "не найден внешний интерфейс (маршрут по умолчанию)"; exit 1; }
+  remove_rules
+  "$IPTABLES" -t nat -A PREROUTING -i "$dev" -p tcp -m multiport --dports "$PORTS" \
+    -m comment --comment "$COMMENT" -j DNAT --to-destination "$ip"
+  # DOCKER-USER создаёт Docker; если его ещё нет — создаём, Docker его сохранит.
+  "$IPTABLES" -t filter -N DOCKER-USER 2>/dev/null || true
+  "$IPTABLES" -t filter -I DOCKER-USER -d "$ip" -p tcp -m multiport --dports "$PORTS" \
+    -m comment --comment "$COMMENT" -j ACCEPT
+  log "$dev:{$PORTS} → $ip"
+}
+
+case ${1:-} in
+  apply) apply_rules ;;
+  remove) remove_rules ;;
+  status)
+    "$IPTABLES" -t nat -S PREROUTING | grep -F -- "--comment $COMMENT" || true
+    "$IPTABLES" -t filter -S DOCKER-USER 2>/dev/null | grep -F -- "--comment $COMMENT" || true
+    ;;
+  *)
+    echo "использование: ingress-forward apply | remove | status" >&2
+    exit 2
+    ;;
+esac

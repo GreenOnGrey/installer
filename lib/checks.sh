@@ -267,7 +267,8 @@ check_metrics() {
   local deadline=$((SECONDS + 150)) jobs down missing job
   while :; do
     jobs=$(vm_query 'count by (job) (up)' 2>/dev/null | jq -r '.data.result[].metric.job' 2>/dev/null | sort -u || true)
-    down=$(vm_query 'up == 0' 2>/dev/null | jq -r '.data.result[].metric | "\(.job)/\(.instance)"' 2>/dev/null || true)
+    # Задание hammurapi не обязательно: упавший Hammurapi не должен блокировать его выкатку.
+    down=$(vm_query 'up{job!="hammurapi"} == 0' 2>/dev/null | jq -r '.data.result[].metric | "\(.job)/\(.instance)"' 2>/dev/null || true)
     missing=""
     while read -r job; do
       grep -qx "$job" <<<"$jobs" || missing+="$job "
@@ -403,6 +404,7 @@ run_checks() {
   fi
   check_storages
   check_resources
+  check_public
   cleanup_probes
   local r name state msg failed=0
   for r in "${CHECK_RESULTS[@]}"; do
