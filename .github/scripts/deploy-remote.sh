@@ -10,7 +10,7 @@
 #     current -> releases/<тег>   успешно развёрнутый тег
 #
 # Аргументы: <каталог прода> <тег> <коммит> <инициатор>; архив tar.gz — в stdin
-# (режим unpack) или уже распакован (режим up).
+# (режим unpack) или уже распакован (режим up; в stdin — параметры стенда из GitHub).
 set -euo pipefail
 mode=$1 dir=$2 tag=$3
 keep=${KEEP_RELEASES:-5}
@@ -28,6 +28,21 @@ case $mode in
     ;;
   up)
     commit=$4 actor=$5
+    # Параметры стенда из переменных и секретов GitHub — строки KEY=VALUE в stdin.
+    # Только ключи из списка и только в окружение up: на диск не пишутся, в argv не
+    # попадают; окружение важнее local.env (load_config).
+    allowed=" PUBLIC_ACCESS ACME_EMAIL ACME_ISSUER PUBLIC_BASE_DOMAIN PUBLIC_IP"
+    allowed+=" GRAFANA_GITHUB_CLIENT_ID GRAFANA_GITHUB_CLIENT_SECRET GRAFANA_GITHUB_ORG "
+    if [[ ! -t 0 ]]; then
+      while IFS= read -r line || [[ -n $line ]]; do
+        line=${line%$'\r'}
+        [[ -z $line ]] && continue
+        key=${line%%=*}
+        [[ $allowed == *" $key "* ]] || { echo "параметр «$key» из GitHub не поддерживается" >&2; exit 2; }
+        export "$key=${line#*=}"
+        echo "параметр из GitHub: $key"
+      done
+    fi
     cd "$dir/releases/$tag"
     ln -sfn "$dir/logs" logs
     cfg=()

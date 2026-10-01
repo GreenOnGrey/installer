@@ -159,7 +159,8 @@ TCP-подключение: токен получает само приложе�
   тег, хранятся последние 5 выгрузок. Машине прода не нужен доступ к GitHub — deploy keys
   запрещены политикой организации;
 - `/opt/hammurapi-infra/local.env` и файлы секретов остаются на машине и в workflow не
-  передаются; журналы всех запусков — в `/opt/hammurapi-infra/logs`;
+  передаются; исключение — публичный доступ и вход в Grafana через GitHub (ниже): их параметры идут в
+  `up` через stdin SSH-сессии и на диск не пишутся. Журналы всех запусков — в `/opt/hammurapi-infra/logs`;
 - выкатки идут по одной (`concurrency`), параллельный `up` на машине блокирует
   `/var/lock/hammurapi-infra.lock` (код 17);
 - итог — сводка `status` в отчёте запуска; развёрнутый тег виден в `status`
@@ -175,6 +176,9 @@ TCP-подключение: токен получает само приложе�
 | `PROD_KNOWN_HOSTS` | секрет | `ssh` | Отпечаток хоста (`ssh-keyscan -t ed25519 <адрес>`); проверка хоста не отключается |
 | `GCP_PROJECT`, `GCP_ZONE`, `GCP_INSTANCE` | переменные | `gcp-iap` | Машина прода |
 | `GCP_WIF_PROVIDER`, `GCP_SERVICE_ACCOUNT` | переменные | `gcp-iap` | Workload Identity Federation |
+| `PUBLIC_ACCESS`, `ACME_EMAIL` | переменные | публичный доступ | `true` и адрес для Let's Encrypt; `ACME_ISSUER`, `PUBLIC_BASE_DOMAIN`, `PUBLIC_IP` — по желанию ([docs/hammurapi.md](docs/hammurapi.md#13-конфигурация-стенда)) |
+| `GRAFANA_GITHUB_CLIENT_ID`, `GRAFANA_GITHUB_ORG` | переменные | вход в Grafana через GitHub | OAuth-приложение организации; организация по умолчанию — `GreenOnGrey` ([docs/hammurapi.md](docs/hammurapi.md#12-oauth-приложение-github-для-grafana)) |
+| `GRAFANA_GITHUB_CLIENT_SECRET` | секрет | вход в Grafana через GitHub | Client secret OAuth-приложения |
 
 Подготовка машины прода — в [docs/gcp.md](docs/gcp.md#машина-прода).
 

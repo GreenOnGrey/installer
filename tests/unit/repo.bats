@@ -87,6 +87,35 @@ load helpers
   kill %1 2>/dev/null || true
 }
 
+# fake_release <каталог прода> — выгрузка v1.0.0, чей hammurapi-infra.sh печатает окружение и аргументы.
+fake_release() {
+  mkdir -p "$1/releases/v1.0.0" "$1/logs"
+  printf '#!/usr/bin/env bash\necho "args: $*"\necho "public=${PUBLIC_ACCESS:-} email=${ACME_EMAIL:-} id=${GRAFANA_GITHUB_CLIENT_ID:-} org=${GRAFANA_GITHUB_ORG:-} secret=${GRAFANA_GITHUB_CLIENT_SECRET:-}"\n' \
+    >"$1/releases/v1.0.0/hammurapi-infra.sh"
+}
+
+@test "PUB-15: параметры из GitHub — в окружение up через stdin, не в argv и не на диск" {
+  local d=$BATS_TEST_TMPDIR/prod
+  fake_release "$d"
+  run bash "$ROOT/.github/scripts/deploy-remote.sh" up "$d" v1.0.0 abc anna \
+    <<<$'PUBLIC_ACCESS=true\nACME_EMAIL=ops@example.org\nGRAFANA_GITHUB_CLIENT_ID=Ov23li1\r\nGRAFANA_GITHUB_CLIENT_SECRET=s3cr=t $x;`y`\n'
+  [ "$status" -eq 0 ]
+  [[ $output == *'public=true email=ops@example.org id=Ov23li1 org= secret=s3cr=t $x;`y`'* ]]
+  [[ $output == *"параметр из GitHub: GRAFANA_GITHUB_CLIENT_SECRET"* ]]
+  [[ $(grep 'args:' <<<"$output") != *s3cr* ]]
+  not_grep -rq s3cr "$d" --exclude=hammurapi-infra.sh
+  # В Git Bash символические ссылки эмулируются копией — проверка только в Linux.
+  [[ $(uname) != Linux ]] || [ "$(readlink "$d/current")" = releases/v1.0.0 ]
+}
+
+@test "PUB-15: чужой параметр из GitHub — код 2, up не запускается" {
+  local d=$BATS_TEST_TMPDIR/prod
+  fake_release "$d"
+  run bash "$ROOT/.github/scripts/deploy-remote.sh" up "$d" v1.0.0 abc anna <<<'POSTGRES_PASSWORD=x'
+  [ "$status" -eq 2 ]
+  [[ $output == *"POSTGRES_PASSWORD"* && $output != *"args:"* ]]
+}
+
 @test "RES: to_bytes понимает единицы Kubernetes" {
   source "$ROOT/lib/common.sh"
   [ "$(to_bytes 512Mi)" -eq 536870912 ]

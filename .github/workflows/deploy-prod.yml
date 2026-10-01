@@ -117,13 +117,31 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
           ACTOR: ${{ github.actor }}
           SHA: ${{ steps.tag.outputs.sha }}
+          # Публичный доступ стенда (PLT.INFRA-0002, R17–R21).
+          PUBLIC_ACCESS: ${{ vars.PUBLIC_ACCESS }}
+          ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+          ACME_ISSUER: ${{ vars.ACME_ISSUER }}
+          PUBLIC_BASE_DOMAIN: ${{ vars.PUBLIC_BASE_DOMAIN }}
+          PUBLIC_IP: ${{ vars.PUBLIC_IP }}
+          # Вход в Grafana через GitHub (R20): OAuth-приложение организации.
+          GRAFANA_GITHUB_CLIENT_ID: ${{ vars.GRAFANA_GITHUB_CLIENT_ID }}
+          GRAFANA_GITHUB_ORG: ${{ vars.GRAFANA_GITHUB_ORG }}
+          GRAFANA_GITHUB_CLIENT_SECRET: ${{ secrets.GRAFANA_GITHUB_CLIENT_SECRET }}
         # Машине прода не нужен доступ к GitHub (deploy keys запрещены политикой
         # организации): раннер передаёт ей выгрузку тега по тому же SSH.
         run: |
           remote() { bash .github/scripts/remote.sh "$@"; }
           remote "mkdir -p $PROD_DIR && cat >$PROD_DIR/deploy-remote.sh" <.github/scripts/deploy-remote.sh
           git archive --format=tar.gz "refs/tags/$TAG" | remote "bash $PROD_DIR/deploy-remote.sh unpack $PROD_DIR $TAG"
-          remote "bash $PROD_DIR/deploy-remote.sh up $PROD_DIR $TAG $SHA $ACTOR"
+          if [[ -n $GRAFANA_GITHUB_CLIENT_ID && -z $GRAFANA_GITHUB_CLIENT_SECRET ]]; then
+            echo "::error::задана переменная GRAFANA_GITHUB_CLIENT_ID, но нет секрета GRAFANA_GITHUB_CLIENT_SECRET"
+            exit 1
+          fi
+          # Заданные параметры — в stdin выкатки (секрет не попадает в argv и на диск).
+          for k in PUBLIC_ACCESS ACME_EMAIL ACME_ISSUER PUBLIC_BASE_DOMAIN PUBLIC_IP \
+            GRAFANA_GITHUB_CLIENT_ID GRAFANA_GITHUB_ORG GRAFANA_GITHUB_CLIENT_SECRET; do
+            if [[ -n ${!k} ]]; then printf '%s=%s\n' "$k" "$(printf '%s' "${!k}" | tr -d '\r\n')"; fi
+          done | remote "bash $PROD_DIR/deploy-remote.sh up $PROD_DIR $TAG $SHA $ACTOR"
 
       - name: Статус
         if: always() && steps.tag.outcome == 'success'

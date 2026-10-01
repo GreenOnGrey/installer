@@ -36,23 +36,45 @@ gcloud compute instances add-tags hammurapi --zone "$ZONE" --tags hammurapi-publ
 1. Organization settings → Developer settings → OAuth Apps → New OAuth App:
    - Homepage URL: `https://grafana.<базовый домен>`;
    - Authorization callback URL: `https://grafana.<базовый домен>/login/github`.
-2. Сгенерируйте client secret и положите его в файл на машине стенда, например
-   `/secure/grafana-github-secret` (права `600`).
+2. Сгенерируйте client secret. На проде задайте в `hammurapi-infra` (окружение `production` или
+   уровень репозитория) переменную `GRAFANA_GITHUB_CLIENT_ID` и секрет
+   `GRAFANA_GITHUB_CLIENT_SECRET`; при желании — переменную `GRAFANA_GITHUB_ORG` (по умолчанию
+   `GreenOnGrey`). `deploy-prod` передаёт их в `up` через stdin SSH-сессии: на диск машины и в
+   argv они не попадают, Grafana получает их через секрет Kubernetes `grafana-github-oauth`.
+   Применяются следующей выкаткой тега. Ручной `up` на машине берёт их из `local.env`: client ID
+   — строкой, секрет — файлом (`GRAFANA_GITHUB_CLIENT_SECRET_FILE`, права `600`); без них такой
+   `up` выключит вход через GitHub до следующей выкатки.
 3. Organization settings → Third-party access → OAuth app policy: разрешите приложению доступ
    к организации. Иначе Grafana не видит членство, и вход отклоняется.
 
 ### 1.3 Конфигурация стенда
 
-`/opt/hammurapi-infra/local.env` на проде (или `config/local.env` рабочей копии):
+На проде параметры публичного доступа задаются переменными GitHub репозитория
+`hammurapi-infra` (окружение `production` или уровень репозитория) — так же, как вход в Grafana
+(п. 1.2): `deploy-prod` передаёт их в `up` через stdin, значения из GitHub важнее `local.env`.
+
+| Переменная | Значение |
+|---|---|
+| `PUBLIC_ACCESS` | `true` |
+| `ACME_EMAIL` | адрес для уведомлений Let's Encrypt (обязателен при `PUBLIC_ACCESS=true`) |
+| `ACME_ISSUER` | `letsencrypt` (по умолчанию) или `letsencrypt-staging` — для проб |
+| `PUBLIC_BASE_DOMAIN` | пусто — `<внешний IP с дефисами>.sslip.io` |
+| `PUBLIC_IP` | пусто — определяется автоматически |
+
+Ручной `up` на машине этих значений не получает и берёт их из `local.env`. Если их там нет,
+такой `up` пропустит шаг `public`; уже развёрнутые Traefik и сертификат останутся.
+
+`/opt/hammurapi-infra/local.env` (или `config/local.env` рабочей копии) для ручного `up`:
 
 ```bash
 PUBLIC_ACCESS=true
 ACME_EMAIL=ops@example.org
 # PUBLIC_BASE_DOMAIN=            # пусто — <внешний IP с дефисами>.sslip.io
 # ACME_ISSUER=letsencrypt-staging  # для проб: не тратит лимиты Let's Encrypt
-GRAFANA_GITHUB_CLIENT_ID=Ov23li…
-GRAFANA_GITHUB_CLIENT_SECRET_FILE=/secure/grafana-github-secret
-GRAFANA_GITHUB_ORG=GreenOnGrey
+# Вход в Grafana через GitHub: на проде — из GitHub (п. 1.2), здесь — для ручного up.
+# GRAFANA_GITHUB_CLIENT_ID=Ov23li…
+# GRAFANA_GITHUB_CLIENT_SECRET_FILE=/secure/grafana-github-secret
+# GRAFANA_GITHUB_ORG=GreenOnGrey
 ```
 
 Следующий `up` (или выкатка тега `hammurapi-infra`) добавляет шаг `public`:
