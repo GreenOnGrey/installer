@@ -1,18 +1,32 @@
-# Публикация чартов Hammurapi (PLT.INFRA-0002, R15, техспека п. 11): по тегу
-# charts-vX.Y.Z оба чарта — hammurapi-core и hammurapi-web — проходят lint,
-# упаковываются с версией из тега и публикуются в oci://ghcr.io/<организация>/charts.
+# Публикация чартов Hammurapi (PLT.INFRA-0002, R15, техспека п. 11): по тегу релиза
+# hammurapi-infra vX.Y.Z оба чарта — hammurapi-core и hammurapi-web — проходят lint,
+# упаковываются с версией X.Y.Z и публикуются в oci://ghcr.io/<организация>/charts.
+# Версия чартов совпадает с версией стенда; ручной запуск публикует уже
+# существующий тег (например, выпущенный до появления этого workflow).
 name: publish-charts
 on:
   push:
-    tags: ["charts-v*.*.*"]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag: { description: "Тег hammurapi-infra (vX.Y.Z)", required: true, type: string }
 permissions: { contents: read }
 
 jobs:
   publish:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
     permissions: { contents: read, packages: write }
     steps:
+      - name: Тег
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          [[ $INPUT_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::тег «$INPUT_TAG» не в формате vX.Y.Z"; exit 1; }
+          echo "tag=$INPUT_TAG" >>"$GITHUB_OUTPUT"
+          echo "version=${INPUT_TAG#v}" >>"$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { ref: "refs/tags/${{ steps.tag.outputs.tag }}" }
       - name: Helm
         run: |
           set -a; source config/versions.env; set +a
@@ -22,15 +36,14 @@ jobs:
       - name: lint, package, push
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          version=${GITHUB_REF_NAME#charts-v}
-          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::тег $GITHUB_REF_NAME не в формате charts-vX.Y.Z"; exit 1; }
           repo="oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"
           printf '%s' "$GH_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           mkdir -p dist
           for chart in hammurapi-core hammurapi-web; do
             helm lint "charts/$chart" --set image.tag=v0.0.0 --set publicBaseDomain=example.org
-            helm package "charts/$chart" --version "$version" --app-version "$version" -d dist
-            helm push "dist/$chart-$version.tgz" "$repo"
-            echo "- $repo/$chart:$version" >>"$GITHUB_STEP_SUMMARY"
+            helm package "charts/$chart" --version "$VERSION" --app-version "$VERSION" -d dist
+            helm push "dist/$chart-$VERSION.tgz" "$repo"
+            echo "- $repo/$chart:$VERSION" >>"$GITHUB_STEP_SUMMARY"
           done

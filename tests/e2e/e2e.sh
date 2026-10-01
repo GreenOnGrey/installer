@@ -91,6 +91,9 @@ echo "=== перезагрузка машины"
 g compute instances reset "$INSTANCE" --zone "$GCP_ZONE" >/dev/null
 sleep 60
 for _ in $(seq 1 30); do on_vm true 2>/dev/null && break || sleep 10; done 2>/dev/null || true
+stage PERS-04 "после перезагрузки кластер и компоненты поднялись сами, без up" \
+  "timeout 1800 bash -c 'until systemctl is-active --quiet hammurapi-stand; do sleep 10; done' &&
+   $H status --no-color && $PG psql -U postgres -d hammurapi -tAc 'select v from e2e' | grep -qx persist"
 stage PERS-02 "перезагрузка и up — данные и пароли прежние" \
   "$H up --no-color && $PG psql -U postgres -d hammurapi -tAc 'select v from e2e' | grep -qx persist &&
    kubectl --context hammurapi get secret -A -l app.kubernetes.io/managed-by=hammurapi-infra -o json | jq -S '[.items[] | {n: .metadata.name, d: .data}]' | diff -q - /tmp/secrets-before.json"

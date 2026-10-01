@@ -134,8 +134,10 @@ workflow приватного `hammurapi-infra` нельзя вызвать из
 
 ## 4. Релизы и выкатка
 
-1. Опубликуйте чарты: тег `charts-vX.Y.Z` в `hammurapi-infra` → `publish-charts.yml` →
-   `oci://ghcr.io/greenongrey/charts/hammurapi-{core,web}:X.Y.Z`.
+1. Тег релиза `vX.Y.Z` в `hammurapi-infra` публикует чарты (`publish-charts.yml`) —
+   `oci://ghcr.io/greenongrey/charts/hammurapi-{core,web}:X.Y.Z`: версия чартов совпадает с
+   версией стенда. Тег, выпущенный раньше, публикуется ручным запуском `publish-charts` с этим
+   тегом.
 2. Выкатите `hammurapi-infra` с `bin/hammurapi-deploy` на стенд (тег `vX.Y.Z` →
    `deploy-prod.yml`): на машине скрипт берётся из `/opt/hammurapi-infra/current`.
 3. Тег `vX.Y.Z` в `hammurapi`, если менялся `deploy-component.yml`.

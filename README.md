@@ -80,6 +80,13 @@ kubectl --context hammurapi -n observability port-forward svc/grafana 3000:80
 `13` релиз не развёрнут, `14` внешнее хранилище недоступно, `15` проверки стенда не прошли,
 `16` отменено, `17` уже выполняется другой `up`.
 
+**Перезагрузка машины.** `up` ставит systemd-юнит `hammurapi-stand`: при загрузке машины он
+запускает профиль minikube (у его контейнера нет политики перезапуска) и ждёт готовности подов —
+компоненты стенда поднимаются сами, их объекты и тома хранятся в профиле. При выключении машины
+юнит останавливает кластер штатно. Итог — `journalctl -u hammurapi-stand`. Проброс портов
+публичного доступа восстанавливает свой юнит `hammurapi-ingress-forward`. Отключить автозапуск —
+`STAND_AUTOSTART=false` и `up`; `down` снимает юнит.
+
 Журнал каждого `up` — `logs/<время>/run.log`; при ошибке рядом — `diagnostics/` (события,
 `describe` проблемных подов, `helm status` релизов).
 
@@ -178,7 +185,7 @@ TCP-подключение: токен получает само приложе�
 Grafana — через GitHub для участников организации. `hammurapi-core` и `hammurapi-web`
 выкатываются на стенд своими пайплайнами через переиспользуемый workflow
 `deploy-component.yml` (в публичном репозитории `hammurapi`) и скрипт `bin/hammurapi-deploy`; чарты — `charts/hammurapi-core` и
-`charts/hammurapi-web`, публикуются по тегу `charts-vX.Y.Z`.
+`charts/hammurapi-web`, публикуются по тегу релиза `vX.Y.Z` с версией `X.Y.Z`.
 
 Настройка — межсетевой экран, OAuth-приложение для Grafana, GitHub App, секреты организации,
 первая установка и коды выкатки — в [docs/hammurapi.md](docs/hammurapi.md).

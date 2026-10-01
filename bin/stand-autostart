@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# stand-autostart start | stop — кластер minikube стенда при загрузке и выключении
+# машины. Запускается systemd-юнитом hammurapi-stand от пользователя стенда;
+# юнит ставит `hammurapi-infra.sh up`.
+#   start — minikube start профиля (у контейнера minikube нет политики перезапуска,
+#           после перезагрузки машины он остаётся остановленным); компоненты стенда
+#           поднимаются сами — их объекты и тома хранятся в профиле. Скрипт ждёт
+#           готовности ноды и подов, чтобы итог был виден в journalctl.
+#   stop  — minikube stop: хранилища останавливаются штатно, а не обрываются.
+# Если кластер уже запущен (юнит включает up), start сразу завершается; если
+# профиля нет (down), оба режима ничего не делают.
+set -euo pipefail
+
+MK_PROFILE=${MK_PROFILE:-hammurapi}
+DOCKER_WAIT=${DOCKER_WAIT:-120}     # секунд: docker.service активен раньше, чем отвечает API
+PODS_TIMEOUT=${PODS_TIMEOUT:-15m}
+
+log() { echo "stand-autostart: $*" >&2; }
+
+profile_exists() {
+  [[ -f "${MINIKUBE_HOME:-$HOME/.minikube}/profiles/$MK_PROFILE/config.json" ]]
+}
+
+running() {
+  [[ $(minikube status -p "$MK_PROFILE" -f '{{.Host}}/{{.APIServer}}' 2>/dev/null || true) == Running/Running ]]
+}
+
+wait_docker() {
+  local i
+  for ((i = 0; i < DOCKER_WAIT; i += 2)); do
+    docker info >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  log "Docker не отвечает ${DOCKER_WAIT} с"
+  return 1
+}
+
+start() {
+  profile_exists || { log "профиля $MK_PROFILE нет — запускать нечего"; return 0; }
+  wait_docker
+  if running; then
+    # Так юнит включает up: компоненты разворачивает он сам, ждать здесь нечего.
+    log "кластер $MK_PROFILE уже запущен"
+    return 0
+  fi
+  log "запуск кластера $MK_PROFILE"
+  minikube start -p "$MK_PROFILE" --interactive=false
+  kubectl --context "$MK_PROFILE" wait --for=condition=Ready node --all --timeout=5m >/dev/null
+  log "нода готова, ожидание подов (до $PODS_TIMEOUT)"
+  # Поды завершённых Job (Succeeded) и вытесненные (Failed) готовыми не станут.
+  if kubectl --context "$MK_PROFILE" wait pods --all-namespaces --for=condition=Ready \
+    --field-selector=status.phase!=Succeeded,status.phase!=Failed --timeout="$PODS_TIMEOUT" >/dev/null; then
+    log "стенд поднят: все поды готовы"
+  else
+    # Кластер запущен — юнит не проваливаем, неготовые поды видны в журнале и в status.
+    log "не все поды готовы за $PODS_TIMEOUT:"
+    kubectl --context "$MK_PROFILE" get pods --all-namespaces \
+      --field-selector=status.phase!=Succeeded --no-headers 2>/dev/null |
+      awk '{split($3, r, "/"); if (r[1] != r[2]) print "  " $1 "/" $2 " " $3 " " $4}' >&2 || true
+  fi
+}
+
+stop() {
+  profile_exists || return 0
+  running || { log "кластер $MK_PROFILE не запущен"; return 0; }
+  log "остановка кластера $MK_PROFILE"
+  minikube stop -p "$MK_PROFILE"
+}
+
+case ${1:-} in
+  start) start ;;
+  stop) stop ;;
+  *)
+    echo "использование: stand-autostart start | stop" >&2
+    exit 2
+    ;;
+esac

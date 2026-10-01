@@ -137,6 +137,10 @@ require_secret() {
 # validate_config — режимы и обязательные параметры внешних хранилищ.
 validate_config() {
   local m
+  case ${STAND_AUTOSTART:-true} in
+    true | false) ;;
+    *) die "$E_USAGE" "STAND_AUTOSTART должен быть true или false" ;;
+  esac
   for m in POSTGRES_MODE KAFKA_MODE S3_MODE; do
     case ${!m} in
       internal | external) ;;

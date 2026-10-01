@@ -352,6 +352,7 @@ cmd_down() {
   step cluster
   have minikube || die "$E_CLUSTER" "minikube не установлен"
   cluster_delete >/dev/null || die "$E_CLUSTER" "minikube delete не выполнен"
+  remove_autostart
   ok "профиль $MK_PROFILE удалён"
 }
 
