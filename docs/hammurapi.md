@@ -7,7 +7,7 @@ HTTPS, а `hammurapi-core` и `hammurapi-web` выпускаются и выка
 ```text
 тег vX.Y.Z в hammurapi-core / hammurapi-web
   lint ∥ test → build (ghcr.io, SBOM, provenance, подпись cosign) → scan (Trivy)
-  → deploy-component.yml (hammurapi-infra) → hammurapi-deploy на машине → проверки по доменам
+  → deploy-component.yml (hammurapi) → hammurapi-deploy на машине → проверки по доменам
 
 браузер, GitHub ──HTTPS──▶ :80/:443 машины ──iptables──▶ MetalLB ─▶ Traefik
   web.<домен>     → web
@@ -128,8 +128,9 @@ Repository access: selected). В git она не хранится.
 В каждом из двух репозиториев — окружение `production` (Settings → Environments) с правилами
 выкатки: разрешённые теги `v*.*.*`, при желании ревьюеры. Своих значений в нём нет.
 
-Организация: Settings → Actions → General → Access — разрешите репозиториям организации
-использовать переиспользуемые workflow приватного `hammurapi-infra`.
+Переиспользуемый workflow `deploy-component.yml` лежит в публичном репозитории `hammurapi`:
+workflow приватного `hammurapi-infra` нельзя вызвать из публичных `hammurapi-core` и
+`hammurapi-web`. Настраивать доступ к нему не нужно.
 
 ## 4. Релизы и выкатка
 
@@ -137,9 +138,10 @@ Repository access: selected). В git она не хранится.
    `oci://ghcr.io/greenongrey/charts/hammurapi-{core,web}:X.Y.Z`.
 2. Выкатите `hammurapi-infra` с `bin/hammurapi-deploy` на стенд (тег `vX.Y.Z` →
    `deploy-prod.yml`): на машине скрипт берётся из `/opt/hammurapi-infra/current`.
-3. В `hammurapi-core` и `hammurapi-web` в `deploy/versions.env` задайте `INFRA_WORKFLOW_REF`
-   (тег `hammurapi-infra` из п. 2) и `CHART_VERSION` (п. 1), выполните `deploy/sync-ref.sh`.
-4. Тег `vX.Y.Z` в `hammurapi-core`, затем в `hammurapi-web`.
+3. Тег `vX.Y.Z` в `hammurapi`, если менялся `deploy-component.yml`.
+4. В `hammurapi-core` и `hammurapi-web` в `deploy/versions.env` задайте `DEPLOY_WORKFLOW_REF`
+   (тег `hammurapi` из п. 3) и `CHART_VERSION` (п. 1), выполните `deploy/sync-ref.sh`.
+5. Тег `vX.Y.Z` в `hammurapi-core`, затем в `hammurapi-web`.
 
 | Что | Как |
 |---|---|

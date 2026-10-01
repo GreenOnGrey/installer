@@ -128,10 +128,13 @@ esac'
 }
 
 # --- deploy-component.yml: проверка конфигурации до подключения (INS-05) ---
+# Workflow лежит в публичном репозитории hammurapi (соседний каталог; в CI — DEPLOY_WORKFLOW).
 
 config_step() {
   command -v yq >/dev/null || skip "нет yq"
-  yq -r '.jobs.deploy.steps[] | select(.id == "config") | .run' "$ROOT/.github/workflows/deploy-component.yml" >"$BATS_TEST_TMPDIR/config.sh"
+  local wf=${DEPLOY_WORKFLOW:-$ROOT/../hammurapi/.github/workflows/deploy-component.yml}
+  [[ -f $wf ]] || skip "нет $wf"
+  yq -r '.jobs.deploy.steps[] | select(.id == "config") | .run' "$wf" >"$BATS_TEST_TMPDIR/config.sh"
   export GITHUB_OUTPUT=$BATS_TEST_TMPDIR/out COMPONENT=hammurapi-core DEPLOY_TRANSPORT=ssh CALLBACK_URL="" TAG=v1.8.0
   : >"$GITHUB_OUTPUT"
   export PROD_HOST=h PROD_USER=u HAS_PROD_SSH_KEY=true HAS_PROD_KNOWN_HOSTS=true HAS_HAMMURAPI_GHCR_PULL_TOKEN=true
@@ -178,7 +181,8 @@ config_step() {
 }
 
 @test "QUAL-03: действия GitHub Actions зафиксированы по SHA" {
-  local bad
-  bad=$(grep -hE '^\s*(-\s*)?uses:\s*[^./]' "$ROOT"/.github/workflows/*.yml | grep -vE '@[0-9a-f]{40}(\s|$)' || true)
+  local bad wf=${DEPLOY_WORKFLOW:-$ROOT/../hammurapi/.github/workflows/deploy-component.yml} files=("$ROOT"/.github/workflows/*.yml)
+  [[ -f $wf ]] && files+=("$wf")
+  bad=$(grep -hE '^\s*(-\s*)?uses:\s*[^./]' "${files[@]}" | grep -vE '@[0-9a-f]{40}(\s|$)' || true)
   [ -z "$bad" ] || { echo "$bad"; return 1; }
 }

@@ -177,7 +177,7 @@ TCP-подключение: токен получает само приложе�
 (MetalLB, Traefik, сертификаты Let's Encrypt, по умолчанию домен `<IP>.sslip.io`); вход в
 Grafana — через GitHub для участников организации. `hammurapi-core` и `hammurapi-web`
 выкатываются на стенд своими пайплайнами через переиспользуемый workflow
-`deploy-component.yml` и скрипт `bin/hammurapi-deploy`; чарты — `charts/hammurapi-core` и
+`deploy-component.yml` (в публичном репозитории `hammurapi`) и скрипт `bin/hammurapi-deploy`; чарты — `charts/hammurapi-core` и
 `charts/hammurapi-web`, публикуются по тегу `charts-vX.Y.Z`.
 
 Настройка — межсетевой экран, OAuth-приложение для Grafana, GitHub App, секреты организации,
