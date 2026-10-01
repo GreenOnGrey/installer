@@ -82,6 +82,10 @@ grafana_public_values() {
       echo "  auth: { disable_login_form: false }"
       # GF_AUTH_GITHUB_CLIENT_ID и GF_AUTH_GITHUB_CLIENT_SECRET — из секрета.
       echo "envFromSecret: grafana-github-oauth"
+      # Grafana читает переменные только при старте, а смена данных секрета под не
+      # перезапускает: хеш значений в аннотации пода перезапускает его при их смене.
+      echo "podAnnotations:"
+      echo "  checksum/github-oauth: $(printf '%s\n%s' "$GRAFANA_GITHUB_CLIENT_ID" "$(secret_value GRAFANA_GITHUB_CLIENT_SECRET)" | sha256sum | cut -c1-64)"
     fi
   } >"$f"
 }

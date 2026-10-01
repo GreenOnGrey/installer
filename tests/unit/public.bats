@@ -127,6 +127,23 @@ esac'
   grep -q 'envFromSecret: grafana-github-oauth' "$BATS_TEST_TMPDIR/g.yaml"
 }
 
+@test "R20: смена client ID или секрета OAuth-приложения перезапускает Grafana" {
+  load_script
+  PUBLIC_DOMAIN=34-12-5-6.sslip.io GRAFANA_GITHUB_ORG=GreenOnGrey
+  checksum() {
+    GRAFANA_GITHUB_CLIENT_ID=$1 GRAFANA_GITHUB_CLIENT_SECRET=$2 grafana_public_values "$BATS_TEST_TMPDIR/g.yaml"
+    sed -n 's/^  checksum\/github-oauth: //p' "$BATS_TEST_TMPDIR/g.yaml"
+  }
+  local a b c d
+  a=$(checksum Iv23li1 s1)
+  b=$(checksum Ov23ct1 s1)
+  c=$(checksum Ov23ct1 s2)
+  d=$(checksum Ov23ct1 s2)
+  [[ $a =~ ^[0-9a-f]{64}$ ]]
+  [ "$a" != "$b" ] && [ "$b" != "$c" ] && [ "$c" = "$d" ]
+  not_grep -q s2 "$BATS_TEST_TMPDIR/g.yaml"
+}
+
 # --- deploy-component.yml: проверка конфигурации до подключения (INS-05) ---
 # Workflow лежит в публичном репозитории hammurapi (соседний каталог; в CI — DEPLOY_WORKFLOW).
 
