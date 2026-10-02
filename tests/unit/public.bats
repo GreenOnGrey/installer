@@ -79,6 +79,49 @@ esac'
   [ ! -s "$RULES" ]
 }
 
+# --- Пул MetalLB в профиле minikube: переживает minikube start (R16, R17) ---
+
+# mk_profile <начало> <конец> — профиль minikube с пулом MetalLB.
+mk_profile() {
+  mkdir -p "$MINIKUBE_HOME/profiles/hammurapi"
+  printf '{"KubernetesConfig":{"LoadBalancerStartIP":"%s","LoadBalancerEndIP":"%s"}}\n' "$1" "$2" \
+    >"$MINIKUBE_HOME/profiles/hammurapi/config.json"
+}
+
+@test "AUTO-10: пул MetalLB сохраняется в профиле — ответы на вопросы minikube по одному" {
+  load_script
+  mk_profile "" ""
+  # Как minikube 1.39: каждый ответ читается отдельно; пул пишется в профиль.
+  stub minikube 'case "$*" in
+    *"addons configure metallb"*) read -r s; read -r e
+      printf "{\"KubernetesConfig\":{\"LoadBalancerStartIP\":\"%s\",\"LoadBalancerEndIP\":\"%s\"}}" "$s" "$e" \
+        >"$MINIKUBE_HOME/profiles/hammurapi/config.json" ;;
+  esac'
+  run metallb_addon 192.168.49.200 192.168.49.209
+  [ "$status" -eq 0 ]
+  called "minikube addons configure metallb -p hammurapi"
+  [ "$(metallb_pool)" = 192.168.49.200-192.168.49.209 ]
+}
+
+@test "AUTO-10: пул уже в профиле — только включение дополнения" {
+  load_script
+  mk_profile 192.168.49.200 192.168.49.209
+  run metallb_addon 192.168.49.200 192.168.49.209
+  [ "$status" -eq 0 ]
+  called "minikube addons enable metallb -p hammurapi"
+  not_called "addons configure"
+}
+
+@test "AUTO-10: пул не сохранился — ошибка шага public" {
+  load_script
+  mk_profile "" ""
+  sleep() { :; }
+  export -f sleep
+  run metallb_addon 192.168.49.200 192.168.49.209
+  [ "$status" -eq "$E_DEPLOY" ]
+  [[ $output == *"не удалось сохранить пул MetalLB 192.168.49.200-192.168.49.209"* ]]
+}
+
 # --- Конфигурация публичного доступа (R18, R21) ---
 
 @test "PUB-12: PUBLIC_ACCESS=false — шаг публичного доступа не выполняется" {

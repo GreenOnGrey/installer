@@ -26,7 +26,7 @@ mk_state() {
   [ "$status" -eq 0 ]
   called "minikube start -p hammurapi --interactive=false"
   called "kubectl --context hammurapi wait --for=condition=Ready node --all"
-  called "kubectl --context hammurapi wait pods --all-namespaces --for=condition=Ready --field-selector=status.phase!=Succeeded,status.phase!=Failed"
+  called "kubectl --context hammurapi wait pods --all-namespaces --for=condition=Ready --selector=!job-name --field-selector=status.phase!=Succeeded,status.phase!=Failed"
   [[ $output == *"все поды готовы"* ]]
 }
 

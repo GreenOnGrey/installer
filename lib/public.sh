@@ -100,6 +100,33 @@ ensure_public_secrets() {
     GF_AUTH_GITHUB_CLIENT_SECRET "$(secret_value GRAFANA_GITHUB_CLIENT_SECRET)"
 }
 
+# metallb_pool — пул MetalLB «начало-конец», сохранённый в профиле minikube.
+metallb_pool() {
+  jq -r '.KubernetesConfig | "\(.LoadBalancerStartIP // "")-\(.LoadBalancerEndIP // "")"' \
+    "${MINIKUBE_HOME:-$HOME/.minikube}/profiles/$MK_PROFILE/config.json" 2>/dev/null || true
+}
+
+# metallb_addon <начало> <конец> — дополнение metallb с пулом в профиле minikube.
+# При каждом minikube start (в том числе после перезагрузки машины) дополнение
+# заново применяет свой ConfigMap из пула профиля; без пула он получается пустым
+# («- -»), MetalLB его не разбирает, и адрес Traefik никто не анонсирует.
+# minikube 1.39 принимает пул только ответами на вопросы и на каждый вопрос
+# создаёт новое буферизованное чтение stdin, поэтому вторая строка — с паузой.
+metallb_addon() {
+  local start=$1 end=$2 delay
+  if [[ $(metallb_pool) == "$start-$end" ]]; then
+    mk addons enable metallb -p "$MK_PROFILE" >"$RUN_DIR/metallb.log" 2>&1 ||
+      die "$E_DEPLOY" "не удалось включить MetalLB, см. $RUN_DIR/metallb.log"
+    return
+  fi
+  for delay in 2 5; do
+    { echo "$start"; sleep "$delay"; echo "$end"; } |
+      mk addons configure metallb -p "$MK_PROFILE" >"$RUN_DIR/metallb.log" 2>&1 || true
+    [[ $(metallb_pool) == "$start-$end" ]] && return
+  done
+  die "$E_DEPLOY" "не удалось сохранить пул MetalLB $start-$end в профиле minikube, см. $RUN_DIR/metallb.log"
+}
+
 metallb_config() {
   cat <<EOF
 apiVersion: v1
@@ -204,8 +231,7 @@ deploy_public() {
   range=$(metallb_range) || die "$E_DEPLOY" "не удалось определить подсеть minikube для MetalLB"
   first=${range%-*}
   log "MetalLB: пул $range"
-  mk addons enable metallb -p "$MK_PROFILE" >"$RUN_DIR/metallb.log" 2>&1 ||
-    die "$E_DEPLOY" "не удалось включить MetalLB, см. $RUN_DIR/metallb.log"
+  metallb_addon "$first" "${range#*-}"
   metallb_config "$range" | apply_stdin
   kc create namespace "$NS_INGRESS" --dry-run=client -o yaml | apply_stdin
   kc create namespace "$NS_CERT_MANAGER" --dry-run=client -o yaml | apply_stdin

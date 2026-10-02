@@ -47,15 +47,17 @@ start() {
   minikube start -p "$MK_PROFILE" --interactive=false
   kubectl --context "$MK_PROFILE" wait --for=condition=Ready node --all --timeout=5m >/dev/null
   log "нода готова, ожидание подов (до $PODS_TIMEOUT)"
-  # Поды завершённых Job (Succeeded) и вытесненные (Failed) готовыми не станут.
+  # Поды заданий (Job, CronJob) не ждём: упавший при старте под задания готовым не
+  # станет никогда, а задание повторит его само. Вытесненные (Failed) — тоже.
   if kubectl --context "$MK_PROFILE" wait pods --all-namespaces --for=condition=Ready \
-    --field-selector=status.phase!=Succeeded,status.phase!=Failed --timeout="$PODS_TIMEOUT" >/dev/null; then
+    --selector='!job-name' --field-selector=status.phase!=Succeeded,status.phase!=Failed \
+    --timeout="$PODS_TIMEOUT" >/dev/null; then
     log "стенд поднят: все поды готовы"
   else
     # Кластер запущен — юнит не проваливаем, неготовые поды видны в журнале и в status.
     log "не все поды готовы за $PODS_TIMEOUT:"
     kubectl --context "$MK_PROFILE" get pods --all-namespaces \
-      --field-selector=status.phase!=Succeeded --no-headers 2>/dev/null |
+      --selector='!job-name' --field-selector=status.phase!=Succeeded --no-headers 2>/dev/null |
       awk '{split($3, r, "/"); if (r[1] != r[2]) print "  " $1 "/" $2 " " $3 " " $4}' >&2 || true
   fi
 }
