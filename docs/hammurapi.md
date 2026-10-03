@@ -1,6 +1,6 @@
 # Hammurapi на демо-стенде: публичный доступ, сборка и выкатка
 
-Спецификация — `HMR.INFRA-0002`. Стенд `HMR.INFRA-0001` публикует web, API и Grafana по
+Спецификация — `FTR.HMR.INFRA-0002`. Стенд `FTR.HMR.INFRA-0001` публикует web, API и Grafana по
 HTTPS, а `hammurapi-core` и `hammurapi-web` выпускаются и выкатываются на него своими
 пайплайнами — от тега до работающей версии, без ручных шагов на сервере.
 
@@ -98,7 +98,7 @@ ACME_EMAIL=ops@example.org
 лимиты Let's Encrypt для `sslip.io` исчерпаны, заведите поддомен DuckDNS
 (`<имя>.duckdns.org` с A-записью на внешний IP) и задайте `PUBLIC_BASE_DOMAIN`. Код не меняется.
 
-SSH-туннель к Grafana из `HMR.INFRA-0001` остаётся резервным способом.
+SSH-туннель к Grafana из `FTR.HMR.INFRA-0001` остаётся резервным способом.
 
 ## 2. GitHub App Hammurapi и репозиторий спецификаций
 
@@ -142,7 +142,7 @@ Repository access: selected). В git она не хранится.
 | `HAMMURAPI_GITHUB_APP_PRIVATE_KEY` | закрытый ключ GitHub App (PEM целиком) |
 | `HAMMURAPI_GITHUB_CLIENT_SECRET`, `HAMMURAPI_WEBHOOK_SECRET` | GitHub App |
 | `HAMMURAPI_TOKEN_ENCRYPTION_KEY` | `openssl rand -base64 32`; менять нельзя без `allow_key_rotation` |
-| `HAMMURAPI_BOOTSTRAP_DEEPSEEK_API_KEY` | необязательный: ключ DeepSeek для первого подключения к LLM; дальше подключения и модели — в «Администрирование → Агент» (HMR.CMN-0004) |
+| `HAMMURAPI_BOOTSTRAP_DEEPSEEK_API_KEY` | необязательный: ключ DeepSeek для первого подключения к LLM; дальше подключения и модели — в «Администрирование → Агент» (FTR.HMR.CMN-0004) |
 | `HAMMURAPI_GHCR_PULL_TOKEN` | classic PAT с `read:packages`: образы и чарты на машине |
 | `HAMMURAPI_DEPLOY_CALLBACK_SECRET` | секрет вебхука выкатки окружения `production` в Hammurapi (Администрирование → Деплой) |
 
@@ -169,7 +169,7 @@ workflow приватного `hammurapi-infra` нельзя вызвать из
 |---|---|
 | Выкатка по тегу | push тега: lint ∥ test → build → scan → deploy |
 | Ручная выкатка или откат (R9) | Actions → release → Run workflow, `ref` = тег; без пересборки, с проверкой подписи |
-| Запуск по контракту `HMR.CMN-0002` (R22) | Hammurapi вызывает `workflow_dispatch` с `service`, `ref`, `environment`, `run_id`, `callback_url`; вебхуки `started` и `success`/`failure` |
+| Запуск по контракту `FTR.HMR.CMN-0002` (R22) | Hammurapi вызывает `workflow_dispatch` с `service`, `ref`, `environment`, `run_id`, `callback_url`; вебхуки `started` и `success`/`failure` |
 | Автовыкатку выключить (R23) | переменная `AUTO_DEPLOY=false` |
 
 В Hammurapi (Администрирование → Деплой → production) для выкатки самого себя: тип
@@ -183,7 +183,7 @@ namespace `hammurapi` и `hammurapi-runners`, секреты конфигура�
 настраивает GitHub App: адрес вебхука и секрет, проверка доступа к `hammurapi-spec`. Web до
 core не выкатывается: «сначала выкатите hammurapi-core».
 
-**Агент (HMR.CMN-0004).** Чарт ставит оператор агента `agent` (по процессу Pi на сессию чата
+**Агент (FTR.HMR.CMN-0004).** Чарт ставит оператор агента `agent` (по процессу Pi на сессию чата
 или задачи, `:8090`), сервис `worker-mcp` (`:8083`, MCP фоновых сценариев) и сетевые политики:
 к оператору — только `api`, `worker` и задачи runner, к серверу рабочей копии задачи (`:8095`) —
 только оператор. Токен `AGENT_SERVICE_TOKEN` между ними `hammurapi-deploy` создаёт при первой
@@ -210,7 +210,7 @@ HTTPS; для web — страница, `config.json` с адресом API и C
 | 26 | GitHub App: нет доступа к `hammurapi-spec` и ссылка на установку, нет прав, не подписан на события |
 | 27 | поды не готовы |
 
-## 5. Решения реализации (внесены в спецификацию HMR.INFRA-0002 v1.1)
+## 5. Решения реализации (внесены в спецификацию FTR.HMR.INFRA-0002 v1.1)
 
 - **Подпись вебхука результата** — HMAC-SHA256 тела, метка времени отдельным заголовком
   `X-Hammurapi-Timestamp`. Так проверяет `hammurapi-core` (`/hooks/v1/deploy`); в техспеке

@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # shellcheck disable=SC2034,SC2016,SC2030,SC2031,SC2153,SC2329
-# HMR.INFRA-0002: публичный доступ стенда, проброс портов, проверка конфигурации выкатки.
+# FTR.HMR.INFRA-0002: публичный доступ стенда, проброс портов, проверка конфигурации выкатки.
 
 load helpers
 
@@ -201,7 +201,7 @@ config_step() {
   export HAMMURAPI_GITHUB_APP_ID=1 HAMMURAPI_GITHUB_CLIENT_ID=c HAMMURAPI_SPEC_REPO=o/r HAMMURAPI_BOOTSTRAP_ADMINS=a
   export HAS_HAMMURAPI_GITHUB_APP_PRIVATE_KEY=true HAS_HAMMURAPI_GITHUB_CLIENT_SECRET=true HAS_HAMMURAPI_WEBHOOK_SECRET=true
   export HAS_HAMMURAPI_TOKEN_ENCRYPTION_KEY=true
-  # Required only by deploy-component.yml before HMR.CMN-0004 (ACP agent): the
+  # Required only by deploy-component.yml before FTR.HMR.CMN-0004 (ACP agent): the
   # workflow comes from hammurapi main, which may lag behind this repository.
   export HAMMURAPI_AGENT_COMMAND=x HAS_HAMMURAPI_AGENT_ENV=true
   mkdir -p "$BATS_TEST_TMPDIR/w/deploy"

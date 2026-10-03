@@ -1,4 +1,4 @@
-# Релиз hammurapi-infra (R18; HMR.INFRA-0002, R15): по тегу vX.Y.Z сначала
+# Релиз hammurapi-infra (R18; FTR.HMR.INFRA-0002, R15): по тегу vX.Y.Z сначала
 # публикуются чарты hammurapi-core и hammurapi-web с версией X.Y.Z, затем — только
 # при успехе — тег выкатывается на прод (демо-стенд в Google Cloud).
 # Для повторной выкатки или возврата на прежнюю версию — ручной запуск с тегом:
@@ -21,7 +21,7 @@ env:
 
 jobs:
   # Чарты hammurapi-core и hammurapi-web в oci://ghcr.io/<организация>/charts: версия
-  # чартов совпадает с версией стенда (техспека HMR.INFRA-0002, п. 11).
+  # чартов совпадает с версией стенда (техспека FTR.HMR.INFRA-0002, п. 11).
   publish-charts:
     runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
     permissions: { contents: read, packages: write }
@@ -117,7 +117,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
           ACTOR: ${{ github.actor }}
           SHA: ${{ steps.tag.outputs.sha }}
-          # Публичный доступ стенда (HMR.INFRA-0002, R17–R21).
+          # Публичный доступ стенда (FTR.HMR.INFRA-0002, R17–R21).
           PUBLIC_ACCESS: ${{ vars.PUBLIC_ACCESS }}
           ACME_EMAIL: ${{ vars.ACME_EMAIL }}
           ACME_ISSUER: ${{ vars.ACME_ISSUER }}

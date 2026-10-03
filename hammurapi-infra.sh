@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Демо-стенд Hammurapi на minikube (HMR.INFRA-0001): хранилища и наблюдаемость.
+# Демо-стенд Hammurapi на minikube (FTR.HMR.INFRA-0001): хранилища и наблюдаемость.
 #   ./hammurapi-infra.sh up | status | creds | down | help
 set -euo pipefail
 

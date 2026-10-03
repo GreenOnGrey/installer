@@ -154,7 +154,7 @@ crd_schemas() {
     done
 }
 
-# --- HMR.INFRA-0002: чарты Hammurapi и публичный доступ ---
+# --- FTR.HMR.INFRA-0002: чарты Hammurapi и публичный доступ ---
 
 # kubeconform_file <файл> <метка>
 kubeconform_file() {
@@ -212,7 +212,7 @@ hammurapi_charts() {
   else
     fail "CH-03: права worker на Job"
   fi
-  # HMR.CMN-0004: оператор агента получает только свой токен; к нему — api, worker
+  # FTR.HMR.CMN-0004: оператор агента получает только свой токен; к нему — api, worker
   # и задачи runner; к серверу рабочей копии задачи — только оператор.
   if docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Deployment" and .metadata.name == "agent")
       | .spec.template.spec.containers[0] | (.args == ["agent"]) and (.envFrom == null)
@@ -222,9 +222,9 @@ hammurapi_charts() {
     docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "NetworkPolicy" and .metadata.name == "runner-workspace"
       and .metadata.namespace == "hammurapi-runners") | .spec.ingress[0].ports == [{"port": 8095}]' >/dev/null &&
     docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Service" and .metadata.name == "worker-mcp")' >/dev/null; then
-    pass "HMR.CMN-0004: оператор агента, worker-mcp и сетевые политики"
+    pass "FTR.HMR.CMN-0004: оператор агента, worker-mcp и сетевые политики"
   else
-    fail "HMR.CMN-0004: оператор агента и сетевые политики"
+    fail "FTR.HMR.CMN-0004: оператор агента и сетевые политики"
   fi
   # Web получает адрес API на своём домене.
   if docs_json "$dir/hammurapi-web.yaml" | jq -e 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[]
@@ -438,7 +438,7 @@ vmagent_scrape_values() {
   {
     printf 'config:\n  scrape_configs:\n'
     cat "$ROOT/values/scrape/base.yaml"
-    # Hammurapi (HMR.INFRA-0002): не обязателен в проверках, пока не установлен.
+    # Hammurapi (FTR.HMR.INFRA-0002): не обязателен в проверках, пока не установлен.
     cat "$ROOT/values/scrape/hammurapi.yaml"
     [[ $KAFKA_MODE == internal ]] && cat "$ROOT/values/scrape/kafka.yaml"
     [[ $POSTGRES_MODE == internal ]] && cat "$ROOT/values/scrape/postgres.yaml"
@@ -469,7 +469,7 @@ deploy_observability() {
   vmagent_scrape_values "$RUN_DIR/vmagent-scrape.yaml"
   release vmagent "$ns" vm/victoria-metrics-agent "$VMAGENT_CHART_VERSION" vmagent.yaml -f "$RUN_DIR/vmagent-scrape.yaml"
   release vector "$ns" vector/vector "$VECTOR_CHART_VERSION" vector.yaml
-  # Публичный доступ: Ingress Grafana и вход через GitHub (HMR.INFRA-0002, R20).
+  # Публичный доступ: Ingress Grafana и вход через GitHub (FTR.HMR.INFRA-0002, R20).
   local grafana_public=()
   if public_enabled; then
     grafana_public_values "$RUN_DIR/grafana-public.yaml"

@@ -1,4 +1,4 @@
-# --- Hammurapi (HMR.INFRA-0002): поды hammurapi и hammurapi-runners с аннотацией prometheus.io/scrape ---
+# --- Hammurapi (FTR.HMR.INFRA-0002): поды hammurapi и hammurapi-runners с аннотацией prometheus.io/scrape ---
 - job_name: hammurapi
   kubernetes_sd_configs:
     [{ role: pod, namespaces: { names: [hammurapi, hammurapi-runners] } }]

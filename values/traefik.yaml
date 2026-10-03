@@ -1,4 +1,4 @@
-# Traefik (HMR.INFRA-0002, R17, R19): ingress-контроллер, сервис LoadBalancer
+# Traefik (FTR.HMR.INFRA-0002, R17, R19): ingress-контроллер, сервис LoadBalancer
 # (адрес выдаёт MetalLB; конкретный — service.spec.loadBalancerIP из up).
 # Маршрутизация — стандартные Ingress с классом traefik.
 deployment:

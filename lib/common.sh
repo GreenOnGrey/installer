@@ -154,7 +154,7 @@ crd_schemas() {
     done
 }
 
-# --- HMR.INFRA-0002: чарты Hammurapi и публичный доступ ---
+# --- FTR.HMR.INFRA-0002: чарты Hammurapi и публичный доступ ---
 
 # kubeconform_file <файл> <метка>
 kubeconform_file() {
@@ -212,7 +212,7 @@ hammurapi_charts() {
   else
     fail "CH-03: права worker на Job"
   fi
-  # HMR.CMN-0004: оператор агента получает только свой токен; к нему — api, worker
+  # FTR.HMR.CMN-0004: оператор агента получает только свой токен; к нему — api, worker
   # и задачи runner; к серверу рабочей копии задачи — только оператор.
   if docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Deployment" and .metadata.name == "agent")
       | .spec.template.spec.containers[0] | (.args == ["agent"]) and (.envFrom == null)
@@ -222,9 +222,9 @@ hammurapi_charts() {
     docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "NetworkPolicy" and .metadata.name == "runner-workspace"
       and .metadata.namespace == "hammurapi-runners") | .spec.ingress[0].ports == [{"port": 8095}]' >/dev/null &&
     docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Service" and .metadata.name == "worker-mcp")' >/dev/null; then
-    pass "HMR.CMN-0004: оператор агента, worker-mcp и сетевые политики"
+    pass "FTR.HMR.CMN-0004: оператор агента, worker-mcp и сетевые политики"
   else
-    fail "HMR.CMN-0004: оператор агента и сетевые политики"
+    fail "FTR.HMR.CMN-0004: оператор агента и сетевые политики"
   fi
   # Web получает адрес API на своём домене.
   if docs_json "$dir/hammurapi-web.yaml" | jq -e 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[]
@@ -510,7 +510,7 @@ validate_config() {
   validate_public_config
 }
 
-# validate_public_config — параметры публичного доступа (HMR.INFRA-0002, R21).
+# validate_public_config — параметры публичного доступа (FTR.HMR.INFRA-0002, R21).
 validate_public_config() {
   case ${PUBLIC_ACCESS:-false} in
     true) ;;

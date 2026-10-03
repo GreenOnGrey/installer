@@ -25,10 +25,10 @@ config: {}
 runners:
   namespace: hammurapi-runners
   maxParallel: 2
-  # Порт сервера рабочей копии задачи: к нему ходит только оператор агента (HMR.CMN-0004).
+  # Порт сервера рабочей копии задачи: к нему ходит только оператор агента (FTR.HMR.CMN-0004).
   workspacePort: 8095
 
-# Оператор агента (режим agent, HMR.CMN-0004): процессы Pi по сессиям чата и задач.
+# Оператор агента (режим agent, FTR.HMR.CMN-0004): процессы Pi по сессиям чата и задач.
 agent:
   maxSessions: 20 # всего процессов Pi
   maxTaskSessions: 4 # из них — сессий задач runner
