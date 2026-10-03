@@ -201,6 +201,9 @@ config_step() {
   export HAMMURAPI_GITHUB_APP_ID=1 HAMMURAPI_GITHUB_CLIENT_ID=c HAMMURAPI_SPEC_REPO=o/r HAMMURAPI_BOOTSTRAP_ADMINS=a
   export HAS_HAMMURAPI_GITHUB_APP_PRIVATE_KEY=true HAS_HAMMURAPI_GITHUB_CLIENT_SECRET=true HAS_HAMMURAPI_WEBHOOK_SECRET=true
   export HAS_HAMMURAPI_TOKEN_ENCRYPTION_KEY=true
+  # Required only by deploy-component.yml before PLT.HMR-0004 (ACP agent): the
+  # workflow comes from hammurapi main, which may lag behind this repository.
+  export HAMMURAPI_AGENT_COMMAND=x HAS_HAMMURAPI_AGENT_ENV=true
   mkdir -p "$BATS_TEST_TMPDIR/w/deploy"
   echo CHART_VERSION=0.4.0 >"$BATS_TEST_TMPDIR/w/deploy/versions.env"
 }
