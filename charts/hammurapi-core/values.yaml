@@ -1,10 +1,5 @@
 # Образ core вместе с агентом; тег задаёт выкатка (hammurapi-deploy).
-image:
-  {
-    repository: ghcr.io/greenongrey/hammurapi-core,
-    tag: "",
-    pullPolicy: IfNotPresent,
-  }
+image: { repository: ghcr.io/greenongrey/hammurapi-core, tag: "", pullPolicy: IfNotPresent }
 imagePullSecrets: [{ name: ghcr-pull }]
 
 # Базовый домен: web.<домен>, api.<домен>. Обязателен.
@@ -13,9 +8,9 @@ publicBaseDomain: ""
 # Секреты и конфигурация создаёт hammurapi-deploy до Helm: чарт получает только
 # ссылки, значения не попадают в историю релизов (R14).
 existingSecrets:
-  config: hammurapi-secrets # GitHub App, секрет вебхуков, ключ шифрования, токен оператора агента
-  configMap: hammurapi-config # несекретная конфигурация из GitHub
-  postgres: postgres-conn # копии секретов стенда из storages
+  config: hammurapi-secrets        # GitHub App, секрет вебхуков, ключ шифрования, токен оператора агента
+  configMap: hammurapi-config      # несекретная конфигурация из GitHub
+  postgres: postgres-conn          # копии секретов стенда из storages
   kafka: kafka-conn
   s3: s3-conn
 
@@ -30,10 +25,10 @@ runners:
 
 # Оператор агента (режим agent, FTR.HMR.CMN-0004): процессы Pi по сессиям чата и задач.
 agent:
-  maxSessions: 20 # всего процессов Pi
-  maxTaskSessions: 4 # из них — сессий задач runner
-  idleTimeout: 15m # простой сессии до закрытия
-  workSizeLimit: 2Gi # каталоги сессий (/work)
+  maxSessions: 20         # всего процессов Pi
+  maxTaskSessions: 4      # из них — сессий задач runner
+  idleTimeout: 15m        # простой сессии до закрытия
+  workSizeLimit: 2Gi      # каталоги сессий (/work)
 
 ingress:
   className: traefik
@@ -44,32 +39,11 @@ cleaner:
   schedule: "0 3 * * *"
 
 resources:
-  api:
-    {
-      requests: { cpu: 100m, memory: 256Mi },
-      limits: { cpu: "1", memory: 512Mi },
-    }
-  worker:
-    {
-      requests: { cpu: 100m, memory: 256Mi },
-      limits: { cpu: "1", memory: 512Mi },
-    }
-  agent:
-    {
-      requests: { cpu: 200m, memory: 512Mi },
-      limits: { cpu: "2", memory: 3Gi },
-    }
-  migrate:
-    {
-      requests: { cpu: 20m, memory: 64Mi },
-      limits: { cpu: 500m, memory: 256Mi },
-    }
-  cleaner:
-    {
-      requests: { cpu: 20m, memory: 64Mi },
-      limits: { cpu: 500m, memory: 256Mi },
-    }
-  runnerJob:
-    { requests: { cpu: 500m, memory: 1Gi }, limits: { cpu: "2", memory: 4Gi } }
+  api:       { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
+  worker:    { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
+  agent:     { requests: { cpu: 200m, memory: 512Mi }, limits: { cpu: "2", memory: 3Gi } }
+  migrate:   { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
+  cleaner:   { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
+  runnerJob: { requests: { cpu: 500m, memory: 1Gi }, limits: { cpu: "2", memory: 4Gi } }
 
 podAnnotations: { prometheus.io/scrape: "true", prometheus.io/port: "9100" }
