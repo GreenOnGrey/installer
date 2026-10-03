@@ -1,13 +1,26 @@
-# cert-manager (PLT.INFRA-0002, R19): сертификаты Let's Encrypt, проверка HTTP-01
+# cert-manager (HMR.INFRA-0002, R19): сертификаты Let's Encrypt, проверка HTTP-01
 # через Traefik. CRD ставятся чартом.
 crds: { enabled: true, keep: true }
-resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { cpu: 200m, memory: 192Mi } }
+resources:
+  { requests: { cpu: 10m, memory: 64Mi }, limits: { cpu: 200m, memory: 192Mi } }
 webhook:
-  resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { cpu: 100m, memory: 64Mi } }
+  resources:
+    {
+      requests: { cpu: 10m, memory: 32Mi },
+      limits: { cpu: 100m, memory: 64Mi },
+    }
 cainjector:
-  resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { cpu: 200m, memory: 192Mi } }
+  resources:
+    {
+      requests: { cpu: 10m, memory: 64Mi },
+      limits: { cpu: 200m, memory: 192Mi },
+    }
 startupapicheck:
-  resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { cpu: 100m, memory: 64Mi } }
+  resources:
+    {
+      requests: { cpu: 10m, memory: 32Mi },
+      limits: { cpu: 100m, memory: 64Mi },
+    }
 # Решатель HTTP-01 — временный под на время выпуска.
 extraArgs: []
 acmesolver:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # hammurapi-deploy <component> <tag> <chart_version> [--allow-key-rotation]
 #
-# Выкатка Hammurapi на стенд (PLT.INFRA-0002, техспека п. 3). Запускается
+# Выкатка Hammurapi на стенд (HMR.INFRA-0002, техспека п. 3). Запускается
 # переиспользуемым workflow deploy-component.yml по SSH на машине стенда.
 #   component       hammurapi-core | hammurapi-web
 #   stdin           JSON с конфигурацией и секретами (п. 3.1); читается в память,
@@ -215,7 +215,7 @@ sync_core_config() {
      data: ({GIT_PROVIDER: "github", HAMMURAPI_BOT_LOGIN: $bot} + (.config // {} | with_entries(.value |= tostring)))}' |
     apply_json || fail "$E_SECRETS" "не удалось записать hammurapi-config"
 
-  # Токен между api/worker и оператором агента (PLT.HMR-0004): создаётся при
+  # Токен между api/worker и оператором агента (HMR.CMN-0004): создаётся при
   # первой выкатке и дальше сохраняется; в jq передаётся через /dev/fd, не аргументом.
   local agent_token
   agent_token=$(kc -n "$NS" get secret hammurapi-secrets -o jsonpath='{.data.AGENT_SERVICE_TOKEN}' 2>/dev/null | base64 -d 2>/dev/null || true)

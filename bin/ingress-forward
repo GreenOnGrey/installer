@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ingress-forward apply | remove | status — проброс TCP 80/443 внешнего
 # интерфейса машины на адрес Traefik, выданный MetalLB в Docker-сети minikube
-# (PLT.INFRA-0002, R17). Запускается systemd-юнитом hammurapi-ingress-forward
+# (HMR.INFRA-0002, R17). Запускается systemd-юнитом hammurapi-ingress-forward
 # после docker.service и командой `up`.
 #   - DNAT в nat/PREROUTING: <внешний интерфейс>:80,443 → LB_IP;
 #   - разрешение в DOCKER-USER: Docker эту цепочку не трогает.

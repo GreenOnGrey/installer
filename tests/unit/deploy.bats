@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # shellcheck disable=SC2034,SC2016,SC2030,SC2031,SC2153,SC2329
-# PLT.INFRA-0002: bin/hammurapi-deploy — порядок, коды выхода, секреты только в stdin.
+# HMR.INFRA-0002: bin/hammurapi-deploy — порядок, коды выхода, секреты только в stdin.
 
 load helpers
 
@@ -140,7 +140,7 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   [ "$(jq -r '.metadata.namespace' <<<"$s3")" = "hammurapi" ]
 }
 
-@test "PLT.HMR-0004: токен оператора агента создаётся один раз, ключ LLM первого запуска — в hammurapi-secrets" {
+@test "HMR.CMN-0004: токен оператора агента создаётся один раз, ключ LLM первого запуска — в hammurapi-secrets" {
   need_linux
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 0 ]
