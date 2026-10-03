@@ -35,13 +35,14 @@ case "$*" in
   *) exit 0 ;;
 esac'
   # kubectl: манифесты из stdin сохраняются для проверок; FINGERPRINT — сохранённый хеш ключа.
-  export FINGERPRINT=""
+  export FINGERPRINT="" AGENT_TOKEN=""
   stub kubectl '
 case "$*" in
   *"apply -f -"*) cat >>"$APPLIED/manifests" ; echo >>"$APPLIED/manifests" ;;
   *"--dry-run=client -o yaml"*) echo "kind: Dummy" ;;
   *"get configmap hammurapi-key-fingerprint"*) printf "%s" "$FINGERPRINT" ;;
   *"get configmap hammurapi-deploy-state"*) exit 1 ;;
+  *"get secret hammurapi-secrets"*) [[ -n $AGENT_TOKEN ]] && printf "%s" "$AGENT_TOKEN" | base64 ;;
   *"get secret postgres-conn -o json"*|*"get secret kafka-conn -o json"*) echo "{\"metadata\":{\"name\":\"x\"},\"data\":{\"uri\":\"cA==\"}}" ;;
   *"get secret s3-conn -o json"*) echo "{\"metadata\":{\"name\":\"s3-conn\"},\"data\":{\"endpoint\":\"$(printf http://s3.storages.svc:9000 | base64)\"}}" ;;
   *) exit 0 ;;
@@ -59,10 +60,10 @@ esac'
   PAYLOAD=$(jq -cn --rawfile key "$BATS_TEST_TMPDIR/app.pem" '{
     image: "ghcr.io/greenongrey/hammurapi-core",
     config: {GIT_REPO: "GreenOnGrey/hammurapi-spec", GITHUB_APP_ID: "123", GITHUB_CLIENT_ID: "Iv1.abc",
-      BOOTSTRAP_ADMINS: "owner", ACP_AGENT_COMMAND: "claude-agent-acp"},
+      BOOTSTRAP_ADMINS: "owner"},
     secrets: {GITHUB_APP_PRIVATE_KEY: $key, GITHUB_CLIENT_SECRET: "client-secret-XYZ",
       WEBHOOK_SECRET: "webhook-secret-XYZ", TOKEN_ENCRYPTION_KEY: "token-key-XYZ",
-      ACP_AGENT_ENV: "ANTHROPIC_API_KEY=sk-ant-SECRET\nOTHER=1"},
+      BOOTSTRAP_DEEPSEEK_API_KEY: "sk-deepseek-SECRET"},
     ghcrPullToken: "ghp_pulltokenXYZ"}')
   export PAYLOAD
 }
@@ -112,15 +113,16 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   grep -q '"name":"hammurapi-config"' "$APPLIED/manifests"
   grep -q '"HAMMURAPI_BOT_LOGIN":"hammurapi-demo\[bot\]"' "$APPLIED/manifests"
   grep -q '"name":"ghcr-pull"' "$APPLIED/manifests"
-  grep -q '"name":"hammurapi-runner-agent"' "$APPLIED/manifests"
+  called "delete secret hammurapi-runner-agent"
 }
 
 @test "INS-12, R14: секреты не попадают в аргументы команд и во временные файлы" {
   need_linux
+  AGENT_TOKEN=agent-token-KEEP
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 0 ]
   local s
-  for s in client-secret-XYZ webhook-secret-XYZ token-key-XYZ sk-ant-SECRET ghp_pulltokenXYZ "BEGIN PRIVATE KEY"; do
+  for s in client-secret-XYZ webhook-secret-XYZ token-key-XYZ sk-deepseek-SECRET agent-token-KEEP ghp_pulltokenXYZ "BEGIN PRIVATE KEY"; do
     not_called "$s"
     [[ $output != *"$s"* ]] || { echo "в журнале: $s"; return 1; }
   done
@@ -138,15 +140,21 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   [ "$(jq -r '.metadata.namespace' <<<"$s3")" = "hammurapi" ]
 }
 
-@test "ACP_AGENT_ENV: построчные KEY=VALUE — через «;» в hammurapi-secrets и по ключам для runner" {
+@test "PLT.HMR-0004: токен оператора агента создаётся один раз, ключ LLM первого запуска — в hammurapi-secrets" {
   need_linux
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 0 ]
-  local sec agent
+  local sec
   sec=$(grep '"name":"hammurapi-secrets"' "$APPLIED/manifests" | head -1)
-  [ "$(jq -r '.stringData.ACP_AGENT_ENV' <<<"$sec")" = "ANTHROPIC_API_KEY=sk-ant-SECRET;OTHER=1" ]
-  agent=$(grep '"name":"hammurapi-runner-agent"' "$APPLIED/manifests" | head -1)
-  jq -e '.stringData.ANTHROPIC_API_KEY == "sk-ant-SECRET" and .stringData.OTHER == "1" and .metadata.namespace == "hammurapi-runners"' <<<"$agent"
+  jq -e '(.stringData.AGENT_SERVICE_TOKEN | test("^[0-9a-f]{64}$")) and .stringData.BOOTSTRAP_DEEPSEEK_API_KEY == "sk-deepseek-SECRET"
+    and (.stringData | has("ACP_AGENT_ENV") | not)' <<<"$sec"
+  # Повторная выкатка сохраняет токен.
+  : >"$APPLIED/manifests"
+  AGENT_TOKEN=agent-token-KEEP
+  run deploy hammurapi-core v1.8.0 0.4.0
+  [ "$status" -eq 0 ]
+  sec=$(grep '"name":"hammurapi-secrets"' "$APPLIED/manifests" | head -1)
+  [ "$(jq -r '.stringData.AGENT_SERVICE_TOKEN' <<<"$sec")" = "agent-token-KEEP" ]
 }
 
 @test "INS-06: изменён ключ шифрования — код 24, релиз не обновлялся" {

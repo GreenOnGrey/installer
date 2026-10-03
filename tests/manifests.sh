@@ -212,6 +212,20 @@ hammurapi_charts() {
   else
     fail "CH-03: права worker на Job"
   fi
+  # PLT.HMR-0004: оператор агента получает только свой токен; к нему — api, worker
+  # и задачи runner; к серверу рабочей копии задачи — только оператор.
+  if docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Deployment" and .metadata.name == "agent")
+      | .spec.template.spec.containers[0] | (.args == ["agent"]) and (.envFrom == null)
+        and ([.env[] | select(.valueFrom) | .valueFrom.secretKeyRef.key] == ["AGENT_SERVICE_TOKEN"])' >/dev/null &&
+    docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "NetworkPolicy" and .metadata.name == "agent")
+      | .spec.ingress[0].ports == [{"port": 8090}]' >/dev/null &&
+    docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "NetworkPolicy" and .metadata.name == "runner-workspace"
+      and .metadata.namespace == "hammurapi-runners") | .spec.ingress[0].ports == [{"port": 8095}]' >/dev/null &&
+    docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Service" and .metadata.name == "worker-mcp")' >/dev/null; then
+    pass "PLT.HMR-0004: оператор агента, worker-mcp и сетевые политики"
+  else
+    fail "PLT.HMR-0004: оператор агента и сетевые политики"
+  fi
   # Web получает адрес API на своём домене.
   if docs_json "$dir/hammurapi-web.yaml" | jq -e 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[]
       | select(.name == "API_BASE_URL" and .value == "https://api.34-12-5-6.sslip.io")' >/dev/null; then

@@ -201,7 +201,7 @@ require_payload() {
 sync_core_config() {
   step secrets
   require_payload .config.GIT_REPO .config.GITHUB_APP_ID .config.GITHUB_CLIENT_ID .config.BOOTSTRAP_ADMINS \
-    .config.ACP_AGENT_COMMAND .secrets.GITHUB_APP_PRIVATE_KEY .secrets.GITHUB_CLIENT_SECRET \
+    .secrets.GITHUB_APP_PRIVATE_KEY .secrets.GITHUB_CLIENT_SECRET \
     .secrets.WEBHOOK_SECRET .secrets.TOKEN_ENCRYPTION_KEY
   check_key_fingerprint
   app_jwt
@@ -215,23 +215,25 @@ sync_core_config() {
      data: ({GIT_PROVIDER: "github", HAMMURAPI_BOT_LOGIN: $bot} + (.config // {} | with_entries(.value |= tostring)))}' |
     apply_json || fail "$E_SECRETS" "не удалось записать hammurapi-config"
 
-  # Секреты → Secret hammurapi-secrets; ACP_AGENT_ENV построчно → через «;».
-  printf '%s' "$PAYLOAD" | jq -c --arg ns "$NS" '
+  # Токен между api/worker и оператором агента (PLT.HMR-0004): создаётся при
+  # первой выкатке и дальше сохраняется; в jq передаётся через /dev/fd, не аргументом.
+  local agent_token
+  agent_token=$(kc -n "$NS" get secret hammurapi-secrets -o jsonpath='{.data.AGENT_SERVICE_TOKEN}' 2>/dev/null | base64 -d 2>/dev/null || true)
+  [[ -n $agent_token ]] || agent_token=$(openssl rand -hex 32) || fail "$E_SECRETS" "не удалось создать токен оператора агента"
+
+  # Секреты → Secret hammurapi-secrets. Ключ LLM первого запуска
+  # (BOOTSTRAP_DEEPSEEK_API_KEY) core переносит в подключение к LLM.
+  printf '%s' "$PAYLOAD" | jq -c --arg ns "$NS" --rawfile token <(printf '%s' "$agent_token") '
     (.secrets // {}) as $s
     | {apiVersion: "v1", kind: "Secret", type: "Opaque",
        metadata: {name: "hammurapi-secrets", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
-       stringData: ($s | del(.DEPLOY_CALLBACK_SECRET)
-         | .ACP_AGENT_ENV = ((.ACP_AGENT_ENV // "") | split("\n") | map(sub("\r$"; "") | select(length > 0)) | join(";"))
+       stringData: ($s | del(.DEPLOY_CALLBACK_SECRET, .ACP_AGENT_ENV)
+         | .AGENT_SERVICE_TOKEN = $token
          | .GITHUB_APP_PRIVATE_KEY = (.GITHUB_APP_PRIVATE_KEY | gsub("\\\\n"; "\n")))}' |
     apply_json || fail "$E_SECRETS" "не удалось записать hammurapi-secrets"
 
-  # Переменные агента для задач runner (envFrom в Job) — в их namespace.
-  printf '%s' "$PAYLOAD" | jq -c --arg ns "$RUNNERS_NS" '
-    {apiVersion: "v1", kind: "Secret", type: "Opaque",
-     metadata: {name: "hammurapi-runner-agent", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
-     stringData: ((.secrets.ACP_AGENT_ENV // "") | split("\n") | map(sub("\r$"; "") | select(test("^[A-Za-z_][A-Za-z0-9_]*=")))
-       | map(capture("^(?<k>[^=]+)=(?<v>.*)$") | {(.k): .v}) | add // {})}' |
-    apply_json || fail "$E_SECRETS" "не удалось записать hammurapi-runner-agent"
+  # Переменные агента в namespace задач больше не нужны: агент работает в операторе.
+  kc -n "$RUNNERS_NS" delete secret hammurapi-runner-agent --ignore-not-found >/dev/null 2>&1 || true
 
   copy_conn_secrets
   ok "конфигурация и секреты синхронизированы с GitHub"

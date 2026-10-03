@@ -1,6 +1,6 @@
 apiVersion: v2
 name: hammurapi-core
-description: "Hammurapi core (PLT.INFRA-0002): api, worker, migrate, cleaner, права runner на Job"
+description: "Hammurapi core (PLT.INFRA-0002, PLT.HMR-0004): api, worker, оператор агента, migrate, cleaner, права runner на Job"
 type: application
 # Версию задаёт publish-charts.yml из тега charts-vX.Y.Z.
 version: 0.0.0

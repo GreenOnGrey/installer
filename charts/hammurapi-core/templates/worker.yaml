@@ -1,4 +1,5 @@
-# worker: Kafka, движок workflow, сессии агента; создаёт Job задач runner в
+# worker: Kafka, движок workflow, сценарии агента через оператор и MCP задач
+# (:8083, сервис worker-mcp); создаёт Job задач runner в
 # отдельном namespace (исполнитель k8s) — поэтому свой ServiceAccount.
 apiVersion: v1
 kind: ServiceAccount
@@ -60,6 +61,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: ["worker"]
           ports:
+            - { name: mcp, containerPort: 8083 }
             - { name: service, containerPort: 9100 }
           {{- include "core.env" . | nindent 10 }}
           readinessProbe: { httpGet: { path: /readyz, port: service }, periodSeconds: 5 }
@@ -68,3 +70,34 @@ spec:
           {{- include "core.containerSecurity" . | nindent 10 }}
           {{- include "core.volumeMounts" . | nindent 10 }}
       {{- include "core.volumes" . | nindent 6 }}
+---
+# MCP сессий задач: к нему ходят только процессы Pi оператора агента.
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-mcp
+  labels:
+    {{- include "core.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  selector: {{- include "core.selector" (dict "root" . "component" "worker") | nindent 4 }}
+  ports:
+    - { name: mcp, port: 8083, targetPort: mcp }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker
+  labels: {{- include "core.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "core.selector" (dict "root" . "component" "worker") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "core.selector" (dict "root" . "component" "agent") | nindent 14 }}
+      ports: [{ port: 8083 }]
+    # Метрики и пробы.
+    - ports: [{ port: 9100 }]

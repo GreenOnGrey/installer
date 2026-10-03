@@ -8,7 +8,7 @@ publicBaseDomain: ""
 # Секреты и конфигурация создаёт hammurapi-deploy до Helm: чарт получает только
 # ссылки, значения не попадают в историю релизов (R14).
 existingSecrets:
-  config: hammurapi-secrets        # GitHub App, секрет вебхуков, ключ шифрования, окружение агента
+  config: hammurapi-secrets        # GitHub App, секрет вебхуков, ключ шифрования, токен оператора агента
   configMap: hammurapi-config      # несекретная конфигурация из GitHub
   postgres: postgres-conn          # копии секретов стенда из storages
   kafka: kafka-conn
@@ -20,7 +20,15 @@ config: {}
 runners:
   namespace: hammurapi-runners
   maxParallel: 2
-  agentSecret: hammurapi-runner-agent   # переменные агента в namespace задач
+  # Порт сервера рабочей копии задачи: к нему ходит только оператор агента (PLT.HMR-0004).
+  workspacePort: 8095
+
+# Оператор агента (режим agent, PLT.HMR-0004): процессы Pi по сессиям чата и задач.
+agent:
+  maxSessions: 20         # всего процессов Pi
+  maxTaskSessions: 4      # из них — сессий задач runner
+  idleTimeout: 15m        # простой сессии до закрытия
+  workSizeLimit: 2Gi      # каталоги сессий (/work)
 
 ingress:
   className: traefik
@@ -33,6 +41,7 @@ cleaner:
 resources:
   api:       { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
   worker:    { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
+  agent:     { requests: { cpu: 200m, memory: 512Mi }, limits: { cpu: "2", memory: 3Gi } }
   migrate:   { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
   cleaner:   { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
   runnerJob: { requests: { cpu: 500m, memory: 1Gi }, limits: { cpu: "2", memory: 4Gi } }

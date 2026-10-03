@@ -132,7 +132,6 @@ Repository access: selected). В git она не хранится.
 | `HAMMURAPI_GITHUB_APP_ID`, `HAMMURAPI_GITHUB_CLIENT_ID` | GitHub App |
 | `HAMMURAPI_SPEC_REPO` | `GreenOnGrey/hammurapi-spec` |
 | `HAMMURAPI_BOOTSTRAP_ADMINS` | логин владельца стенда — первый глобальный администратор |
-| `HAMMURAPI_AGENT_COMMAND`, `HAMMURAPI_AGENT_ARGS` | запуск агента; в образе core — `claude-agent-acp` |
 | `AUTO_DEPLOY` | `false` — выкатку по тегу ведёт Hammurapi (R23); сборка и сканирование продолжаются |
 
 **Секреты:**
@@ -143,7 +142,7 @@ Repository access: selected). В git она не хранится.
 | `HAMMURAPI_GITHUB_APP_PRIVATE_KEY` | закрытый ключ GitHub App (PEM целиком) |
 | `HAMMURAPI_GITHUB_CLIENT_SECRET`, `HAMMURAPI_WEBHOOK_SECRET` | GitHub App |
 | `HAMMURAPI_TOKEN_ENCRYPTION_KEY` | `openssl rand -base64 32`; менять нельзя без `allow_key_rotation` |
-| `HAMMURAPI_AGENT_ENV` | переменные агента построчно `KEY=VALUE`, например `ANTHROPIC_API_KEY=…` |
+| `HAMMURAPI_BOOTSTRAP_DEEPSEEK_API_KEY` | необязательный: ключ DeepSeek для первого подключения к LLM; дальше подключения и модели — в «Администрирование → Агент» (PLT.HMR-0004) |
 | `HAMMURAPI_GHCR_PULL_TOKEN` | classic PAT с `read:packages`: образы и чарты на машине |
 | `HAMMURAPI_DEPLOY_CALLBACK_SECRET` | секрет вебхука выкатки окружения `production` в Hammurapi (Администрирование → Деплой) |
 
@@ -183,6 +182,14 @@ namespace `hammurapi` и `hammurapi-runners`, секреты конфигура�
 `*-conn` из `storages`, устанавливает чарт (миграции — хуком до `api` и `worker`) и
 настраивает GitHub App: адрес вебхука и секрет, проверка доступа к `hammurapi-spec`. Web до
 core не выкатывается: «сначала выкатите hammurapi-core».
+
+**Агент (PLT.HMR-0004).** Чарт ставит оператор агента `agent` (по процессу Pi на сессию чата
+или задачи, `:8090`), сервис `worker-mcp` (`:8083`, MCP фоновых сценариев) и сетевые политики:
+к оператору — только `api`, `worker` и задачи runner, к серверу рабочей копии задачи (`:8095`) —
+только оператор. Токен `AGENT_SERVICE_TOKEN` между ними `hammurapi-deploy` создаёт при первой
+выкатке и сохраняет в `hammurapi-secrets`. Подключения к LLM, модели, скиллы и MCP-серверы
+настраиваются в «Администрирование → Агент»; секрет `HAMMURAPI_BOOTSTRAP_DEEPSEEK_API_KEY`
+создаёт первое подключение. Старый секрет `hammurapi-runner-agent` удаляется.
 
 **Проверки после выкатки** — с раннера GitHub через публичные домены: `/api/v1/config`,
 подписанный `ping` на `/hooks/v1/git` (202), закрытый `/metrics`, перенаправление HTTP →

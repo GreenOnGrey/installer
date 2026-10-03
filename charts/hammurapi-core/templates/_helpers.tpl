@@ -42,7 +42,12 @@ env:
   - { name: RUNNER_NAMESPACE, value: {{ .Values.runners.namespace | quote }} }
   - { name: RUNNER_IMAGE, value: {{ include "core.image" . | quote }} }
   - { name: RUNNER_MAX_PARALLEL, value: {{ .Values.runners.maxParallel | quote }} }
-  - { name: RUNNER_AGENT_SECRET, value: {{ .Values.runners.agentSecret | quote }} }
+  - { name: RUNNER_WORKSPACE_PORT, value: {{ .Values.runners.workspacePort | quote }} }
+  - { name: AGENT_ADDR, value: "http://agent.{{ .Release.Namespace }}.svc:8090" }
+  - { name: AGENT_RUNNER_URL, value: "http://agent.{{ .Release.Namespace }}.svc:8090" }
+  - { name: AGENT_IDLE_TIMEOUT, value: {{ .Values.agent.idleTimeout | quote }} }
+  - { name: WORKER_MCP_ADDR, value: ":8083" }
+  - { name: WORKER_MCP_URL, value: "http://worker-mcp.{{ .Release.Namespace }}.svc:8083" }
   - { name: RUNNER_CPU, value: {{ .Values.resources.runnerJob.limits.cpu | quote }} }
   - { name: RUNNER_MEMORY, value: {{ .Values.resources.runnerJob.limits.memory | quote }} }
   - { name: DATABASE_URL, valueFrom: { secretKeyRef: { name: {{ .Values.existingSecrets.postgres }}, key: uri } } }
@@ -74,7 +79,7 @@ securityContext:
   capabilities: { drop: [ALL] }
 {{- end }}
 
-{{/* Записываемые каталоги при read-only корне: /tmp и HOME агента. */}}
+{{/* Записываемые каталоги при read-only корне: /tmp и HOME. */}}
 {{- define "core.volumeMounts" -}}
 volumeMounts:
   - { name: tmp, mountPath: /tmp }
