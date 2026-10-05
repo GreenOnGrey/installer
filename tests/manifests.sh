@@ -333,8 +333,10 @@ main() {
     S3_ENDPOINT=https://storage.googleapis.com
     local label="postgres=$POSTGRES_MODE kafka=$KAFKA_MODE s3=$S3_MODE" dir=$OUT/$combo
     printf '\n%s\n' "$label"
-    (render "$dir") >/dev/null 2>&1 || {
-      fail "рендер $label: $(tail -3 "$dir"/helm-*.log 2>/dev/null | tail -3)"
+    # Вывод рендера — в журнал рядом с каталогом комбинации (render очищает каталог):
+    # при ошибке видно, что сломалось, например загрузка внешнего чарта.
+    (render "$dir") >"$OUT/render-$combo.log" 2>&1 || {
+      fail "рендер $label: $(tail -5 "$OUT/render-$combo.log" "$dir"/helm-*.log 2>/dev/null | grep -v '^==>' | grep -v '^$' | tail -5 | tr '\n' ' ')"
       continue
     }
     if ((first)); then
