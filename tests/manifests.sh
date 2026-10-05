@@ -196,11 +196,12 @@ hammurapi_charts() {
     if [[ -n $bad ]]; then fail "CH-04 $c: $(echo "$bad" | tr '\n' ' ')"; else pass "CH-04 $c: запросы, лимиты, пробы, runAsNonRoot"; fi
   done
   # CH-07: Ingress api — только публичные префиксы; служебные порты не публикуются.
+  # /mcp/nabu — MCP для персональных агентов Nabu с их JWT (FTR.HMR.CMN-0006 R7).
   local paths ports
   paths=$(docs_json "$dir/hammurapi-core.yaml" | jq -r 'select(.kind == "Ingress" and .metadata.name == "api") | .spec.rules[].http.paths[].path' | sort | tr '\n' ' ')
   ports=$(docs_json "$dir/hammurapi-core.yaml" | jq -r 'select(.kind == "Ingress") | .spec.rules[].http.paths[].backend.service.port.name' | sort -u | tr '\n' ' ')
-  if [[ $paths == "/admin/api/ /api/ /hooks/ " && $ports == "http " ]]; then
-    pass "CH-07: Ingress api — /api/, /admin/api/, /hooks/ на порт http"
+  if [[ $paths == "/admin/api/ /api/ /hooks/ /mcp/nabu " && $ports == "http " ]]; then
+    pass "CH-07: Ingress api — /api/, /admin/api/, /hooks/, /mcp/nabu на порт http"
   else
     fail "CH-07: пути «$paths», порты «$ports»"
   fi
