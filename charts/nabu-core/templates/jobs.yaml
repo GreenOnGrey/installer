@@ -1,0 +1,77 @@
+# Миграции БД до обновления api и worker. ConfigMap и секреты создаёт
+# nabu-deploy до Helm — хук их видит. Провал хука при --atomic возвращает
+# релиз на прежнюю ревизию.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nabu-migrate
+  labels:
+    {{- include "nabu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "nabu.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- include "nabu.podSecurity" . | nindent 6 }}
+      containers:
+        - name: migrate
+          image: {{ include "nabu.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["migrate"]
+          {{- include "nabu.env" . | nindent 10 }}
+          resources: {{- toYaml .Values.resources.migrate | nindent 12 }}
+          {{- include "nabu.containerSecurity" . | nindent 10 }}
+          {{- include "nabu.volumeMounts" . | nindent 10 }}
+      {{- include "nabu.volumes" . | nindent 6 }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nabu-cleaner
+  labels:
+    {{- include "nabu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cleaner
+spec:
+  schedule: {{ .Values.cleaner.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            {{- include "nabu.labels" . | nindent 12 }}
+            app.kubernetes.io/component: cleaner
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- include "nabu.podSecurity" . | nindent 10 }}
+          containers:
+            - name: cleaner
+              image: {{ include "nabu.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: ["cleaner"]
+              {{- include "nabu.env" . | nindent 14 }}
+              resources: {{- toYaml .Values.resources.cleaner | nindent 16 }}
+              {{- include "nabu.containerSecurity" . | nindent 14 }}
+              {{- include "nabu.volumeMounts" . | nindent 14 }}
+          {{- include "nabu.volumes" . | nindent 10 }}

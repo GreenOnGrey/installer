@@ -1,0 +1,74 @@
+{{- $d := required "publicBaseDomain обязателен" .Values.publicBaseDomain }}
+{{- $web := printf "%s.%s" .Values.hosts.web $d }}
+{{- $api := printf "%s.%s" .Values.hosts.api $d }}
+{{- $tag := required "image.tag обязателен (задаёт выкатка)" .Values.image.tag }}
+{{- define "nabuweb.labels" -}}
+app.kubernetes.io/name: nabu
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: web
+app.kubernetes.io/version: {{ .Values.image.tag | quote }}
+app.kubernetes.io/part-of: nabu
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels: {{- include "nabuweb.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: nabu, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: web }
+  template:
+    metadata:
+      labels: {{- include "nabuweb.labels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: web
+          image: "{{ .Values.image.repository }}:{{ $tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            # config.json → { apiBaseUrl }: один образ для любых доменов.
+            - { name: API_BASE_URL, value: "https://{{ $api }}" }
+          readinessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  labels: {{- include "nabuweb.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: nabu, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: web }
+  ports: [{ name: http, port: 8080, targetPort: http }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web
+  labels: {{- include "nabuweb.labels" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  tls: [{ hosts: ["{{ $web }}"] }]
+  rules:
+    - host: "{{ $web }}"
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: web, port: { name: http } } } }

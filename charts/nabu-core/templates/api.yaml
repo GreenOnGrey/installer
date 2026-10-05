@@ -1,0 +1,55 @@
+{{ include "nabu.deployment" (dict "root" . "name" "api" "ports" (list (dict "name" "http" "port" 8080) (dict "name" "internal" "port" 8081))) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels:
+    {{- include "nabu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector: {{- include "nabu.selector" (dict "root" . "component" "api") | nindent 4 }}
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+---
+# Внутренний API (:8081): встроенный MCP и MCP-прокси для оператора агента,
+# синхронизация файлов для песочниц.
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-internal
+  labels:
+    {{- include "nabu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector: {{- include "nabu.selector" (dict "root" . "component" "api") | nindent 4 }}
+  ports:
+    - { name: internal, port: 8081, targetPort: internal }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api
+  labels:
+    {{- include "nabu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  # Сертификат по умолчанию Traefik (общий сертификат стенда с nabu. и nabu-api.).
+  tls: [{ hosts: [{{ include "nabu.api" . | quote }}] }]
+  rules:
+    - host: {{ include "nabu.api" . | quote }}
+      http:
+        paths:
+          {{- range .Values.ingress.paths }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend: { service: { name: api, port: { name: http } } }
+          {{- end }}
+          {{- range .Values.ingress.relayPaths }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend: { service: { name: relay, port: { name: relay } } }
+          {{- end }}

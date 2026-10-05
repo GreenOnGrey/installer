@@ -20,8 +20,8 @@ env:
   PROD_DIR: /opt/hammurapi-infra
 
 jobs:
-  # Чарты hammurapi-core и hammurapi-web в oci://ghcr.io/<организация>/charts: версия
-  # чартов совпадает с версией стенда (техспека FTR.HMR.INFRA-0002, п. 11).
+  # Чарты hammurapi-core, hammurapi-web, nabu-core и nabu-web в oci://ghcr.io/<организация>/charts:
+  # версия чартов совпадает с версией стенда (техспека FTR.HMR.INFRA-0002, п. 11).
   publish-charts:
     runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
     permissions: { contents: read, packages: write }
@@ -53,7 +53,7 @@ jobs:
           printf '%s' "$GH_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           mkdir -p dist
           echo "## Чарты $VERSION" >>"$GITHUB_STEP_SUMMARY"
-          for chart in hammurapi-core hammurapi-web; do
+          for chart in hammurapi-core hammurapi-web nabu-core nabu-web; do
             # Повторная выкатка (откат) того же тега: версия уже в реестре — не перезаписываем.
             if helm show chart "$repo/$chart" --version "$VERSION" >/dev/null 2>&1; then
               echo "- $repo/$chart:$VERSION — уже опубликован" >>"$GITHUB_STEP_SUMMARY"

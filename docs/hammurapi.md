@@ -159,14 +159,20 @@ workflow приватного `hammurapi-infra` нельзя вызвать из
 ## 4. Релизы и выкатка
 
 1. Тег релиза `vX.Y.Z` в `hammurapi-infra` запускает `deploy-prod.yml`: сначала публикуются
-   чарты `oci://ghcr.io/greenongrey/charts/hammurapi-{core,web}:X.Y.Z` (версия чартов совпадает с
-   версией стенда), затем, только при успехе, тег выкатывается на стенд вместе с
-   `bin/hammurapi-deploy` — на машине скрипт берётся из `/opt/hammurapi-infra/current`. Ручной
+   чарты `oci://ghcr.io/greenongrey/charts/{hammurapi,nabu}-{core,web}:X.Y.Z` (версия чартов
+   совпадает с версией стенда), затем, только при успехе, тег выкатывается на стенд вместе с
+   `bin/hammurapi-deploy` и `bin/nabu-deploy` — на машине скрипты берутся из
+   `/opt/hammurapi-infra/current`. Ручной
    запуск с тегом (повтор или откат) уже опубликованные версии чартов не перезаписывает.
 2. Тег `vX.Y.Z` в `hammurapi`, если менялся `deploy-component.yml`.
 3. В `hammurapi-core` и `hammurapi-web` в `deploy/versions.env` задайте `DEPLOY_WORKFLOW_REF`
    (тег `hammurapi` из п. 2) и `CHART_VERSION` (п. 1), выполните `deploy/sync-ref.sh`.
 4. Тег `vX.Y.Z` в `hammurapi-core`, затем в `hammurapi-web`.
+
+Nabu (`FTR.NAB.CMN-0001`) выкатывается так же: тег `nabu` — только версия `deploy-component.yml`
+(на машину он ничего не кладёт); в `nabu-core` и `nabu-web` в `deploy/versions.env` —
+`DEPLOY_WORKFLOW_REF` (тег `nabu`) и `CHART_VERSION` (версия стенда); теги `nabu-core`, затем
+`nabu-web`. Переменные и секреты — в `nabu/docs/deployment.md`.
 
 | Что | Как |
 |---|---|

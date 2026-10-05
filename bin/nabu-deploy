@@ -1,0 +1,392 @@
+#!/usr/bin/env bash
+# nabu-deploy <nabu-core|nabu-web> <tag> <chart_version> [--allow-key-rotation]
+#
+# Выкатка Nabu на стенд Hammurapi (FTR.NAB.CMN-0001 R29, arch §11, tech §11):
+# тот же minikube, namespace nabu и nabu-sandboxes, общие хранилища стенда с
+# отдельной базой, бакетом и префиксом топиков. Запускается переиспользуемым
+# workflow deploy-component.yml репозитория nabu по SSH на машине стенда, как
+# hammurapi-deploy: оба скрипта лежат в /opt/hammurapi-infra/current/bin и берут
+# функции стенда (kc, hm, журнал, конфигурация) из lib/ этого же релиза.
+#   stdin   JSON с конфигурацией и секретами; читается в память, на диск, в
+#           аргументы команд и журнал не попадает
+#   stdout  журнал; последняя строка — JSON-итог
+#           { status, component, tag, revision, firstInstall, publicBaseDomain, webUrl, apiUrl, … }
+#
+# Коды: 17 уже идёт выкатка; 20 стенд не готов; 21 web без core; 22 namespace;
+# 23 секреты и конфигурация; 24 изменён ключ SECRETS_KEY; 25 релиз Helm; 26 база
+# данных; 27 готовность подов.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+# shellcheck source=../lib/common.sh
+source "$ROOT/lib/common.sh"
+
+readonly E_STAND=20 E_NO_CORE=21 E_NS=22 E_SECRETS=23 E_KEY=24 E_HELM=25 E_DB=26 E_READY=27
+NS=${NABU_NAMESPACE:-nabu}
+SANDBOX_NS=${NABU_SANDBOX_NAMESPACE:-nabu-sandboxes}
+CHART_REPO=${CHART_REPO:-oci://ghcr.io/greenongrey/charts}
+REGISTRY=${REGISTRY:-ghcr.io}
+DEPLOY_LOCK_DIR=${DEPLOY_LOCK_DIR:-/var/lock}
+STATUS_CMD=${STATUS_CMD:-"$ROOT/hammurapi-infra.sh"}
+NS_INGRESS=${NS_INGRESS:-ingress}
+CERT_NAME=${CERT_NAME:-hammurapi-public}
+WEB_HOST=${NABU_WEB_HOST:-nabu}
+API_HOST=${NABU_API_HOST:-nabu-api}
+PG_ROLE=${NABU_PG_ROLE:-nabu}
+PG_DB=${NABU_PG_DB:-nabu}
+S3_BUCKET_NABU=${NABU_S3_BUCKET:-nabu}
+
+COMPONENT="" TAG="" CHART_VERSION="" ALLOW_KEY_ROTATION=0
+FIRST_INSTALL=false BASE_DOMAIN="" REVISION="" DIAG="" PAYLOAD="" HELM_REG="" FAIL_MSG=""
+
+usage() {
+  echo "использование: nabu-deploy <nabu-core|nabu-web> <vX.Y.Z> <версия чарта> [--allow-key-rotation]" >&2
+  exit "$E_USAGE"
+}
+
+fail() {
+  FAIL_MSG=$2
+  die "$1" "$2"
+}
+
+result() {
+  local code=$1 status=success
+  ((code == 0)) || status=failure
+  [[ -n $HELM_REG ]] && rm -f "$HELM_REG"
+  jq -cn --arg s "$status" --arg c "$COMPONENT" --arg t "$TAG" --arg r "$REVISION" \
+    --argjson first "$FIRST_INSTALL" --arg d "$BASE_DOMAIN" --arg chart "$CHART_VERSION" \
+    --argjson code "$code" --arg e "$FAIL_MSG" --arg diag "$DIAG" --arg web "$WEB_HOST" --arg api "$API_HOST" \
+    '{status: $s, component: $c, tag: $t, chartVersion: $chart, revision: $r, firstInstall: $first,
+      publicBaseDomain: $d, code: $code}
+     + (if $d != "" then {webUrl: "https://\($web).\($d)", apiUrl: "https://\($api).\($d)"} else {} end)
+     + (if $s == "failure" then {error: (if $e == "" then "код \($code)" else $e end), diagnostics: $diag} else {} end)'
+}
+
+parse_args() {
+  (($# >= 3)) || usage
+  COMPONENT=$1 TAG=$2 CHART_VERSION=$3
+  shift 3
+  while (($#)); do
+    case $1 in
+      --allow-key-rotation) ALLOW_KEY_ROTATION=1 ;;
+      *) usage ;;
+    esac
+    shift
+  done
+  case $COMPONENT in nabu-core | nabu-web) ;; *) usage ;; esac
+  [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$E_USAGE" "тег «$TAG» не в формате vX.Y.Z"
+  [[ $CHART_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$E_USAGE" "версия чарта «$CHART_VERSION» не в формате X.Y.Z"
+}
+
+acquire_deploy_lock() {
+  exec 8>>"$DEPLOY_LOCK_DIR/nabu-deploy-$COMPONENT.lock"
+  flock -n 8 || fail "$E_LOCKED" "уже выполняется выкатка $COMPONENT на этой машине"
+}
+
+# payload <jq-путь> — значение из JSON stdin (jq читает из pipe, не из аргументов).
+payload() { printf '%s' "$PAYLOAD" | jq -r "$1 // empty"; }
+
+read_payload() {
+  if [[ -t 0 ]]; then
+    PAYLOAD='{}'
+  else
+    PAYLOAD=$(cat)
+    [[ -n $PAYLOAD ]] || PAYLOAD='{}'
+  fi
+  printf '%s' "$PAYLOAD" | jq -e 'type == "object"' >/dev/null 2>&1 || fail "$E_SECRETS" "stdin: ожидается JSON-объект"
+}
+
+apply_json() { kc apply -f - >/dev/null; }
+
+gen_secret() { openssl rand -hex 32; }
+
+# --- 1. Стенд ---
+
+check_stand() {
+  step stand
+  local st cfg=()
+  [[ -f ${HAMMURAPI_INFRA_CONFIG:-} ]] && cfg=(--config "$HAMMURAPI_INFRA_CONFIG")
+  st=$(bash "$STATUS_CMD" status --json --no-color "${cfg[@]}" 2>/dev/null) || true
+  jq -e . >/dev/null 2>&1 <<<"$st" || fail "$E_STAND" "стенд не отвечает: hammurapi-infra.sh status --json"
+  if [[ $(jq -r '.ok' <<<"$st") != true ]]; then
+    fail "$E_STAND" "стенд не готов: $(jq -r '[.checks[] | select(.ok | not) | "\(.name): \(.message)"] | join("; ")' <<<"$st")"
+  fi
+  [[ $(jq -r '.public.enabled' <<<"$st") == true ]] || fail "$E_STAND" "публичный доступ стенда выключен (PUBLIC_ACCESS=true)"
+  BASE_DOMAIN=$(jq -r '.public.baseDomain // empty' <<<"$st")
+  [[ -n $BASE_DOMAIN ]] || fail "$E_STAND" "стенд не сообщил базовый домен"
+  ok "стенд готов, домен $BASE_DOMAIN"
+}
+
+check_order() {
+  if hm status nabu-core -n "$NS" >/dev/null 2>&1; then
+    [[ $COMPONENT == nabu-core ]] && FIRST_INSTALL=false
+  else
+    [[ $COMPONENT == nabu-web ]] && fail "$E_NO_CORE" "сначала выкатите nabu-core"
+    FIRST_INSTALL=true
+  fi
+  if [[ $COMPONENT == nabu-web ]] && ! hm status nabu-web -n "$NS" >/dev/null 2>&1; then
+    FIRST_INSTALL=true
+  fi
+}
+
+# --- 2. Namespace ---
+
+ensure_namespaces() {
+  step namespaces
+  local ns
+  for ns in "$NS" "$SANDBOX_NS"; do
+    kc create namespace "$ns" --dry-run=client -o yaml | kc label --local -f - "app.kubernetes.io/part-of=nabu" -o yaml |
+      apply_stdin || fail "$E_NS" "не удалось создать namespace $ns"
+  done
+}
+
+ghcr_pull() {
+  local token ns
+  token=$(payload .ghcrPullToken)
+  if [[ -z $token ]]; then
+    kc -n "$NS" get secret ghcr-pull >/dev/null 2>&1 || fail "$E_SECRETS" "нет ghcrPullToken и секрета ghcr-pull"
+    token=$(kc -n "$NS" get secret ghcr-pull -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d | jq -r --arg r "$REGISTRY" '.auths[$r].password')
+  fi
+  for ns in "$NS" "$SANDBOX_NS"; do
+    printf '%s' "$token" | jq -Rc --arg ns "$ns" --arg reg "$REGISTRY" '
+      {auths: {($reg): {username: "nabu", password: ., auth: ("nabu:" + . | @base64)}}} as $cfg
+      | {apiVersion: "v1", kind: "Secret", type: "kubernetes.io/dockerconfigjson",
+         metadata: {name: "ghcr-pull", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "nabu-deploy"}},
+         data: {".dockerconfigjson": ($cfg | tojson | @base64)}}' | apply_json ||
+      fail "$E_SECRETS" "не удалось записать ghcr-pull в $ns"
+  done
+}
+
+# --- 3. База, бакет, секреты (tech §11: первая установка) ---
+
+secret_get() { kc -n "$1" get secret "$2" -o "jsonpath={.data.$3}" 2>/dev/null | base64 -d 2>/dev/null || true; }
+
+# ensure_database — роль и база nabu в Postgres стенда. Встроенный Postgres
+# (CloudNativePG): SQL через локальный сокет основного пода от суперпользователя;
+# внешний — от учётной записи владельца из postgres-conn (нужно право CREATEDB).
+# Пароль передаётся только в stdin psql.
+ensure_database() {
+  step database
+  local pw pod sql
+  pw=$(secret_get "$NS" nabu-postgres-conn password)
+  [[ -n $pw ]] || pw=$(openssl rand -hex 24)
+  sql=$(printf "SELECT 'CREATE ROLE %s LOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '%s')\\\\gexec\nALTER ROLE %s WITH LOGIN PASSWORD '%s';\nSELECT 'CREATE DATABASE %s OWNER %s' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '%s')\\\\gexec\n" \
+    "$PG_ROLE" "$PG_ROLE" "$PG_ROLE" "$pw" "$PG_DB" "$PG_ROLE" "$PG_DB")
+  pod=$(kc -n "$NS_STORAGES" get pods -l cnpg.io/instanceRole=primary -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  if [[ -n $pod ]]; then
+    printf '%s' "$sql" | kc -n "$NS_STORAGES" exec -i "$pod" -c postgres -- psql -v ON_ERROR_STOP=1 -q -U postgres -d postgres >/dev/null ||
+      fail "$E_DB" "не удалось создать базу $PG_DB в $NS_STORAGES/$pod"
+  else
+    local uri
+    uri=$(secret_get "$NS_STORAGES" postgres-conn uri)
+    [[ -n $uri ]] || fail "$E_DB" "нет $NS_STORAGES/postgres-conn"
+    # psql во временном поде; адрес владельца и SQL — в stdin.
+    # shellcheck disable=SC2016 # $URI раскрывается в поде
+    { printf '%s\n' "$uri"; printf '%s' "$sql"; } | kc -n "$NS" run "nabu-db-$RANDOM" --rm -i --restart=Never --quiet \
+      --image=postgres:17-alpine --command -- sh -c 'read -r URI; psql -v ON_ERROR_STOP=1 -q "$URI"' >/dev/null ||
+      fail "$E_DB" "не удалось создать базу $PG_DB: у владельца из postgres-conn нужно право CREATEDB"
+  fi
+  local host port sslmode
+  host=$(secret_get "$NS_STORAGES" postgres-conn host)
+  port=$(secret_get "$NS_STORAGES" postgres-conn port)
+  sslmode=$(secret_get "$NS_STORAGES" postgres-conn sslmode)
+  jq -cn --arg ns "$NS" --arg u "$PG_ROLE" --rawfile p <(printf '%s' "$pw") --arg h "$host" --arg port "$port" \
+    --arg db "$PG_DB" --arg ssl "${sslmode:-disable}" '
+    {apiVersion: "v1", kind: "Secret", type: "Opaque",
+     metadata: {name: "nabu-postgres-conn", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "nabu-deploy"}},
+     stringData: {host: $h, port: $port, database: $db, username: $u, password: $p, sslmode: $ssl,
+       uri: "postgresql://\($u):\($p | @uri)@\($h):\($port)/\($db)?sslmode=\($ssl)"}}' | apply_json ||
+    fail "$E_SECRETS" "не удалось записать nabu-postgres-conn"
+  ok "база $PG_DB и пользователь $PG_ROLE"
+}
+
+# copy_storages — kafka-conn как есть; s3-conn с бакетом nabu (бакет создаёт nabu-core при старте).
+copy_storages() {
+  kc -n "$NS_STORAGES" get secret kafka-conn -o json 2>/dev/null | jq -c --arg ns "$NS" '
+    {apiVersion: "v1", kind: "Secret", type: "Opaque",
+     metadata: {name: "kafka-conn", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "nabu-deploy"}}, data: .data}' |
+    apply_json || fail "$E_SECRETS" "не удалось скопировать kafka-conn"
+  kc -n "$NS_STORAGES" get secret s3-conn -o json 2>/dev/null | jq -c --arg ns "$NS" --arg b "$S3_BUCKET_NABU" '
+    (.data.endpoint | @base64d) as $e
+    | {apiVersion: "v1", kind: "Secret", type: "Opaque",
+       metadata: {name: "nabu-s3-conn", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "nabu-deploy"}},
+       data: (.data + {bucket: ($b | @base64),
+         endpoint_host: ($e | sub("^https?://"; "") | sub("/.*$"; "") | @base64),
+         use_ssl: ((if ($e | startswith("https://")) then "true" else "false" end) | @base64)})}' |
+    apply_json || fail "$E_SECRETS" "не удалось записать nabu-s3-conn"
+}
+
+check_key_fingerprint() {
+  local fp saved
+  fp=$(payload .secrets.SECRETS_KEY | sha256sum | awk '{print $1}')
+  saved=$(kc -n "$NS" get configmap nabu-key-fingerprint -o jsonpath='{.data.sha256}' 2>/dev/null || true)
+  if [[ -n $saved && $saved != "$fp" ]]; then
+    ((ALLOW_KEY_ROTATION)) || fail "$E_KEY" "SECRETS_KEY изменён: сохранённые секреты станут нечитаемыми; для намеренной смены — allow_key_rotation"
+    warn "SECRETS_KEY изменён (allow_key_rotation): подключения и доступы нужно задать заново"
+  fi
+  kc -n "$NS" create configmap nabu-key-fingerprint --from-literal="sha256=$fp" --dry-run=client -o yaml | apply_stdin
+}
+
+require_payload() {
+  local missing=() k
+  for k in "$@"; do
+    [[ -n $(payload "$k") ]] || missing+=("${k#.}")
+  done
+  ((${#missing[@]} == 0)) || fail "$E_SECRETS" "в конфигурации нет: ${missing[*]}"
+}
+
+sync_core_config() {
+  step secrets
+  require_payload .config.AUTH_PROVIDER .config.BOOTSTRAP_ADMINS .secrets.SECRETS_KEY
+  case $(payload .config.AUTH_PROVIDER) in
+    github) require_payload .config.GITHUB_CLIENT_ID .secrets.GITHUB_CLIENT_SECRET ;;
+    oidc) require_payload .config.OIDC_ISSUER .config.OIDC_CLIENT_ID .secrets.OIDC_CLIENT_SECRET ;;
+    *) fail "$E_SECRETS" "AUTH_PROVIDER — github или oidc" ;;
+  esac
+  check_key_fingerprint
+
+  printf '%s' "$PAYLOAD" | jq -c --arg ns "$NS" '
+    {apiVersion: "v1", kind: "ConfigMap",
+     metadata: {name: "nabu-config", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "nabu-deploy"}},
+     data: (.config // {} | with_entries(.value |= tostring))}' |
+    apply_json || fail "$E_SECRETS" "не удалось записать nabu-config"
+
+  # Токен оператора агента и секрет вебхука Telegram создаются при первой
+  # выкатке и дальше сохраняются; в jq — через /dev/fd, не аргументом.
+  local agent_token tg_secret
+  agent_token=$(secret_get "$NS" nabu-secrets AGENT_SERVICE_TOKEN)
+  [[ -n $agent_token ]] || agent_token=$(gen_secret)
+  tg_secret=$(secret_get "$NS" nabu-secrets TELEGRAM_WEBHOOK_SECRET)
+  [[ -n $tg_secret ]] || tg_secret=$(gen_secret)
+  printf '%s' "$PAYLOAD" | jq -c --arg ns "$NS" --rawfile token <(printf '%s' "$agent_token") --rawfile tg <(printf '%s' "$tg_secret") '
+    (.secrets // {}) as $s
+    | {apiVersion: "v1", kind: "Secret", type: "Opaque",
+       metadata: {name: "nabu-secrets", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "nabu-deploy"}},
+       stringData: ($s | with_entries(select(.value != null and .value != ""))
+         | .AGENT_SERVICE_TOKEN = $token | .TELEGRAM_WEBHOOK_SECRET = (.TELEGRAM_WEBHOOK_SECRET // $tg))}' |
+    apply_json || fail "$E_SECRETS" "не удалось записать nabu-secrets"
+  copy_storages
+  ok "конфигурация и секреты"
+}
+
+# ensure_certificate — nabu. и nabu-api. в общем сертификате Traefik стенда.
+ensure_certificate() {
+  step certificate
+  local names want missing=()
+  names=$(kc -n "$NS_INGRESS" get certificate "$CERT_NAME" -o json 2>/dev/null | jq -r '.spec.dnsNames[]?') ||
+    fail "$E_STAND" "нет сертификата $NS_INGRESS/$CERT_NAME"
+  for want in "$WEB_HOST.$BASE_DOMAIN" "$API_HOST.$BASE_DOMAIN"; do
+    grep -qxF "$want" <<<"$names" || missing+=("$want")
+  done
+  if ((${#missing[@]} == 0)); then
+    ok "сертификат содержит $WEB_HOST. и $API_HOST."
+    return
+  fi
+  printf '%s\n' "${missing[@]}" | jq -R . | jq -sc '[.[] | {op: "add", path: "/spec/dnsNames/-", value: .}]' |
+    kc -n "$NS_INGRESS" patch certificate "$CERT_NAME" --type json --patch-file /dev/stdin >/dev/null ||
+    fail "$E_STAND" "не удалось добавить ${missing[*]} в сертификат"
+  log "сертификат: добавлены ${missing[*]}, ожидание выпуска"
+  kc -n "$NS_INGRESS" wait "certificate/$CERT_NAME" --for=condition=Ready --timeout=5m >/dev/null 2>&1 ||
+    warn "сертификат ещё не выпущен; проверьте, что *.$BASE_DOMAIN указывает на машину"
+}
+
+# --- 4. Helm ---
+
+helm_login() {
+  local token
+  token=$(payload .ghcrPullToken)
+  [[ -n $token ]] || token=$(kc -n "$NS" get secret ghcr-pull -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null |
+    base64 -d | jq -r --arg r "$REGISTRY" '.auths[$r].password // empty')
+  [[ -n $token ]] || fail "$E_HELM" "нет токена чтения реестра для чарта"
+  HELM_REG=$(mktemp -p /dev/shm nabu-helm-XXXXXX.json 2>/dev/null || mktemp)
+  export HELM_REGISTRY_CONFIG=$HELM_REG
+  printf '%s' "$token" | helm registry login "$REGISTRY" --username nabu --password-stdin >/dev/null 2>&1 ||
+    fail "$E_HELM" "не удалось войти в $REGISTRY"
+}
+
+diagnostics() {
+  local dir ts logs
+  ts=$(date -u +%Y%m%dT%H%M%SZ)
+  dir=$(mktemp -d)
+  kc -n "$NS" get events --sort-by=.lastTimestamp >"$dir/events.txt" 2>&1 || true
+  kc -n "$NS" get pods -o wide >"$dir/pods.txt" 2>&1 || true
+  kc -n "$NS" describe pods >"$dir/describe-pods.txt" 2>&1 || true
+  hm history "$COMPONENT" -n "$NS" >"$dir/helm-history.txt" 2>&1 || true
+  kc -n "$NS" logs job/nabu-migrate --tail=500 >"$dir/migrate.log" 2>&1 || true
+  local d
+  for d in api worker agent relay web; do
+    kc -n "$NS" logs "deploy/$d" --all-containers --tail=300 >"$dir/$d.log" 2>&1 || true
+  done
+  logs=${DEPLOY_LOGS:-/opt/hammurapi-infra/logs}
+  [[ -d $logs && -w $logs ]] || logs=$ROOT/logs
+  mkdir -p "$logs"
+  DIAG=$logs/deploy-$COMPONENT-$ts.tar.gz
+  tar -czf "$DIAG" -C "$dir" . && rm -rf "$dir"
+}
+
+helm_deploy() {
+  step helm
+  helm_login
+  local image args
+  image=$(payload .image)
+  args=(upgrade --install "$COMPONENT" "$CHART_REPO/$COMPONENT" --version "$CHART_VERSION"
+    -n "$NS" --set-string "image.tag=$TAG" --set-string "publicBaseDomain=$BASE_DOMAIN"
+    --set-string "hosts.web=$WEB_HOST" --set-string "hosts.api=$API_HOST"
+    --atomic --wait --timeout "${HELM_TIMEOUT:-10m}")
+  [[ -n $image ]] && args+=(--set-string "image.repository=$image")
+  if [[ $COMPONENT == nabu-core ]]; then
+    local pi
+    pi=$(payload .config.PI_VERSION)
+    [[ -n $pi ]] && args+=(--set-string "piVersion=$pi")
+  fi
+  log "helm upgrade --install $COMPONENT $TAG (чарт $CHART_VERSION)"
+  if ! hm "${args[@]}" >&2; then
+    diagnostics
+    fail "$E_HELM" "релиз $COMPONENT $TAG не развёрнут, Helm вернул прежнюю ревизию; диагностика: $DIAG"
+  fi
+  REVISION=$(hm status "$COMPONENT" -n "$NS" -o json 2>/dev/null | jq -r '.version // empty')
+}
+
+wait_ready() {
+  step ready
+  local d deploys=(web)
+  [[ $COMPONENT == nabu-core ]] && deploys=(api worker agent relay)
+  for d in "${deploys[@]}"; do
+    if ! kc -n "$NS" rollout status "deploy/$d" --timeout=5m >/dev/null 2>&1; then
+      diagnostics
+      fail "$E_READY" "$d не готов; диагностика: $DIAG"
+    fi
+  done
+  ok "$COMPONENT $TAG готов (ревизия $REVISION)"
+}
+
+on_exit() {
+  local rc=$?
+  result "$rc"
+  exit "$rc"
+}
+
+main() {
+  trap on_exit EXIT
+  # shellcheck disable=SC2034 # COLOR читает setup_color стенда
+  COLOR=0
+  setup_color
+  parse_args "$@"
+  HAMMURAPI_INFRA_CONFIG=${HAMMURAPI_INFRA_CONFIG:-/opt/hammurapi-infra/local.env}
+  load_config "$ROOT" "$HAMMURAPI_INFRA_CONFIG"
+  acquire_deploy_lock
+  read_payload
+  check_stand
+  check_order
+  ensure_namespaces
+  ghcr_pull
+  if [[ $COMPONENT == nabu-core ]]; then
+    sync_core_config
+    ensure_database
+    ensure_certificate
+  fi
+  helm_deploy
+  wait_ready
+}
+
+main "$@"

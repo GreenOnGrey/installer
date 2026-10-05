@@ -1,0 +1,12 @@
+# Образ web; тег задаёт выкатка (nabu-deploy).
+image: { repository: ghcr.io/greenongrey/nabu-web, tag: "", pullPolicy: IfNotPresent }
+imagePullSecrets: [{ name: ghcr-pull }]
+
+# Базовый домен: сайт на nabu.<домен>, API — на nabu-api.<домен>. Обязателен.
+publicBaseDomain: ""
+hosts: { web: nabu, api: nabu-api }
+
+ingress:
+  className: traefik
+
+resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { cpu: 200m, memory: 128Mi } }

@@ -1,0 +1,66 @@
+# Оператор агента (режим agent, FTR.NAB.CMN-0001 arch §4): процессы Pi по
+# сессиям персональных агентов, заданий и служебных агентов. Под получает
+# только токен оператора: ни хранилищ, ни других секретов Nabu.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent
+  labels:
+    {{- include "nabu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  replicas: {{ .Values.replicas.agent }}
+  selector:
+    matchLabels: {{- include "nabu.selector" (dict "root" . "component" "agent") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "nabu.labels" . | nindent 8 }}
+        app.kubernetes.io/component: agent
+      annotations:
+        {{- toYaml .Values.podAnnotations | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      {{- include "nabu.podSecurity" . | nindent 6 }}
+      containers:
+        - name: agent
+          image: {{ include "nabu.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["agent"]
+          ports:
+            - { name: agent, containerPort: 8090 }
+            - { name: service, containerPort: 9100 }
+          env:
+            - { name: AGENT_SERVICE_TOKEN, valueFrom: { secretKeyRef: { name: {{ .Values.existingSecrets.config }}, key: AGENT_SERVICE_TOKEN } } }
+            - { name: AGENT_MAX_SESSIONS, value: {{ .Values.agent.maxSessions | quote }} }
+            - { name: AGENT_MAX_RUNS, value: {{ .Values.agent.maxRuns | quote }} }
+            - { name: AGENT_IDLE_TIMEOUT, value: {{ .Values.agent.idleTimeout | quote }} }
+            - { name: AGENT_WORKDIR, value: /work }
+          readinessProbe: { httpGet: { path: /readyz, port: service }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: service }, initialDelaySeconds: 20, periodSeconds: 10 }
+          resources: {{- toYaml .Values.resources.agent | nindent 12 }}
+          {{- include "nabu.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: home, mountPath: /home/node }
+            - { name: work, mountPath: /work }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        - { name: home, emptyDir: {} }
+        - { name: work, emptyDir: { sizeLimit: {{ .Values.agent.workSizeLimit }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent
+  labels:
+    {{- include "nabu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  type: ClusterIP
+  selector: {{- include "nabu.selector" (dict "root" . "component" "agent") | nindent 4 }}
+  ports:
+    - { name: agent, port: 8090, targetPort: agent }

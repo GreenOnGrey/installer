@@ -1,0 +1,7 @@
+apiVersion: v2
+name: nabu-core
+description: "Nabu core (FTR.NAB.CMN-0001): api, worker, оператор агента, relay, migrate, cleaner, права worker на песочницы"
+type: application
+# Версию задаёт deploy-prod.yml hammurapi-infra из тега стенда vX.Y.Z (как у чартов Hammurapi).
+version: 0.0.0
+appVersion: "0.0.0"

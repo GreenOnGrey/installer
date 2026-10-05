@@ -1,0 +1,1 @@
+{{ include "nabu.deployment" (dict "root" . "name" "worker" "ports" (list) "serviceAccount" (ternary "nabu-worker" "" .Values.sandboxes.enabled) "grace" 60) }}

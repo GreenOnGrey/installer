@@ -1,0 +1,59 @@
+# Образ core вместе с агентом Pi; тег задаёт выкатка (nabu-deploy).
+image: { repository: ghcr.io/greenongrey/nabu-core, tag: "", pullPolicy: IfNotPresent }
+imagePullSecrets: [{ name: ghcr-pull }]
+
+# Базовый домен: сайт nabu.<домен>, API nabu-api.<домен>. Обязателен.
+publicBaseDomain: ""
+# Поддомены сайта и API (FTR.NAB.CMN-0001 arch §11).
+hosts: { web: nabu, api: nabu-api }
+
+# Секреты и конфигурация создаёт nabu-deploy до Helm: чарт получает только
+# ссылки, значения не попадают в историю релизов.
+existingSecrets:
+  config: nabu-secrets          # SECRETS_KEY, токен оператора, OAuth GitHub, Telegram, ключ LLM первого запуска
+  configMap: nabu-config        # несекретная конфигурация из GitHub
+  postgres: nabu-postgres-conn  # база nabu и пользователь nabu
+  kafka: kafka-conn             # копия секрета стенда
+  s3: nabu-s3-conn              # бакет nabu
+
+# Дополнительные несекретные переменные окружения.
+config: {}
+
+agent:
+  maxSessions: 100        # процессов Pi на под (AGENT_MAX_SESSIONS)
+  maxRuns: 10             # из них — запусков служебных агентов (AGENT_MAX_RUNS)
+  idleTimeout: 15m        # простой сессии до закрытия
+  workSizeLimit: 4Gi      # каталоги сессий (/work)
+
+# Личные песочницы (FTR.NAB.CMN-0001 arch §5.2).
+sandboxes:
+  enabled: true
+  namespace: nabu-sandboxes
+  idleTimeout: 30m
+  cpu: "1"
+  memory: 1Gi
+  spaceQuota: 5GB
+  # CIDR, куда песочницам разрешены исходящие соединения (реестры пакетов и т. п.).
+  egressAllow: []
+
+ingress:
+  className: traefik
+  # Публичные префиксы API; служебный :9100 и внутренний :8081 не маршрутизируются.
+  paths: [/api/, /admin/api/, /client/v1/, /hooks/, /auth/, /oauth/, /.well-known/]
+  # Канал рабочих пространств (wss) — в relay.
+  relayPaths: [/v1/workspaces/]
+
+cleaner:
+  schedule: "30 3 * * *"
+
+replicas: { api: 1, worker: 1, agent: 1, relay: 1 }
+
+resources:
+  api:     { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
+  worker:  { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 768Mi } }
+  agent:   { requests: { cpu: 200m, memory: 512Mi }, limits: { cpu: "2", memory: 3Gi } }
+  relay:   { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
+  migrate: { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
+  cleaner: { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
+
+podAnnotations: { prometheus.io/scrape: "true", prometheus.io/port: "9100" }

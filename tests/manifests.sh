@@ -169,6 +169,41 @@ kubeconform_file() {
   fi
 }
 
+# nabu_charts — чарты Nabu на том же стенде (FTR.NAB.CMN-0001 arch §11).
+nabu_charts() {
+  printf '\nчарты Nabu\n'
+  local dir=$OUT/nabu c f bad
+  mkdir -p "$dir"
+  for c in nabu-core nabu-web; do
+    f=$dir/$c.yaml
+    if ! helm lint "$ROOT/charts/$c" --set image.tag=v1.0.0 --set publicBaseDomain=34-12-5-6.sslip.io >/dev/null 2>&1 ||
+      ! helm template "$c" "$ROOT/charts/$c" -n nabu --kube-version "$KUBE_VERSION" \
+        --set image.tag=v1.0.0 --set publicBaseDomain=34-12-5-6.sslip.io >"$f" 2>&1; then
+      fail "QUAL-02 $c: helm lint/template"
+      continue
+    fi
+    kubeconform_file "$f" "$c"
+    bad=$(docs_json "$f" | jq -r '
+      select(.kind | IN("Deployment", "Job", "CronJob"))
+      | .kind as $k
+      | (if $k == "CronJob" then .spec.jobTemplate.spec.template.spec else .spec.template.spec end) as $s
+      | "\($k)/\(.metadata.name)" as $o
+      | $s.containers[]
+      | [ (if (.resources.requests.cpu // "") == "" or (.resources.limits.memory // "") == "" then "ресурсы" else empty end),
+          (if ((.securityContext.runAsNonRoot // $s.securityContext.runAsNonRoot // false) | not) then "runAsNonRoot" else empty end) ]
+      | select(length > 0) | "\($o): \(join(", "))"')
+    if [[ -n $bad ]]; then fail "RES-01 $c: $(echo "$bad" | tr '\n' ' ')"; else pass "RES-01 $c: запросы, лимиты, runAsNonRoot"; fi
+  done
+  # Хосты nabu. и nabu-api. того же домена; API без служебных портов.
+  local hosts
+  hosts=$(docs_json "$dir"/nabu-*.yaml | jq -r 'select(.kind == "Ingress") | .spec.rules[].host' | sort -u | tr '\n' ' ')
+  if [[ $hosts == "nabu-api.34-12-5-6.sslip.io nabu.34-12-5-6.sslip.io " ]]; then
+    pass "R29: Ingress nabu.<домен> и nabu-api.<домен>"
+  else
+    fail "R29: хосты Nabu «$hosts»"
+  fi
+}
+
 hammurapi_charts() {
   printf '\nчарты Hammurapi\n'
   local dir=$OUT/hammurapi c f bad
@@ -341,6 +376,7 @@ main() {
     helm lint "$OUT/iii/work/hammurapi-dashboards" >/dev/null; then pass "QUAL-02: helm lint локальных чартов"; else fail "QUAL-02: helm lint"; fi
 
   hammurapi_charts
+  nabu_charts
   public_access_charts
 
   if ((FAILURES)); then
