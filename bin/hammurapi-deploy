@@ -51,8 +51,10 @@ result() {
   jq -cn --arg s "$status" --arg c "$COMPONENT" --arg t "$TAG" --arg r "$REVISION" \
     --argjson first "$FIRST_INSTALL" --arg d "$BASE_DOMAIN" --arg chart "$CHART_VERSION" \
     --argjson code "$code" --arg e "$FAIL_MSG" --arg diag "$DIAG" \
+    --arg web "${HAMMURAPI_WEB_HOST:-hammurapi}" --arg api "${HAMMURAPI_API_HOST:-hammurapi-api}" \
     '{status: $s, component: $c, tag: $t, chartVersion: $chart, revision: $r, firstInstall: $first,
       publicBaseDomain: $d, code: $code}
+     + (if $d != "" then {webUrl: "https://\($web).\($d)", apiUrl: "https://\($api).\($d)"} else {} end)
      + (if $s == "failure" then {error: (if $e == "" then "код \($code)" else $e end), diagnostics: $diag} else {} end)'
 }
 
@@ -269,7 +271,7 @@ configure_app() {
   step github-app
   local repo inst perms url state
   repo=$(payload .config.GIT_REPO)
-  url="https://api.$BASE_DOMAIN/hooks/v1/git"
+  url="https://${HAMMURAPI_API_HOST:-hammurapi-api}.$BASE_DOMAIN/hooks/v1/git"
   state=$(kc -n "$NS" get configmap hammurapi-deploy-state -o jsonpath='{.data.webhookUrl}' 2>/dev/null || true)
   if [[ $FIRST_INSTALL != true && $state == "$url" ]]; then
     debug "адрес вебхука GitHub App не менялся"
@@ -333,8 +335,11 @@ helm_deploy() {
   image=$(payload .image)
   local args=(upgrade --install "$COMPONENT" "$CHART_REPO/$COMPONENT" --version "$CHART_VERSION"
     -n "$NS" --set-string "image.tag=$TAG" --set-string "publicBaseDomain=$BASE_DOMAIN"
+    --set-string "hosts.web=${HAMMURAPI_WEB_HOST:-hammurapi}" --set-string "hosts.api=${HAMMURAPI_API_HOST:-hammurapi-api}"
     --atomic --wait --timeout "${HELM_TIMEOUT:-10m}")
   [[ -n $image ]] && args+=(--set-string "image.repository=$image")
+  # После переноса настроек агента в Nabu оператор агента не нужен (FTR.HMR.CMN-0006 R10).
+  [[ $COMPONENT == hammurapi-core && $(printf '%s' "$PAYLOAD" | jq -r '.agentOperator') == false ]] && args+=(--set "agent.enabled=false")
   log "helm upgrade --install $COMPONENT $TAG (чарт $CHART_VERSION)"
   if ! hm "${args[@]}" >&2; then
     diagnostics

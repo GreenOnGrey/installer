@@ -77,9 +77,9 @@ metadata:
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   # Сертификат по умолчанию Traefik (hammurapi-public) — без собственного секрета.
-  tls: [{ hosts: ["api.{{ include "core.domain" . }}"] }]
+  tls: [{ hosts: [{{ include "core.apiHost" . | quote }}] }]
   rules:
-    - host: "api.{{ include "core.domain" . }}"
+    - host: {{ include "core.apiHost" . | quote }}
       http:
         paths:
           {{- range .Values.ingress.paths }}

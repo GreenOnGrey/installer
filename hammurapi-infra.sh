@@ -158,7 +158,7 @@ EOF
     cat <<EOF
 
 Публичный доступ (сертификат ${ACME_ISSUER:-letsencrypt}):
-  https://grafana.$PUBLIC_DOMAIN   https://web.$PUBLIC_DOMAIN   https://api.$PUBLIC_DOMAIN
+  https://grafana.$PUBLIC_DOMAIN   https://${HAMMURAPI_WEB_HOST:-hammurapi}.$PUBLIC_DOMAIN   https://${HAMMURAPI_API_HOST:-hammurapi-api}.$PUBLIC_DOMAIN
   порты 80/443 машины → Traefik $LB_IP; откройте их в межсетевом экране облака
 EOF
   fi

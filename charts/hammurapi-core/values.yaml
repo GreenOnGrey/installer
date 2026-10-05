@@ -2,8 +2,10 @@
 image: { repository: ghcr.io/greenongrey/hammurapi-core, tag: "", pullPolicy: IfNotPresent }
 imagePullSecrets: [{ name: ghcr-pull }]
 
-# Базовый домен: web.<домен>, api.<домен>. Обязателен.
+# Базовый домен: сайт hammurapi.<домен>, API hammurapi-api.<домен>. Обязателен.
 publicBaseDomain: ""
+# Поддомены сайта и API: на одном стенде с Nabu (nabu., nabu-api.).
+hosts: { web: hammurapi, api: hammurapi-api }
 
 # Секреты и конфигурация создаёт hammurapi-deploy до Helm: чарт получает только
 # ссылки, значения не попадают в историю релизов (R14).
@@ -24,16 +26,24 @@ runners:
   workspacePort: 8095
 
 # Оператор агента (режим agent, FTR.HMR.CMN-0004): процессы Pi по сессиям чата и задач.
+# После переноса настроек агента в Nabu (FTR.HMR.CMN-0006 R10) — enabled: false.
 agent:
+  enabled: true
   maxSessions: 20         # всего процессов Pi
   maxTaskSessions: 4      # из них — сессий задач runner
   idleTimeout: 15m        # простой сессии до закрытия
   workSizeLimit: 2Gi      # каталоги сессий (/work)
 
+# Nabu (FTR.HMR.CMN-0006): служебные агенты Nabu вызывают MCP воркера
+# (worker-mcp:8083) и внутренний /mcp api (api-internal:8081) из своего namespace.
+nabu:
+  namespace: nabu
+
 ingress:
   className: traefik
   # Только публичные префиксы; служебные :9100 и внутренний :8081 не маршрутизируются.
-  paths: [/api/, /admin/api/, /hooks/]
+  # /mcp/nabu — MCP для персональных агентов Nabu (JWT Nabu, FTR.HMR.CMN-0006 R7).
+  paths: [/api/, /admin/api/, /hooks/, /mcp/nabu]
 
 cleaner:
   schedule: "0 3 * * *"

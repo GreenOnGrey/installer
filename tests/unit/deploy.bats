@@ -104,6 +104,9 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 0 ]
   last_json | jq -e '.status == "success" and .firstInstall == true and .publicBaseDomain == "34-12-5-6.sslip.io" and .revision == "3"'
+  # Поддомены Hammurapi рядом с Nabu: hammurapi. и hammurapi-api.
+  last_json | jq -e '.webUrl == "https://hammurapi.34-12-5-6.sslip.io" and .apiUrl == "https://hammurapi-api.34-12-5-6.sslip.io"'
+  called "hosts.api=hammurapi-api"
   called "upgrade --install hammurapi-core oci://ghcr.io/greenongrey/charts/hammurapi-core --version 0.4.0"
   called "image.tag=v1.8.0"
   called "publicBaseDomain=34-12-5-6.sslip.io"

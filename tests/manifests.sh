@@ -228,8 +228,8 @@ hammurapi_charts() {
   fi
   # Web получает адрес API на своём домене.
   if docs_json "$dir/hammurapi-web.yaml" | jq -e 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[]
-      | select(.name == "API_BASE_URL" and .value == "https://api.34-12-5-6.sslip.io")' >/dev/null; then
-    pass "R17: web — API_BASE_URL https://api.<домен>"
+      | select(.name == "API_BASE_URL" and .value == "https://hammurapi-api.34-12-5-6.sslip.io")' >/dev/null; then
+    pass "R17: web — API_BASE_URL https://hammurapi-api.<домен>"
   else
     fail "R17: web без API_BASE_URL"
   fi

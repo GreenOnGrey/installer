@@ -179,10 +179,14 @@ spec:
   secretName: hammurapi-public
   issuerRef: { kind: ClusterIssuer, name: ${ACME_ISSUER:-letsencrypt} }
   dnsNames:
-    - web.$PUBLIC_DOMAIN
-    - api.$PUBLIC_DOMAIN
+    - ${HAMMURAPI_WEB_HOST:-hammurapi}.$PUBLIC_DOMAIN
+    - ${HAMMURAPI_API_HOST:-hammurapi-api}.$PUBLIC_DOMAIN
     - grafana.$PUBLIC_DOMAIN
 EOF
+  local h
+  for h in ${PUBLIC_EXTRA_HOSTS:-}; do
+    printf '    - %s.%s\n' "$h" "$PUBLIC_DOMAIN"
+  done
 }
 
 public_state_manifest() {
@@ -250,13 +254,13 @@ deploy_public() {
 
   public_certificate | apply_stdin
   public_state_manifest | apply_stdin
-  log "сертификат для web., api., grafana.$PUBLIC_DOMAIN (${ACME_ISSUER:-letsencrypt})"
+  log "сертификат для ${HAMMURAPI_WEB_HOST:-hammurapi}., ${HAMMURAPI_API_HOST:-hammurapi-api}., grafana.$PUBLIC_DOMAIN (${ACME_ISSUER:-letsencrypt})"
   if ! kc -n "$NS_INGRESS" wait certificate/hammurapi-public --for=condition=Ready --timeout=5m >/dev/null 2>&1; then
     kc -n "$NS_INGRESS" describe certificate hammurapi-public >"$RUN_DIR/certificate.txt" 2>&1 || true
     kc get challenges -A -o wide >>"$RUN_DIR/certificate.txt" 2>&1 || true
     die "$E_DEPLOY" "сертификат не выпущен за 5 минут: проверьте, что порты 80/443 машины открыты снаружи, а *.$PUBLIC_DOMAIN указывает на $PUBLIC_IP_RESOLVED (см. $RUN_DIR/certificate.txt)"
   fi
-  ok "публичный доступ: https://{web,api,grafana}.$PUBLIC_DOMAIN"
+  ok "публичный доступ: https://{${HAMMURAPI_WEB_HOST:-hammurapi},${HAMMURAPI_API_HOST:-hammurapi-api},grafana}.$PUBLIC_DOMAIN"
 }
 
 # public_curl <хост> <схема> [аргументы curl…] — запрос к Traefik с машины
@@ -287,6 +291,6 @@ check_public() {
   elif [[ ! $redirect =~ ^30[178]\ https:// ]]; then
     record public fail "http://$host не перенаправляет на HTTPS: «${redirect:-нет ответа}»"
   else
-    record public ok "https://{web,api,grafana}.$PUBLIC_DOMAIN через $LB_IP, HTTP → HTTPS"
+    record public ok "https://{${HAMMURAPI_WEB_HOST:-hammurapi},${HAMMURAPI_API_HOST:-hammurapi-api},grafana}.$PUBLIC_DOMAIN через $LB_IP, HTTP → HTTPS"
   fi
 }

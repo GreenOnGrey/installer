@@ -22,6 +22,14 @@ app.kubernetes.io/component: {{ .component }}
 {{ required "publicBaseDomain обязателен" .Values.publicBaseDomain }}
 {{- end }}
 
+{{- define "core.webHost" -}}
+{{ printf "%s.%s" .Values.hosts.web (include "core.domain" .) }}
+{{- end }}
+
+{{- define "core.apiHost" -}}
+{{ printf "%s.%s" .Values.hosts.api (include "core.domain" .) }}
+{{- end }}
+
 {{/* Окружение всех режимов: конфигурация из GitHub, публичные адреса, хранилища. */}}
 {{- define "core.env" -}}
 {{- $d := include "core.domain" . -}}
@@ -29,10 +37,10 @@ envFrom:
   - configMapRef: { name: {{ .Values.existingSecrets.configMap }} }
   - secretRef: { name: {{ .Values.existingSecrets.config }} }
 env:
-  - { name: PUBLIC_URL, value: "https://web.{{ $d }}" }
-  - { name: PUBLIC_WEB_URL, value: "https://web.{{ $d }}" }
-  - { name: PUBLIC_API_URL, value: "https://api.{{ $d }}" }
-  - { name: CORS_ALLOWED_ORIGINS, value: "https://web.{{ $d }}" }
+  - { name: PUBLIC_URL, value: "https://{{ include "core.webHost" . }}" }
+  - { name: PUBLIC_WEB_URL, value: "https://{{ include "core.webHost" . }}" }
+  - { name: PUBLIC_API_URL, value: "https://{{ include "core.apiHost" . }}" }
+  - { name: CORS_ALLOWED_ORIGINS, value: "https://{{ include "core.webHost" . }}" }
   - { name: COOKIE_DOMAIN, value: {{ $d | quote }} }
   - { name: HTTP_ADDR, value: ":8080" }
   - { name: SERVICE_ADDR, value: ":9100" }
@@ -43,6 +51,10 @@ env:
   - { name: RUNNER_IMAGE, value: {{ include "core.image" . | quote }} }
   - { name: RUNNER_MAX_PARALLEL, value: {{ .Values.runners.maxParallel | quote }} }
   - { name: RUNNER_WORKSPACE_PORT, value: {{ .Values.runners.workspacePort | quote }} }
+  {{- if not .Values.agent.enabled }}
+  # Без оператора агента (FTR.HMR.CMN-0006 R10): встроенный агент выключен.
+  - { name: AGENT_SERVICE_TOKEN, value: "" }
+  {{- end }}
   - { name: AGENT_ADDR, value: "http://agent.{{ .Release.Namespace }}.svc:8090" }
   - { name: AGENT_RUNNER_URL, value: "http://agent.{{ .Release.Namespace }}.svc:8090" }
   - { name: AGENT_IDLE_TIMEOUT, value: {{ .Values.agent.idleTimeout | quote }} }

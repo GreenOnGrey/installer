@@ -10,9 +10,10 @@ HTTPS, а `hammurapi-core` и `hammurapi-web` выпускаются и выка
   → deploy-component.yml (hammurapi) → hammurapi-deploy на машине → проверки по доменам
 
 браузер, GitHub ──HTTPS──▶ :80/:443 машины ──iptables──▶ MetalLB ─▶ Traefik
-  web.<домен>     → web
-  api.<домен>     → api: /api/, /admin/api/, /hooks/
-  grafana.<домен> → Grafana (вход через GitHub для участников организации)
+  hammurapi.<домен>     → web
+  hammurapi-api.<домен> → api: /api/, /admin/api/, /hooks/, /mcp/nabu
+  nabu.<домен>          → Nabu web,  nabu-api.<домен> → Nabu api и relay (репозиторий nabu)
+  grafana.<домен>       → Grafana (вход через GitHub для участников организации)
 ```
 
 ## 1. Публичный доступ стенда
@@ -60,6 +61,8 @@ gcloud compute instances add-tags hammurapi --zone "$ZONE" --tags hammurapi-publ
 | `ACME_ISSUER` | `letsencrypt` (по умолчанию) или `letsencrypt-staging` — для проб |
 | `PUBLIC_BASE_DOMAIN` | пусто — `<внешний IP с дефисами>.sslip.io` |
 | `PUBLIC_IP` | пусто — определяется автоматически |
+| `HAMMURAPI_WEB_HOST`, `HAMMURAPI_API_HOST` | `hammurapi`, `hammurapi-api` — поддомены сайта и API Hammurapi (`hammurapi.<домен>`, `hammurapi-api.<домен>`); выкатка передаёт их в чарты |
+| `PUBLIC_EXTRA_HOSTS` | `nabu nabu-api` — поддомены Nabu на том же стенде в общем сертификате (FTR.NAB.CMN-0001) |
 
 Ручной `up` на машине этих значений не получает и берёт их из `local.env`. Если их там нет,
 такой `up` пропустит шаг `public`; уже развёрнутые Traefik и сертификат останутся.
@@ -105,10 +108,10 @@ SSH-туннель к Grafana из `FTR.HMR.INFRA-0001` остаётся рез�
 1. Создайте репозиторий спецификаций, например `GreenOnGrey/hammurapi-spec`, и скопируйте в
    него `rules/` из репозитория `hammurapi`.
 2. Organization settings → Developer settings → GitHub Apps → New GitHub App:
-   - Callback URL: `https://api.<базовый домен>/api/v1/auth/callback`;
+   - Callback URL: `https://hammurapi-api.<базовый домен>/api/v1/auth/callback`;
    - Expire user authorization tokens — включено;
    - Webhook — включён, адрес любой: выкатка core сама пропишет
-     `https://api.<домен>/hooks/v1/git` и секрет;
+     `https://hammurapi-api.<домен>/hooks/v1/git` и секрет;
    - Repository permissions: Contents — Read and write, Pull requests — Read and write,
      Issues — Read and write, Metadata — Read, Actions — Read and write;
    - Subscribe to events: Push, Pull request, Pull request review, Pull request review comment,

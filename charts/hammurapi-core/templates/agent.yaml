@@ -1,3 +1,4 @@
+{{- if .Values.agent.enabled }}
 # Оператор агента (FTR.HMR.CMN-0004): по процессу Pi на сессию чата или задачи.
 # Получает только свой токен и настройки: ключи LLM и MCP приходят в запросах
 # api и worker на открытие сессии, хранилища и GitHub ему не нужны.
@@ -111,3 +112,4 @@ spec:
           podSelector:
             matchLabels: {{- include "core.selector" (dict "root" . "component" "agent") | nindent 14 }}
       ports: [{ port: {{ .Values.runners.workspacePort }} }]
+{{- end }}

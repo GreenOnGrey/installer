@@ -2,8 +2,10 @@
 image: { repository: ghcr.io/greenongrey/hammurapi-web, tag: "", pullPolicy: IfNotPresent }
 imagePullSecrets: [{ name: ghcr-pull }]
 
-# Базовый домен: SPA на web.<домен>, API — на api.<домен>. Обязателен.
+# Базовый домен: SPA на hammurapi.<домен>, API — на hammurapi-api.<домен>. Обязателен.
 publicBaseDomain: ""
+# Поддомены сайта и API (те же, что в чарте hammurapi-core).
+hosts: { web: hammurapi, api: hammurapi-api }
 
 ingress:
   className: traefik

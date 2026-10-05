@@ -98,6 +98,9 @@ spec:
     - from:
         - podSelector:
             matchLabels: {{- include "core.selector" (dict "root" . "component" "agent") | nindent 14 }}
+        # Служебные агенты Nabu с токеном сценария (FTR.HMR.CMN-0006 tech §3.4).
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Values.nabu.namespace }} }
       ports: [{ port: 8083 }]
     # Метрики и пробы.
     - ports: [{ port: 9100 }]

@@ -1,6 +1,6 @@
-    # --- Hammurapi (FTR.HMR.INFRA-0002): поды hammurapi и hammurapi-runners с аннотацией prometheus.io/scrape ---
+    # --- Hammurapi (FTR.HMR.INFRA-0002) и Nabu (FTR.NAB.CMN-0001 arch §11): поды с аннотацией prometheus.io/scrape ---
     - job_name: hammurapi
-      kubernetes_sd_configs: [{ role: pod, namespaces: { names: [hammurapi, hammurapi-runners] } }]
+      kubernetes_sd_configs: [{ role: pod, namespaces: { names: [hammurapi, hammurapi-runners, nabu, nabu-sandboxes] } }]
       relabel_configs:
         - { source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape], regex: "true", action: keep }
         - { source_labels: [__meta_kubernetes_pod_phase], regex: Running, action: keep }
