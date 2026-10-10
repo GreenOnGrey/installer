@@ -1,12 +1,15 @@
-{{- if .Values.sandboxes.enabled }}
-# worker создаёт и удаляет поды личных песочниц — только в их namespace
-# (FTR.NAB.CMN-0001 arch §5.2). Namespace создаёт nabu-deploy.
+{{- if or .Values.sandboxes.enabled .Values.agents.enabled }}
+# worker создаёт и удаляет поды личных песочниц и поды агентов — только в их
+# namespace (FTR.NAB.CMN-0001 arch §5.2, FTR.NAB.CMN-0004 arch §3.1). Namespace
+# создаёт nabu-deploy.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: nabu-worker
   labels: {{- include "nabu.labels" . | nindent 4 }}
 automountServiceAccountToken: false
+{{- end }}
+{{- if .Values.sandboxes.enabled }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

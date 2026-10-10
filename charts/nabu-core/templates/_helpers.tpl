@@ -50,6 +50,25 @@ env:
   - { name: RELAY_PUBLIC_WS_URL, value: "wss://{{ include "nabu.api" . }}/v1/workspaces/connect" }
   - { name: AGENT_ADDR, value: "http://agent.{{ .Release.Namespace }}.svc:8090" }
   - { name: AGENT_IDLE_TIMEOUT, value: {{ .Values.agent.idleTimeout | quote }} }
+  - { name: AGENT_EXECUTOR, value: {{ ternary "k8s" "local" .Values.agents.enabled | quote }} }
+  - { name: AGENT_NAMESPACE, value: {{ .Values.agents.namespace | quote }} }
+  - { name: AGENT_IMAGE, value: {{ include "nabu.image" . | quote }} }
+  - { name: AGENT_POD_CPU_REQUEST, value: {{ .Values.agents.resources.requests.cpu | quote }} }
+  - { name: AGENT_POD_CPU, value: {{ .Values.agents.resources.limits.cpu | quote }} }
+  - { name: AGENT_POD_MEMORY_REQUEST, value: {{ .Values.agents.resources.requests.memory | quote }} }
+  - { name: AGENT_POD_MEMORY, value: {{ .Values.agents.resources.limits.memory | quote }} }
+  - { name: AGENT_POD_WORK, value: {{ .Values.agents.workSizeLimit | quote }} }
+  - { name: AGENT_POD_MAX_SESSIONS, value: {{ .Values.agents.maxSessions | quote }} }
+  - { name: AGENT_POD_IDLE_TIMEOUT, value: {{ .Values.agents.idleTimeout | quote }} }
+  - { name: AGENT_POD_MIN_IDLE, value: {{ .Values.agents.minIdle | quote }} }
+  - { name: AGENT_PODS_MAX, value: {{ .Values.agents.podsMax | quote }} }
+  - { name: AGENT_START_PARALLEL, value: {{ .Values.agents.startParallel | quote }} }
+  - { name: AGENT_START_TIMEOUT, value: {{ .Values.agents.startTimeout | quote }} }
+  - { name: AGENT_SCHEDULE_TIMEOUT, value: {{ .Values.agents.scheduleTimeout | quote }} }
+  - { name: AGENT_QUEUE_TIMEOUT, value: {{ .Values.agents.queueTimeout | quote }} }
+  - { name: AGENT_WARM_WINDOW, value: {{ .Values.agents.warm.window | quote }} }
+  - { name: AGENT_WARM_SHARE, value: {{ .Values.agents.warm.share | quote }} }
+  - { name: AGENT_WARM_MAX, value: {{ .Values.agents.warm.max | quote }} }
   - { name: SANDBOX_EXECUTOR, value: {{ ternary "k8s" "none" .Values.sandboxes.enabled | quote }} }
   - { name: SANDBOX_NAMESPACE, value: {{ .Values.sandboxes.namespace | quote }} }
   - { name: SANDBOX_IMAGE, value: {{ include "nabu.image" . | quote }} }

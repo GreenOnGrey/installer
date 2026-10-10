@@ -2,7 +2,8 @@
 # nabu-deploy <nabu-core|nabu-web> <tag> <chart_version> [--allow-key-rotation]
 #
 # Выкатка Nabu на стенд Hammurapi (FTR.NAB.CMN-0001 R29, arch §11, tech §11):
-# тот же minikube, namespace nabu и nabu-sandboxes, общие хранилища стенда с
+# тот же minikube, namespace nabu, nabu-sandboxes и nabu-agents (поды агентов,
+# FTR.NAB.CMN-0004), общие хранилища стенда с
 # отдельной базой, бакетом и префиксом топиков. Запускается переиспользуемым
 # workflow deploy-component.yml репозитория nabu по SSH на машине стенда, как
 # hammurapi-deploy: оба скрипта лежат в /opt/hammurapi-infra/current/bin и берут
@@ -24,6 +25,7 @@ source "$ROOT/lib/common.sh"
 readonly E_STAND=20 E_NO_CORE=21 E_NS=22 E_SECRETS=23 E_KEY=24 E_HELM=25 E_DB=26 E_READY=27
 NS=${NABU_NAMESPACE:-nabu}
 SANDBOX_NS=${NABU_SANDBOX_NAMESPACE:-nabu-sandboxes}
+AGENTS_NS=${NABU_AGENTS_NAMESPACE:-nabu-agents}
 CHART_REPO=${CHART_REPO:-oci://ghcr.io/greenongrey/charts}
 REGISTRY=${REGISTRY:-ghcr.io}
 DEPLOY_LOCK_DIR=${DEPLOY_LOCK_DIR:-/var/lock}
@@ -134,10 +136,13 @@ check_order() {
 ensure_namespaces() {
   step namespaces
   local ns
-  for ns in "$NS" "$SANDBOX_NS"; do
+  for ns in "$NS" "$SANDBOX_NS" "$AGENTS_NS"; do
     kc create namespace "$ns" --dry-run=client -o yaml | kc label --local -f - "app.kubernetes.io/part-of=nabu" -o yaml |
       apply_stdin || fail "$E_NS" "не удалось создать namespace $ns"
   done
+  # Поды агентов — только с ограниченным профилем безопасности (FTR.NAB.CMN-0004 tech §7.2).
+  kc label namespace "$AGENTS_NS" --overwrite pod-security.kubernetes.io/enforce=restricted >/dev/null ||
+    fail "$E_NS" "не удалось пометить namespace $AGENTS_NS"
 }
 
 ghcr_pull() {
@@ -147,7 +152,7 @@ ghcr_pull() {
     kc -n "$NS" get secret ghcr-pull >/dev/null 2>&1 || fail "$E_SECRETS" "нет ghcrPullToken и секрета ghcr-pull"
     token=$(kc -n "$NS" get secret ghcr-pull -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d | jq -r --arg r "$REGISTRY" '.auths[$r].password')
   fi
-  for ns in "$NS" "$SANDBOX_NS"; do
+  for ns in "$NS" "$SANDBOX_NS" "$AGENTS_NS"; do
     printf '%s' "$token" | jq -Rc --arg ns "$ns" --arg reg "$REGISTRY" '
       {auths: {($reg): {username: "nabu", password: ., auth: ("nabu:" + . | @base64)}}} as $cfg
       | {apiVersion: "v1", kind: "Secret", type: "kubernetes.io/dockerconfigjson",
@@ -332,6 +337,7 @@ helm_deploy() {
   args=(upgrade --install "$COMPONENT" "$CHART_REPO/$COMPONENT" --version "$CHART_VERSION"
     -n "$NS" --set-string "image.tag=$TAG" --set-string "publicBaseDomain=$BASE_DOMAIN"
     --set-string "hosts.web=$WEB_HOST" --set-string "hosts.api=$API_HOST"
+    --set-string "agents.namespace=$AGENTS_NS"
     --atomic --wait --timeout "${HELM_TIMEOUT:-10m}")
   [[ -n $image ]] && args+=(--set-string "image.repository=$image")
   if [[ $COMPONENT == nabu-core ]]; then

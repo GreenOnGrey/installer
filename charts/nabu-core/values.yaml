@@ -19,11 +19,37 @@ existingSecrets:
 # Дополнительные несекретные переменные окружения.
 config: {}
 
+# Общий пул: запуски служебных агентов и проверки подключений
+# (FTR.NAB.CMN-0004 arch §3.3). Разговоры идут в подах владельцев — agents.
 agent:
-  maxSessions: 100        # процессов Pi на под (AGENT_MAX_SESSIONS)
-  maxRuns: 10             # из них — запусков служебных агентов (AGENT_MAX_RUNS)
-  idleTimeout: 15m        # простой сессии до закрытия
+  maxRuns: 10             # запусков служебных агентов на под (AGENT_MAX_RUNS)
+  idleTimeout: 15m        # простой сессии до закрытия (и в подах владельцев)
   workSizeLimit: 4Gi      # каталоги сессий (/work)
+
+# Поды агентов: под на пользователя и на группового агента
+# (FTR.NAB.CMN-0004 tech §7.2). Namespace создаёт nabu-deploy.
+agents:
+  enabled: true           # false — все сессии в общем операторе (AGENT_EXECUTOR=local)
+  namespace: nabu-agents
+  podsMax: 0              # потолок числа подов; 0 — по квоте или по факту размещения
+  maxSessions: 8          # сессий в поде
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: "1", memory: 1Gi }
+  workSizeLimit: 1GB
+  idleTimeout: 15m        # простой до остановки пода
+  minIdle: 60s            # простой, после которого под может уступить место
+  queueTimeout: 10m       # наибольшее ожидание хода в очереди
+  scheduleTimeout: 15s    # при автомасштабировании узлов — время появления узла
+  startTimeout: 60s       # срок готовности пода после размещения
+  startParallel: 10
+  warm: { window: 3h, share: 0.3, max: 0 }
+  # hard для ResourceQuota namespace (pods, requests.cpu, requests.memory); пусто — без квоты.
+  quota: {}
+  # CIDR моделей внутри сети компании: в интернет поды ходят только на 443.
+  egressAllow: []
+  # Образ агента заранее на каждом узле: без этого холодный старт не укладывается в 30 секунд.
+  prepull: true
 
 # Личные песочницы (FTR.NAB.CMN-0001 arch §5.2).
 sandboxes:

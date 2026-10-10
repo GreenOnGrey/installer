@@ -1,6 +1,7 @@
-# Оператор агента (режим agent, FTR.NAB.CMN-0001 arch §4): процессы Pi по
-# сессиям персональных агентов, заданий и служебных агентов. Под получает
-# только токен оператора: ни хранилищ, ни других секретов Nabu.
+# Общий пул оператора агента (FTR.NAB.CMN-0004 arch §3.3): процессы Pi запусков
+# служебных агентов и проверки подключений. Разговоры и задания пользователей
+# идут в подах владельцев (agents.yaml). Под получает только токен оператора:
+# ни хранилищ, ни других секретов Nabu.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -35,7 +36,7 @@ spec:
             - { name: service, containerPort: 9100 }
           env:
             - { name: AGENT_SERVICE_TOKEN, valueFrom: { secretKeyRef: { name: {{ .Values.existingSecrets.config }}, key: AGENT_SERVICE_TOKEN } } }
-            - { name: AGENT_MAX_SESSIONS, value: {{ .Values.agent.maxSessions | quote }} }
+            - { name: AGENT_MODE, value: {{ ternary "pool" "all" .Values.agents.enabled | quote }} }
             - { name: AGENT_MAX_RUNS, value: {{ .Values.agent.maxRuns | quote }} }
             - { name: AGENT_IDLE_TIMEOUT, value: {{ .Values.agent.idleTimeout | quote }} }
             - { name: AGENT_WORKDIR, value: /work }

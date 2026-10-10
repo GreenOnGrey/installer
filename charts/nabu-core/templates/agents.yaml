@@ -1,0 +1,134 @@
+{{- if .Values.agents.enabled }}
+# Поды агентов (FTR.NAB.CMN-0004 arch §3.1, §8.3; tech §7.2): под на
+# владельца создаёт worker; здесь — его права, сеть, приоритет, квота и
+# предзагрузка образа.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nabu-agents
+  namespace: {{ .Values.agents.namespace }}
+  labels: {{- include "nabu.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [resourcequotas]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nabu-worker
+  namespace: {{ .Values.agents.namespace }}
+  labels: {{- include "nabu.labels" . | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: nabu-agents }
+subjects:
+  - { kind: ServiceAccount, name: nabu-worker, namespace: {{ .Release.Namespace }} }
+---
+# Ниже нуля и без вытеснения: при нехватке ресурсов узла первыми уходят поды
+# агентов, а не api, worker и хранилища.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: nabu-agent-pod
+  labels: {{- include "nabu.labels" . | nindent 4 }}
+value: -10
+preemptionPolicy: Never
+globalDefault: false
+description: Поды агентов Nabu
+---
+# Входящие — только от worker (оператор) и наблюдаемости (метрики). Исходящие —
+# DNS, внутренний API и relay Nabu, поставщики моделей на 443 в интернете и
+# адреса из agents.egressAllow. Поды агентов не видят друг друга.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agents
+  namespace: {{ .Values.agents.namespace }}
+  labels: {{- include "nabu.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ .Release.Namespace }} } }
+          podSelector: { matchLabels: { app.kubernetes.io/component: worker, app.kubernetes.io/name: nabu } }
+      ports: [{ port: 8090 }]
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: observability } }
+      ports: [{ port: 9100 }]
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ .Release.Namespace }} } }
+          podSelector: { matchLabels: { app.kubernetes.io/component: relay, app.kubernetes.io/name: nabu } }
+      ports: [{ port: 8085 }]
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ .Release.Namespace }} } }
+          podSelector: { matchLabels: { app.kubernetes.io/component: api, app.kubernetes.io/name: nabu } }
+      ports: [{ port: 8081 }]
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10]
+      ports: [{ port: 443, protocol: TCP }]
+    {{- range .Values.agents.egressAllow }}
+    - to: [{ ipBlock: { cidr: {{ . | quote }} } }]
+    {{- end }}
+{{- with .Values.agents.quota }}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: agents
+  namespace: {{ $.Values.agents.namespace }}
+  labels: {{- include "nabu.labels" $ | nindent 4 }}
+spec:
+  hard: {{- toYaml . | nindent 4 }}
+{{- end }}
+{{- if .Values.agents.prepull }}
+---
+# Образ агента на каждом узле до первого пода: начальный контейнер тянет
+# образ и выходит, заглушка держит под.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: agent-prepull
+  namespace: {{ .Values.agents.namespace }}
+  labels:
+    {{- include "nabu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-prepull
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/component: agent-prepull, app.kubernetes.io/name: nabu }
+  template:
+    metadata:
+      labels:
+        {{- include "nabu.labels" . | nindent 8 }}
+        app.kubernetes.io/component: agent-prepull
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 1
+      {{- include "nabu.podSecurity" . | nindent 6 }}
+      initContainers:
+        - name: pull
+          image: {{ include "nabu.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["version"]
+          resources: { requests: { cpu: 5m, memory: 16Mi }, limits: { cpu: 100m, memory: 64Mi } }
+          {{- include "nabu.containerSecurity" . | nindent 10 }}
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10
+          resources: { requests: { cpu: 1m, memory: 4Mi }, limits: { cpu: 10m, memory: 16Mi } }
+          {{- include "nabu.containerSecurity" . | nindent 10 }}
+{{- end }}
+{{- end }}
