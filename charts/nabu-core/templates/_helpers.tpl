@@ -50,6 +50,14 @@ env:
   - { name: RELAY_PUBLIC_WS_URL, value: "wss://{{ include "nabu.api" . }}/v1/workspaces/connect" }
   - { name: AGENT_ADDR, value: "http://agent.{{ .Release.Namespace }}.svc:8090" }
   - { name: AGENT_IDLE_TIMEOUT, value: {{ .Values.agent.idleTimeout | quote }} }
+  {{- if .Values.memory.pool.enabled }}
+  - { name: MEMORY_AGENT_ADDR, value: "http://agent-memory.{{ .Release.Namespace }}.svc:8090" }
+  {{- end }}
+  - { name: MEMORY_COLLECT_CONCURRENCY, value: {{ .Values.memory.collectConcurrency | quote }} }
+  - { name: MEMORY_BATCH_THREADS, value: {{ .Values.memory.batchThreads | quote }} }
+  - { name: MEMORY_RUN_TIMEOUT, value: {{ .Values.memory.runTimeout | quote }} }
+  - { name: MEMORY_BACKFILL_DAYS, value: {{ .Values.memory.backfillDays | quote }} }
+  - { name: MEMORY_BACKFILL_POOL_SHARE, value: {{ .Values.memory.backfillPoolShare | quote }} }
   - { name: AGENT_EXECUTOR, value: {{ ternary "k8s" "local" .Values.agents.enabled | quote }} }
   - { name: AGENT_NAMESPACE, value: {{ .Values.agents.namespace | quote }} }
   - { name: AGENT_IMAGE, value: {{ include "nabu.image" . | quote }} }

@@ -1,0 +1,105 @@
+{{- if .Values.memory.pool.enabled }}
+# Пул сборщика коммуникаций (FTR.NAB.CMN-0003 arch §3.4): тот же оператор в
+# режиме pool, но только для запусков memory-collector — worker обращается к
+# нему по MEMORY_AGENT_ADDR. Отдельный от общего пула, чтобы сбор не занимал
+# лимит запусков служебных агентов. Под получает только токен оператора.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-memory
+  labels:
+    {{- include "nabu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-memory
+spec:
+  replicas: {{ .Values.memory.pool.replicas }}
+  selector:
+    matchLabels: {{- include "nabu.selector" (dict "root" . "component" "agent-memory") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "nabu.labels" . | nindent 8 }}
+        app.kubernetes.io/component: agent-memory
+      annotations:
+        {{- toYaml .Values.podAnnotations | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      {{- include "nabu.podSecurity" . | nindent 6 }}
+      containers:
+        - name: agent
+          image: {{ include "nabu.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["agent"]
+          ports:
+            - { name: agent, containerPort: 8090 }
+            - { name: service, containerPort: 9100 }
+          env:
+            - { name: AGENT_SERVICE_TOKEN, valueFrom: { secretKeyRef: { name: {{ .Values.existingSecrets.config }}, key: AGENT_SERVICE_TOKEN } } }
+            - { name: AGENT_MODE, value: "pool" }
+            - { name: AGENT_MAX_RUNS, value: {{ .Values.memory.pool.maxRuns | quote }} }
+            - { name: AGENT_IDLE_TIMEOUT, value: {{ .Values.agent.idleTimeout | quote }} }
+            - { name: AGENT_WORKDIR, value: /work }
+          readinessProbe: { httpGet: { path: /readyz, port: service }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: service }, initialDelaySeconds: 20, periodSeconds: 10 }
+          resources: {{- toYaml .Values.memory.pool.resources | nindent 12 }}
+          {{- include "nabu.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: home, mountPath: /home/node }
+            - { name: work, mountPath: /work }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        - { name: home, emptyDir: {} }
+        - { name: work, emptyDir: { sizeLimit: {{ .Values.agent.workSizeLimit }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-memory
+  labels:
+    {{- include "nabu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-memory
+spec:
+  type: ClusterIP
+  selector: {{- include "nabu.selector" (dict "root" . "component" "agent-memory") | nindent 4 }}
+  ports:
+    - { name: agent, port: 8090, targetPort: agent }
+---
+# Входящие — только от worker и наблюдаемости. Исходящие — DNS, внутренний API
+# Nabu (встроенный MCP и MCP-прокси), поставщик модели сбора на 443 в интернете
+# и адреса из memory.pool.egressAllow. relay и остальная сеть закрыты: у
+# запуска сборщика нет пространства, а источник он читает только через прокси.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-memory
+  labels: {{- include "nabu.labels" . | nindent 4 }}
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/component: agent-memory, app.kubernetes.io/name: nabu } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/component: worker, app.kubernetes.io/name: nabu } }
+      ports: [{ port: 8090 }]
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: observability } }
+      ports: [{ port: 9100 }]
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    - to:
+        - podSelector: { matchLabels: { app.kubernetes.io/component: api, app.kubernetes.io/name: nabu } }
+      ports: [{ port: 8081 }]
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10]
+      ports: [{ port: 443, protocol: TCP }]
+    {{- range .Values.memory.pool.egressAllow }}
+    - to: [{ ipBlock: { cidr: {{ . | quote }} } }]
+    {{- end }}
+{{- end }}

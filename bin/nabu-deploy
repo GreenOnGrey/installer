@@ -181,6 +181,11 @@ ensure_database() {
   if [[ -n $pod ]]; then
     printf '%s' "$sql" | kc -n "$NS_STORAGES" exec -i "$pod" -c postgres -- psql -v ON_ERROR_STOP=1 -q -U postgres -d postgres >/dev/null ||
       fail "$E_DB" "не удалось создать базу $PG_DB в $NS_STORAGES/$pod"
+    # FTR.NAB.CMN-0003: расширение vector для поиска по смыслу в памяти
+    # коммуникаций. Создаёт только суперпользователь; без расширения Nabu
+    # работает, поиск идёт по словам — поэтому это предупреждение, а не отказ.
+    printf 'CREATE EXTENSION IF NOT EXISTS vector;\n' | kc -n "$NS_STORAGES" exec -i "$pod" -c postgres -- psql -v ON_ERROR_STOP=1 -q -U postgres -d "$PG_DB" >/dev/null 2>&1 ||
+      warn "расширение vector в базе $PG_DB не создано: поиск в памяти коммуникаций будет только по словам"
   else
     local uri
     uri=$(secret_get "$NS_STORAGES" postgres-conn uri)
