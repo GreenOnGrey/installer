@@ -58,6 +58,7 @@ env:
   - { name: MEMORY_RUN_TIMEOUT, value: {{ .Values.memory.runTimeout | quote }} }
   - { name: MEMORY_BACKFILL_DAYS, value: {{ .Values.memory.backfillDays | quote }} }
   - { name: MEMORY_BACKFILL_POOL_SHARE, value: {{ .Values.memory.backfillPoolShare | quote }} }
+  - { name: MEMORY_GMAIL_OVERLAP, value: {{ .Values.memory.gmailOverlap | quote }} }
   - { name: AGENT_EXECUTOR, value: {{ ternary "k8s" "local" .Values.agents.enabled | quote }} }
   - { name: AGENT_NAMESPACE, value: {{ .Values.agents.namespace | quote }} }
   - { name: AGENT_IMAGE, value: {{ include "nabu.image" . | quote }} }

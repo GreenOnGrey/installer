@@ -68,8 +68,8 @@ spec:
     - { name: agent, port: 8090, targetPort: agent }
 ---
 # Входящие — только от worker и наблюдаемости. Исходящие — DNS, внутренний API
-# Nabu (встроенный MCP и MCP-прокси), поставщик модели сбора на 443 в интернете
-# и адреса из memory.pool.egressAllow. relay и остальная сеть закрыты: у
+# Nabu (встроенный MCP и MCP-прокси) и модель сбора: внешний поставщик на 443
+# (memory.pool.egressInternet) или адреса из memory.pool.egressAllow. relay и остальная сеть закрыты: у
 # запуска сборщика нет пространства, а источник он читает только через прокси.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -94,11 +94,13 @@ spec:
     - to:
         - podSelector: { matchLabels: { app.kubernetes.io/component: api, app.kubernetes.io/name: nabu } }
       ports: [{ port: 8081 }]
+    {{- if .Values.memory.pool.egressInternet }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
             except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10]
       ports: [{ port: 443, protocol: TCP }]
+    {{- end }}
     {{- range .Values.memory.pool.egressAllow }}
     - to: [{ ipBlock: { cidr: {{ . | quote }} } }]
     {{- end }}

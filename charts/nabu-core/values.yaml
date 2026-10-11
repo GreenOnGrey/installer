@@ -59,13 +59,18 @@ memory:
   runTimeout: 10m         # наибольшая длительность запуска
   backfillDays: 30        # глубина первого сбора
   backfillPoolShare: 0.3  # доля одновременных запусков под первый сбор
+  gmailOverlap: 24h       # перекрытие поиска Gmail перед курсором
   # Отдельный пул оператора для сборщика. false — запуски идут в общий пул agent.
   pool:
     enabled: true
     replicas: 1
     maxRuns: 40           # запусков на под; держите replicas × maxRuns не меньше collectConcurrency
     resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { cpu: "2", memory: 3Gi } }
-    # CIDR модели сбора внутри сети компании: в интернет пул ходит только на 443.
+    # Модель сбора у внешнего поставщика: пулу открыт интернет на 443 (кроме
+    # частных диапазонов). false — модель внутри сети компании, интернет закрыт
+    # целиком, а её адреса перечислены в egressAllow.
+    egressInternet: true
+    # CIDR модели сбора внутри сети компании.
     egressAllow: []
 
 # Личные песочницы (FTR.NAB.CMN-0001 arch §5.2).
