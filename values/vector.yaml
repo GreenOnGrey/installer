@@ -9,7 +9,9 @@ customConfig:
   data_dir: /vector-data-dir
   api: { enabled: false }
   sources:
-    k8s: { type: kubernetes_logs }
+    # Новые файлы логов ищем каждые 5 с, а не раз в минуту по умолчанию: иначе
+    # строки короткоживущих подов (и пробы проверки logs) опаздывают до минуты.
+    k8s: { type: kubernetes_logs, glob_minimum_cooldown_ms: 5000 }
     internal: { type: internal_metrics }
   transforms:
     shape:

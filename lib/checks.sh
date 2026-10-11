@@ -292,7 +292,8 @@ check_logs() {
   kc -n "$NS_STORAGES" delete pod log-probe --ignore-not-found --wait=true >/dev/null 2>&1 || true
   log_probe_manifest "$id" | kc create -f - >/dev/null
   kc -n "$NS_STORAGES" wait --for=condition=Ready pod/log-probe --timeout=120s >/dev/null 2>&1 || true
-  deadline=$((SECONDS + 60))
+  # Запас на поиск нового файла Vector-ом и на сброс записи в VictoriaLogs.
+  deadline=$((SECONDS + 120))
   while ((SECONDS < deadline)); do
     found=$(probe_curl "$VL_URL/select/logsql/query" --data-urlencode "query=\"hammurapi-infra-probe-$id\"" \
       --data-urlencode limit=1 2>/dev/null | head -1 || true)
