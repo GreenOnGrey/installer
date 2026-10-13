@@ -6,7 +6,7 @@ Guide for coding agents and developers working in this repository.
 
 Hammurapi is five repositories checked out side by side: `hammurapi-core` (Go backend),
 `hammurapi-web` (SPA), `hammurapi` (public docs, demo stack, reusable deploy workflow),
-`hammurapi-infra` (this one, private: the stand, the charts of Hammurapi and of Nabu) and
+`hammurapi-infra` (this one, private: the stand, the charts of Hammurapi, of Nabu and of the site) and
 `hammurapi-specs`. Nabu (`nabu-core`, `nabu-web`, `nabu` — FTR.NAB.CMN-0001) runs on the same stand;
 its charts and `bin/nabu-deploy` live here too, exactly like those of Hammurapi. The site of GreenOnGrey
 (`landing` — FTR.LND.WEB-0001) runs here as well: namespace `landing`, host `web.<domain>`.
@@ -48,6 +48,7 @@ shellcheck -x tests/manifests.sh tests/e2e/*.sh bin/hammurapi-deploy bin/nabu-de
 bats tests/unit                                        # Linux; needs jq, yq for some tests
 bash tests/manifests.sh                                # helm, kubeconform, jq, yq, network
 helm lint charts/hammurapi-core --set image.tag=v1 --set publicBaseDomain=x.example
+helm lint charts/landing --set image.tag=v1 --set publicBaseDomain=x.example
 ```
 
 ## Rules
