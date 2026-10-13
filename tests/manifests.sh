@@ -234,6 +234,28 @@ landing_chart() {
   else
     fail "LND-38 R26: хост «$hosts», SITE_URL «$site»"
   fi
+  # Собственный домен: адрес сайта — домен, отдельный сертификат на домен и www.,
+  # перенаправление с www., прежний хост стенда остаётся.
+  local own=$dir/landing-domain.yaml names regex
+  if ! helm template landing "$ROOT/charts/landing" -n landing --kube-version "$KUBE_VERSION" \
+    --set image.tag=v1.0.0 --set publicBaseDomain=34-12-5-6.sslip.io --set domain=example.org \
+    --set issuer=letsencrypt-staging >"$own" 2>&1; then
+    fail "LND-40 landing с доменом: helm template"
+    return
+  fi
+  kubeconform_file "$own" "LND-40 landing с доменом"
+  hosts=$(docs_json "$own" | jq -r 'select(.kind == "Ingress") | .spec.rules[].host' | sort | tr '\n' ' ')
+  site=$(docs_json "$own" | jq -r 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "SITE_URL") | .value')
+  names=$(docs_json "$own" | jq -r 'select(.kind == "Certificate") | "\(.spec.issuerRef.name): \(.spec.dnsNames | join(" "))"')
+  regex=$(docs_json "$own" | jq -r 'select(.kind == "Middleware") | .spec.redirectRegex | "\(.regex) -> \(.replacement)"')
+  # shellcheck disable=SC2016 # ${1} — подстановка Traefik, а не shell
+  if [[ $hosts == "example.org web.34-12-5-6.sslip.io www.example.org " && $site == "https://example.org" &&
+    $names == "letsencrypt-staging: example.org www.example.org" &&
+    $regex == '^https?://www\.example\.org/(.*) -> https://example.org/${1}' ]]; then
+    pass "LND-40: домен и www. в Ingress и сертификате, SITE_URL — домен, www. перенаправляется"
+  else
+    fail "LND-40: хосты «$hosts», SITE_URL «$site», сертификат «$names», перенаправление «$regex»"
+  fi
 }
 
 hammurapi_charts() {

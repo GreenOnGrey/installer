@@ -7,20 +7,27 @@
 # статическими страницами. Запускается workflow release.yml репозитория landing по
 # SSH на машине стенда, как hammurapi-deploy и nabu-deploy: скрипты лежат в
 # /opt/hammurapi-infra/current/bin и берут функции стенда из lib/ этого же релиза.
-#   stdin   JSON { image, ghcrPullToken }; читается в память, на диск, в аргументы
-#           команд и журнал не попадает
+#   stdin   JSON { image, ghcrPullToken, domain }; читается в память, на диск, в
+#           аргументы команд и журнал не попадает
 #   stdout  журнал; последняя строка — JSON-итог
-#           { status, component, tag, chartVersion, revision, firstInstall, publicBaseDomain, webUrl, … }
+#           { status, component, tag, chartVersion, revision, firstInstall, publicBaseDomain,
+#             webUrl, standUrl, domain, … }
 #
-# Коды: 17 уже идёт выкатка; 20 стенд не готов; 22 namespace; 23 секреты;
-# 25 релиз Helm; 27 готовность подов.
+# domain (необязателен) — собственный домен сайта, например greenongrey.tech: сайт
+# открывается по https://<domain>, www.<domain> перенаправляется на него, для обоих
+# имён выпускается отдельный сертификат; адрес web.<домен стенда> остаётся. До
+# изменений в кластере проверяется, что оба имени указывают на адрес стенда.
+#
+# Коды: 2 аргументы; 17 уже идёт выкатка; 20 стенд не готов или не удалось добавить
+# хост в сертификат; 22 namespace; 23 секреты и конфигурация; 25 релиз Helm;
+# 27 готовность подов; 28 DNS собственного домена; 29 сертификат собственного домена.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 # shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh"
 
-readonly E_STAND=20 E_NS=22 E_SECRETS=23 E_HELM=25 E_READY=27
+readonly E_STAND=20 E_NS=22 E_SECRETS=23 E_HELM=25 E_READY=27 E_DNS=28 E_CERT=29
 readonly COMPONENT=landing
 NS=${LANDING_NAMESPACE:-landing}
 CHART_REPO=${CHART_REPO:-oci://ghcr.io/greenongrey/charts}
@@ -33,6 +40,7 @@ WEB_HOST=${LANDING_WEB_HOST:-web}
 
 TAG="" CHART_VERSION=""
 FIRST_INSTALL=false BASE_DOMAIN="" REVISION="" DIAG="" PAYLOAD="" HELM_REG="" FAIL_MSG=""
+DOMAIN="" PUBLIC_IP_STAND="" ISSUER=""
 
 usage() {
   echo "использование: landing-deploy <vX.Y.Z> <версия чарта>" >&2
@@ -50,10 +58,12 @@ result() {
   [[ -n $HELM_REG ]] && rm -f "$HELM_REG"
   jq -cn --arg s "$status" --arg c "$COMPONENT" --arg t "$TAG" --arg r "$REVISION" \
     --argjson first "$FIRST_INSTALL" --arg d "$BASE_DOMAIN" --arg chart "$CHART_VERSION" \
-    --argjson code "$code" --arg e "$FAIL_MSG" --arg diag "$DIAG" --arg web "$WEB_HOST" \
+    --argjson code "$code" --arg e "$FAIL_MSG" --arg diag "$DIAG" --arg web "$WEB_HOST" --arg own "$DOMAIN" \
     '{status: $s, component: $c, tag: $t, chartVersion: $chart, revision: $r, firstInstall: $first,
       publicBaseDomain: $d, code: $code}
-     + (if $d != "" then {webUrl: "https://\($web).\($d)"} else {} end)
+     + (if $d != "" then {standUrl: "https://\($web).\($d)"} else {} end)
+     + (if $own != "" then {domain: $own, webUrl: "https://\($own)"}
+        elif $d != "" then {webUrl: "https://\($web).\($d)"} else {} end)
      + (if $s == "failure" then {error: (if $e == "" then "код \($code)" else $e end), diagnostics: $diag} else {} end)'
 }
 
@@ -80,6 +90,12 @@ read_payload() {
     [[ -n $PAYLOAD ]] || PAYLOAD='{}'
   fi
   printf '%s' "$PAYLOAD" | jq -e 'type == "object"' >/dev/null 2>&1 || fail "$E_SECRETS" "stdin: ожидается JSON-объект"
+  DOMAIN=$(payload .domain)
+  if [[ -n $DOMAIN && ! $DOMAIN =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$ ]]; then
+    local bad=$DOMAIN
+    DOMAIN=""
+    fail "$E_SECRETS" "domain: недопустимое имя «$bad»"
+  fi
 }
 
 apply_json() { kc apply -f - >/dev/null; }
@@ -98,6 +114,8 @@ check_stand() {
   [[ $(jq -r '.public.enabled' <<<"$st") == true ]] || fail "$E_STAND" "публичный доступ стенда выключен (PUBLIC_ACCESS=true)"
   BASE_DOMAIN=$(jq -r '.public.baseDomain // empty' <<<"$st")
   [[ -n $BASE_DOMAIN ]] || fail "$E_STAND" "стенд не сообщил базовый домен"
+  PUBLIC_IP_STAND=$(jq -r '.public.publicIp // empty' <<<"$st")
+  ISSUER=$(jq -r '.public.issuer // "letsencrypt"' <<<"$st")
   ok "стенд готов, домен $BASE_DOMAIN"
   hm status "$COMPONENT" -n "$NS" >/dev/null 2>&1 || FIRST_INSTALL=true
 }
@@ -146,6 +164,23 @@ ensure_certificate() {
     warn "сертификат ещё не выпущен; проверьте, что *.$BASE_DOMAIN указывает на машину"
 }
 
+# check_domain_dns — оба имени собственного домена указывают на адрес стенда.
+# Иначе Let's Encrypt не выпустит сертификат, а сайт по домену не откроется:
+# выкатка останавливается до изменений в кластере.
+check_domain_dns() {
+  [[ -n $DOMAIN ]] || return 0
+  step dns
+  [[ -n $PUBLIC_IP_STAND ]] || fail "$E_STAND" "стенд не сообщил публичный адрес"
+  local name ips
+  for name in "$DOMAIN" "www.$DOMAIN"; do
+    ips=$(getent ahostsv4 "$name" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')
+    ips=${ips% }
+    [[ $ips == "$PUBLIC_IP_STAND" ]] ||
+      fail "$E_DNS" "$name указывает на «${ips:-нет записи}», а нужна одна A-запись на $PUBLIC_IP_STAND"
+  done
+  ok "$DOMAIN и www.$DOMAIN указывают на $PUBLIC_IP_STAND"
+}
+
 # --- 4. Helm ---
 
 helm_login() {
@@ -169,6 +204,7 @@ diagnostics() {
   kc -n "$NS" describe pods >"$dir/describe-pods.txt" 2>&1 || true
   hm history "$COMPONENT" -n "$NS" >"$dir/helm-history.txt" 2>&1 || true
   kc -n "$NS" logs deploy/web --all-containers --tail=300 >"$dir/web.log" 2>&1 || true
+  kc -n "$NS" describe certificate,certificaterequest,order,challenge >"$dir/certificate.txt" 2>&1 || true
   logs=${DEPLOY_LOGS:-/opt/hammurapi-infra/logs}
   [[ -d $logs && -w $logs ]] || logs=$ROOT/logs
   mkdir -p "$logs"
@@ -183,7 +219,7 @@ helm_deploy() {
   image=$(payload .image)
   args=(upgrade --install "$COMPONENT" "$CHART_REPO/$COMPONENT" --version "$CHART_VERSION"
     -n "$NS" --set-string "image.tag=$TAG" --set-string "publicBaseDomain=$BASE_DOMAIN"
-    --set-string "hosts.web=$WEB_HOST"
+    --set-string "hosts.web=$WEB_HOST" --set-string "domain=$DOMAIN" --set-string "issuer=$ISSUER"
     --atomic --wait --timeout "${HELM_TIMEOUT:-10m}")
   [[ -n $image ]] && args+=(--set-string "image.repository=$image")
   log "helm upgrade --install $COMPONENT $TAG (чарт $CHART_VERSION)"
@@ -203,6 +239,19 @@ wait_ready() {
   ok "$COMPONENT $TAG готов (ревизия $REVISION)"
 }
 
+# wait_domain_certificate — сертификат собственного домена выпущен. Сайт уже
+# работает по адресу стенда; по домену он откроется без предупреждения только
+# с этим сертификатом.
+wait_domain_certificate() {
+  [[ -n $DOMAIN ]] || return 0
+  step domain
+  if ! kc -n "$NS" wait certificate/landing-domain --for=condition=Ready --timeout=5m >/dev/null 2>&1; then
+    diagnostics
+    fail "$E_CERT" "сертификат для $DOMAIN не выпущен за 5 минут; диагностика: $DIAG"
+  fi
+  ok "сертификат для $DOMAIN и www.$DOMAIN выпущен"
+}
+
 on_exit() {
   local rc=$?
   result "$rc"
@@ -220,11 +269,13 @@ main() {
   acquire_deploy_lock
   read_payload
   check_stand
+  check_domain_dns
   ensure_namespace
   ghcr_pull
   ensure_certificate
   helm_deploy
   wait_ready
+  wait_domain_certificate
 }
 
 main "$@"

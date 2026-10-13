@@ -27,7 +27,8 @@ hammurapi-infra.sh       CLI: up | status | creds | down — a minikube stand wi
 lib/*.sh                 functions sourced by the CLI (common, host, prereqs, cluster, deploy, public, …)
 bin/hammurapi-deploy     deploys hammurapi-core/web on the stand; reads one JSON from stdin
 bin/nabu-deploy          deploys nabu-core/web (namespaces nabu, nabu-sandboxes; its DB, bucket, hosts)
-bin/landing-deploy       deploys the site of GreenOnGrey (namespace landing, host web.<domain>; no storages)
+bin/landing-deploy       deploys the site of GreenOnGrey (namespace landing, host web.<domain>; no storages;
+                         an optional domain of its own with a certificate and a redirect from www.)
 bin/stand-autostart      systemd unit hammurapi-stand: the stand starts after a VM reboot
 charts/hammurapi-core    api, worker, agent operator, migrate, cleaner, network policies
 charts/hammurapi-web     the SPA
