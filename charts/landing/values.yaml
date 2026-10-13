@@ -1,0 +1,12 @@
+# Образ сайта; тег задаёт выкатка (landing-deploy).
+image: { repository: ghcr.io/greenongrey/landing, tag: "", pullPolicy: IfNotPresent }
+imagePullSecrets: [{ name: ghcr-pull }]
+
+# Базовый домен: сайт на web.<домен>. Обязателен.
+publicBaseDomain: ""
+hosts: { web: web }
+
+ingress:
+  className: traefik
+
+resources: { requests: { cpu: 10m, memory: 16Mi }, limits: { cpu: 200m, memory: 64Mi } }

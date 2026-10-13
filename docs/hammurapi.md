@@ -62,7 +62,7 @@ gcloud compute instances add-tags hammurapi --zone "$ZONE" --tags hammurapi-publ
 | `PUBLIC_BASE_DOMAIN` | пусто — `<внешний IP с дефисами>.sslip.io` |
 | `PUBLIC_IP` | пусто — определяется автоматически |
 | `HAMMURAPI_WEB_HOST`, `HAMMURAPI_API_HOST` | `hammurapi`, `hammurapi-api` — поддомены сайта и API Hammurapi (`hammurapi.<домен>`, `hammurapi-api.<домен>`); выкатка передаёт их в чарты |
-| `PUBLIC_EXTRA_HOSTS` | `nabu nabu-api` — поддомены Nabu на том же стенде в общем сертификате (FTR.NAB.CMN-0001) |
+| `PUBLIC_EXTRA_HOSTS` | `nabu nabu-api web` — поддомены Nabu (FTR.NAB.CMN-0001) и сайта GreenOnGrey (FTR.LND.WEB-0001) на том же стенде в общем сертификате |
 
 Ручной `up` на машине этих значений не получает и берёт их из `local.env`. Если их там нет,
 такой `up` пропустит шаг `public`; уже развёрнутые Traefik и сертификат останутся.
@@ -173,6 +173,12 @@ Nabu (`FTR.NAB.CMN-0001`) выкатывается так же: тег `nabu` �
 (на машину он ничего не кладёт); в `nabu-core` и `nabu-web` в `deploy/versions.env` —
 `DEPLOY_WORKFLOW_REF` (тег `nabu`) и `CHART_VERSION` (версия стенда); теги `nabu-core`, затем
 `nabu-web`. Переменные и секреты — в `nabu/docs/deployment.md`.
+
+Сайт GreenOnGrey (`FTR.LND.WEB-0001`) выкатывается так же, но проще: чарт `landing` публикует
+релиз стенда, на машине выполняется `bin/landing-deploy <тег> <версия чарта>` — namespace
+`landing`, хост `web.<домен>`, без хранилищ и секретов. Workflow выкатки лежит в самом
+репозитории `landing` (`release.yml`); в его `deploy/versions.env` — `CHART_VERSION` (версия
+стенда). Сайту нужны те же доступ к машине и токен чтения реестра, что и остальным компонентам.
 
 | Что | Как |
 |---|---|

@@ -204,6 +204,38 @@ nabu_charts() {
   fi
 }
 
+# landing_chart — сайт GreenOnGrey на том же стенде (FTR.LND.WEB-0001 arch §7).
+landing_chart() {
+  printf '\nчарт landing\n'
+  local dir=$OUT/landing f bad hosts site
+  mkdir -p "$dir"
+  f=$dir/landing.yaml
+  if ! helm lint "$ROOT/charts/landing" --set image.tag=v1.0.0 --set publicBaseDomain=34-12-5-6.sslip.io >/dev/null 2>&1 ||
+    ! helm template landing "$ROOT/charts/landing" -n landing --kube-version "$KUBE_VERSION" \
+      --set image.tag=v1.0.0 --set publicBaseDomain=34-12-5-6.sslip.io >"$f" 2>&1; then
+    fail "QUAL-02 landing: helm lint/template"
+    return
+  fi
+  kubeconform_file "$f" landing
+  bad=$(docs_json "$f" | jq -r '
+    select(.kind == "Deployment")
+    | .spec.template.spec as $s
+    | "\(.kind)/\(.metadata.name)" as $o
+    | $s.containers[]
+    | [ (if (.resources.requests.cpu // "") == "" or (.resources.limits.memory // "") == "" then "ресурсы" else empty end),
+        (if ((.securityContext.runAsNonRoot // $s.securityContext.runAsNonRoot // false) | not) then "runAsNonRoot" else empty end) ]
+    | select(length > 0) | "\($o): \(join(", "))"')
+  if [[ -n $bad ]]; then fail "RES-01 landing: $(echo "$bad" | tr '\n' ' ')"; else pass "RES-01 landing: запросы, лимиты, runAsNonRoot"; fi
+  # Хост web.<домен>, и тот же адрес сайт получает в SITE_URL.
+  hosts=$(docs_json "$f" | jq -r 'select(.kind == "Ingress") | .spec.rules[].host' | tr '\n' ' ')
+  site=$(docs_json "$f" | jq -r 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "SITE_URL") | .value')
+  if [[ $hosts == "web.34-12-5-6.sslip.io " && $site == "https://web.34-12-5-6.sslip.io" ]]; then
+    pass "LND R26: Ingress web.<домен>, SITE_URL сайта — тот же адрес"
+  else
+    fail "LND R26: хост «$hosts», SITE_URL «$site»"
+  fi
+}
+
 hammurapi_charts() {
   printf '\nчарты Hammurapi\n'
   local dir=$OUT/hammurapi c f bad
@@ -379,6 +411,7 @@ main() {
 
   hammurapi_charts
   nabu_charts
+  landing_chart
   public_access_charts
 
   if ((FAILURES)); then

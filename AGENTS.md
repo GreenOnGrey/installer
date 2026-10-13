@@ -8,7 +8,8 @@ Hammurapi is five repositories checked out side by side: `hammurapi-core` (Go ba
 `hammurapi-web` (SPA), `hammurapi` (public docs, demo stack, reusable deploy workflow),
 `hammurapi-infra` (this one, private: the stand, the charts of Hammurapi and of Nabu) and
 `hammurapi-specs`. Nabu (`nabu-core`, `nabu-web`, `nabu` — FTR.NAB.CMN-0001) runs on the same stand;
-its charts and `bin/nabu-deploy` live here too, exactly like those of Hammurapi.
+its charts and `bin/nabu-deploy` live here too, exactly like those of Hammurapi. The site of GreenOnGrey
+(`landing` — FTR.LND.WEB-0001) runs here as well: namespace `landing`, host `web.<domain>`.
 
 - The stand is specified in `hammurapi-specs/specs/HMR/INFRA/FTR.HMR.INFRA-0001` (stand) and
   `FTR.HMR.INFRA-0002` (Hammurapi on the stand); product features in `…/CMN/FTR.HMR.CMN-NNNN`.
@@ -26,11 +27,13 @@ hammurapi-infra.sh       CLI: up | status | creds | down — a minikube stand wi
 lib/*.sh                 functions sourced by the CLI (common, host, prereqs, cluster, deploy, public, …)
 bin/hammurapi-deploy     deploys hammurapi-core/web on the stand; reads one JSON from stdin
 bin/nabu-deploy          deploys nabu-core/web (namespaces nabu, nabu-sandboxes; its DB, bucket, hosts)
+bin/landing-deploy       deploys the site of GreenOnGrey (namespace landing, host web.<domain>; no storages)
 bin/stand-autostart      systemd unit hammurapi-stand: the stand starts after a VM reboot
 charts/hammurapi-core    api, worker, agent operator, migrate, cleaner, network policies
 charts/hammurapi-web     the SPA
 charts/nabu-core         Nabu: api, worker, agent, relay, migrate, cleaner, RBAC for sandboxes
 charts/nabu-web          the SPA of Nabu
+charts/landing           the site of GreenOnGrey: nginx with static pages
 config/                  defaults.env, versions.env (chart and tool versions)
 values/                  Helm values of the stand's components
 dashboards/              Grafana dashboards
@@ -41,7 +44,7 @@ tests/unit/*.bats        unit tests (Linux); tests/manifests.sh — rendered man
 
 ```sh
 shellcheck -x hammurapi-infra.sh                       # CI pins shellcheck v0.11.0
-shellcheck -x tests/manifests.sh tests/e2e/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/ingress-forward bin/stand-autostart
+shellcheck -x tests/manifests.sh tests/e2e/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/landing-deploy bin/ingress-forward bin/stand-autostart
 bats tests/unit                                        # Linux; needs jq, yq for some tests
 bash tests/manifests.sh                                # helm, kubeconform, jq, yq, network
 helm lint charts/hammurapi-core --set image.tag=v1 --set publicBaseDomain=x.example

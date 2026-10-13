@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+# landing-deploy <tag> <chart_version>
+#
+# Выкатка сайта GreenOnGrey на стенд Hammurapi (FTR.LND.WEB-0001 arch §7, tech §9):
+# тот же minikube, отдельный namespace landing, хост web.<домен стенда> в общем
+# сертификате Traefik. Хранилищ, базы и секретов у сайта нет: это nginx со
+# статическими страницами. Запускается workflow release.yml репозитория landing по
+# SSH на машине стенда, как hammurapi-deploy и nabu-deploy: скрипты лежат в
+# /opt/hammurapi-infra/current/bin и берут функции стенда из lib/ этого же релиза.
+#   stdin   JSON { image, ghcrPullToken }; читается в память, на диск, в аргументы
+#           команд и журнал не попадает
+#   stdout  журнал; последняя строка — JSON-итог
+#           { status, component, tag, chartVersion, revision, firstInstall, publicBaseDomain, webUrl, … }
+#
+# Коды: 17 уже идёт выкатка; 20 стенд не готов; 22 namespace; 23 секреты;
+# 25 релиз Helm; 27 готовность подов.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+# shellcheck source=../lib/common.sh
+source "$ROOT/lib/common.sh"
+
+readonly E_STAND=20 E_NS=22 E_SECRETS=23 E_HELM=25 E_READY=27
+readonly COMPONENT=landing
+NS=${LANDING_NAMESPACE:-landing}
+CHART_REPO=${CHART_REPO:-oci://ghcr.io/greenongrey/charts}
+REGISTRY=${REGISTRY:-ghcr.io}
+DEPLOY_LOCK_DIR=${DEPLOY_LOCK_DIR:-/var/lock}
+STATUS_CMD=${STATUS_CMD:-"$ROOT/hammurapi-infra.sh"}
+NS_INGRESS=${NS_INGRESS:-ingress}
+CERT_NAME=${CERT_NAME:-hammurapi-public}
+WEB_HOST=${LANDING_WEB_HOST:-web}
+
+TAG="" CHART_VERSION=""
+FIRST_INSTALL=false BASE_DOMAIN="" REVISION="" DIAG="" PAYLOAD="" HELM_REG="" FAIL_MSG=""
+
+usage() {
+  echo "использование: landing-deploy <vX.Y.Z> <версия чарта>" >&2
+  exit "$E_USAGE"
+}
+
+fail() {
+  FAIL_MSG=$2
+  die "$1" "$2"
+}
+
+result() {
+  local code=$1 status=success
+  ((code == 0)) || status=failure
+  [[ -n $HELM_REG ]] && rm -f "$HELM_REG"
+  jq -cn --arg s "$status" --arg c "$COMPONENT" --arg t "$TAG" --arg r "$REVISION" \
+    --argjson first "$FIRST_INSTALL" --arg d "$BASE_DOMAIN" --arg chart "$CHART_VERSION" \
+    --argjson code "$code" --arg e "$FAIL_MSG" --arg diag "$DIAG" --arg web "$WEB_HOST" \
+    '{status: $s, component: $c, tag: $t, chartVersion: $chart, revision: $r, firstInstall: $first,
+      publicBaseDomain: $d, code: $code}
+     + (if $d != "" then {webUrl: "https://\($web).\($d)"} else {} end)
+     + (if $s == "failure" then {error: (if $e == "" then "код \($code)" else $e end), diagnostics: $diag} else {} end)'
+}
+
+parse_args() {
+  (($# == 2)) || usage
+  TAG=$1 CHART_VERSION=$2
+  [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$E_USAGE" "тег «$TAG» не в формате vX.Y.Z"
+  [[ $CHART_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$E_USAGE" "версия чарта «$CHART_VERSION» не в формате X.Y.Z"
+}
+
+acquire_deploy_lock() {
+  exec 8>>"$DEPLOY_LOCK_DIR/landing-deploy.lock"
+  flock -n 8 || fail "$E_LOCKED" "уже выполняется выкатка $COMPONENT на этой машине"
+}
+
+# payload <jq-путь> — значение из JSON stdin (jq читает из pipe, не из аргументов).
+payload() { printf '%s' "$PAYLOAD" | jq -r "$1 // empty"; }
+
+read_payload() {
+  if [[ -t 0 ]]; then
+    PAYLOAD='{}'
+  else
+    PAYLOAD=$(cat)
+    [[ -n $PAYLOAD ]] || PAYLOAD='{}'
+  fi
+  printf '%s' "$PAYLOAD" | jq -e 'type == "object"' >/dev/null 2>&1 || fail "$E_SECRETS" "stdin: ожидается JSON-объект"
+}
+
+apply_json() { kc apply -f - >/dev/null; }
+
+# --- 1. Стенд ---
+
+check_stand() {
+  step stand
+  local st cfg=()
+  [[ -f ${HAMMURAPI_INFRA_CONFIG:-} ]] && cfg=(--config "$HAMMURAPI_INFRA_CONFIG")
+  st=$(bash "$STATUS_CMD" status --json --no-color "${cfg[@]}" 2>/dev/null) || true
+  jq -e . >/dev/null 2>&1 <<<"$st" || fail "$E_STAND" "стенд не отвечает: hammurapi-infra.sh status --json"
+  if [[ $(jq -r '.ok' <<<"$st") != true ]]; then
+    fail "$E_STAND" "стенд не готов: $(jq -r '[.checks[] | select(.ok | not) | "\(.name): \(.message)"] | join("; ")' <<<"$st")"
+  fi
+  [[ $(jq -r '.public.enabled' <<<"$st") == true ]] || fail "$E_STAND" "публичный доступ стенда выключен (PUBLIC_ACCESS=true)"
+  BASE_DOMAIN=$(jq -r '.public.baseDomain // empty' <<<"$st")
+  [[ -n $BASE_DOMAIN ]] || fail "$E_STAND" "стенд не сообщил базовый домен"
+  ok "стенд готов, домен $BASE_DOMAIN"
+  hm status "$COMPONENT" -n "$NS" >/dev/null 2>&1 || FIRST_INSTALL=true
+}
+
+# --- 2. Namespace и доступ к реестру ---
+
+ensure_namespace() {
+  step namespace
+  kc create namespace "$NS" --dry-run=client -o yaml | kc label --local -f - "app.kubernetes.io/part-of=landing" -o yaml |
+    apply_stdin || fail "$E_NS" "не удалось создать namespace $NS"
+}
+
+ghcr_pull() {
+  local token
+  token=$(payload .ghcrPullToken)
+  if [[ -z $token ]]; then
+    kc -n "$NS" get secret ghcr-pull >/dev/null 2>&1 || fail "$E_SECRETS" "нет ghcrPullToken и секрета ghcr-pull"
+    return
+  fi
+  printf '%s' "$token" | jq -Rc --arg ns "$NS" --arg reg "$REGISTRY" '
+    {auths: {($reg): {username: "landing", password: ., auth: ("landing:" + . | @base64)}}} as $cfg
+    | {apiVersion: "v1", kind: "Secret", type: "kubernetes.io/dockerconfigjson",
+       metadata: {name: "ghcr-pull", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "landing-deploy"}},
+       data: {".dockerconfigjson": ($cfg | tojson | @base64)}}' | apply_json ||
+    fail "$E_SECRETS" "не удалось записать ghcr-pull в $NS"
+}
+
+# --- 3. Сертификат ---
+
+# ensure_certificate — web. в общем сертификате Traefik стенда. Стенд добавляет его
+# сам (PUBLIC_EXTRA_HOSTS), но выкатка сайта не должна зависеть от порядка релизов.
+ensure_certificate() {
+  step certificate
+  local names want=$WEB_HOST.$BASE_DOMAIN
+  names=$(kc -n "$NS_INGRESS" get certificate "$CERT_NAME" -o json 2>/dev/null | jq -r '.spec.dnsNames[]?') ||
+    fail "$E_STAND" "нет сертификата $NS_INGRESS/$CERT_NAME"
+  if grep -qxF "$want" <<<"$names"; then
+    ok "сертификат содержит $want"
+    return
+  fi
+  jq -cn --arg h "$want" '[{op: "add", path: "/spec/dnsNames/-", value: $h}]' |
+    kc -n "$NS_INGRESS" patch certificate "$CERT_NAME" --type json --patch-file /dev/stdin >/dev/null ||
+    fail "$E_STAND" "не удалось добавить $want в сертификат"
+  log "сертификат: добавлен $want, ожидание выпуска"
+  kc -n "$NS_INGRESS" wait "certificate/$CERT_NAME" --for=condition=Ready --timeout=5m >/dev/null 2>&1 ||
+    warn "сертификат ещё не выпущен; проверьте, что *.$BASE_DOMAIN указывает на машину"
+}
+
+# --- 4. Helm ---
+
+helm_login() {
+  local token
+  token=$(payload .ghcrPullToken)
+  [[ -n $token ]] || token=$(kc -n "$NS" get secret ghcr-pull -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null |
+    base64 -d | jq -r --arg r "$REGISTRY" '.auths[$r].password // empty')
+  [[ -n $token ]] || fail "$E_HELM" "нет токена чтения реестра для чарта"
+  HELM_REG=$(mktemp -p /dev/shm landing-helm-XXXXXX.json 2>/dev/null || mktemp)
+  export HELM_REGISTRY_CONFIG=$HELM_REG
+  printf '%s' "$token" | helm registry login "$REGISTRY" --username landing --password-stdin >/dev/null 2>&1 ||
+    fail "$E_HELM" "не удалось войти в $REGISTRY"
+}
+
+diagnostics() {
+  local dir ts logs
+  ts=$(date -u +%Y%m%dT%H%M%SZ)
+  dir=$(mktemp -d)
+  kc -n "$NS" get events --sort-by=.lastTimestamp >"$dir/events.txt" 2>&1 || true
+  kc -n "$NS" get pods -o wide >"$dir/pods.txt" 2>&1 || true
+  kc -n "$NS" describe pods >"$dir/describe-pods.txt" 2>&1 || true
+  hm history "$COMPONENT" -n "$NS" >"$dir/helm-history.txt" 2>&1 || true
+  kc -n "$NS" logs deploy/web --all-containers --tail=300 >"$dir/web.log" 2>&1 || true
+  logs=${DEPLOY_LOGS:-/opt/hammurapi-infra/logs}
+  [[ -d $logs && -w $logs ]] || logs=$ROOT/logs
+  mkdir -p "$logs"
+  DIAG=$logs/deploy-$COMPONENT-$ts.tar.gz
+  tar -czf "$DIAG" -C "$dir" . && rm -rf "$dir"
+}
+
+helm_deploy() {
+  step helm
+  helm_login
+  local image args
+  image=$(payload .image)
+  args=(upgrade --install "$COMPONENT" "$CHART_REPO/$COMPONENT" --version "$CHART_VERSION"
+    -n "$NS" --set-string "image.tag=$TAG" --set-string "publicBaseDomain=$BASE_DOMAIN"
+    --set-string "hosts.web=$WEB_HOST"
+    --atomic --wait --timeout "${HELM_TIMEOUT:-10m}")
+  [[ -n $image ]] && args+=(--set-string "image.repository=$image")
+  log "helm upgrade --install $COMPONENT $TAG (чарт $CHART_VERSION)"
+  if ! hm "${args[@]}" >&2; then
+    diagnostics
+    fail "$E_HELM" "релиз $COMPONENT $TAG не развёрнут, Helm вернул прежнюю ревизию; диагностика: $DIAG"
+  fi
+  REVISION=$(hm status "$COMPONENT" -n "$NS" -o json 2>/dev/null | jq -r '.version // empty')
+}
+
+wait_ready() {
+  step ready
+  if ! kc -n "$NS" rollout status deploy/web --timeout=5m >/dev/null 2>&1; then
+    diagnostics
+    fail "$E_READY" "web не готов; диагностика: $DIAG"
+  fi
+  ok "$COMPONENT $TAG готов (ревизия $REVISION)"
+}
+
+on_exit() {
+  local rc=$?
+  result "$rc"
+  exit "$rc"
+}
+
+main() {
+  trap on_exit EXIT
+  # shellcheck disable=SC2034 # COLOR читает setup_color стенда
+  COLOR=0
+  setup_color
+  parse_args "$@"
+  HAMMURAPI_INFRA_CONFIG=${HAMMURAPI_INFRA_CONFIG:-/opt/hammurapi-infra/local.env}
+  load_config "$ROOT" "$HAMMURAPI_INFRA_CONFIG"
+  acquire_deploy_lock
+  read_payload
+  check_stand
+  ensure_namespace
+  ghcr_pull
+  ensure_certificate
+  helm_deploy
+  wait_ready
+}
+
+main "$@"
