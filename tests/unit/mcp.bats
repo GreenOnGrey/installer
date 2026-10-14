@@ -190,3 +190,23 @@ esac'
   [ "$(jq -r '.docling.ready' <<<"$output")" = false ]
   [ "$(jq -r '."yandex-mail".enabled' <<<"$output")" = false ]
 }
+
+@test "R3: память серверов — из рендера чарта через kubectl и jq, без yq" {
+  MCP_DOCLING=true
+  stub helm 'echo "kind: Deployment"'
+  stub kubectl '
+case "$*" in
+  *"create --dry-run=client -o json -f -"*) cat >/dev/null
+    echo "{\"kind\":\"List\",\"items\":[{\"kind\":\"Deployment\",\"spec\":{\"template\":{\"spec\":{\"containers\":[
+      {\"resources\":{\"requests\":{\"memory\":\"2Gi\"}}},{\"resources\":{\"requests\":{\"memory\":\"256Mi\"}}}]}}}},
+      {\"kind\":\"Service\"}]}" ;;
+  *) exit 0 ;;
+esac'
+  run mcp_rendered_memory
+  [ "$status" -eq 0 ]
+  [ "$output" = $(((2 << 30) + (256 << 20))) ]
+}
+
+@test "стенд не зависит от yq: на машине его нет (prereqs ставит jq)" {
+  not_grep -nE '(^|[^#]*[|;&(] *|^ *)yq\b' "$ROOT"/lib/*.sh "$ROOT/hammurapi-infra.sh"
+}

@@ -129,12 +129,17 @@ copy_pull_secret() {
 }
 
 # mcp_rendered_memory — сумма запросов памяти контейнеров включённых серверов, байты.
+# Рендер чарта переводится в JSON kubectl (client dry-run): на машине стенда есть
+# jq, но нет yq.
 mcp_rendered_memory() {
-  local args=()
+  local args=() rendered
   mapfile -t args < <(mcp_helm_args)
-  helm template "$MCP_RELEASE" "$ROOT/charts/mcp-servers" -n "$NS_MCP" "${args[@]}" 2>/dev/null |
-    yq -r 'select(.kind == "Deployment") | .spec.template.spec.containers[] | .resources.requests.memory' |
-    while read -r q; do [[ -n $q && $q != null ]] && to_bytes "$q"; done |
+  rendered=$(hm template "$MCP_RELEASE" "$ROOT/charts/mcp-servers" -n "$NS_MCP" "${args[@]}") ||
+    die "$E_DEPLOY" "чарт mcp-servers не рендерится"
+  kc create --dry-run=client -o json -f - <<<"$rendered" |
+    jq -r '(if .kind == "List" then .items[] else . end) | select(.kind == "Deployment")
+      | .spec.template.spec.containers[] | .resources.requests.memory // empty' |
+    while read -r q; do to_bytes "$q"; done |
     awk '{ s += $1 } END { print s + 0 }'
 }
 
@@ -165,7 +170,7 @@ mcp_preflight() {
   done < <({ kc get pods -n "$NS_STORAGES" -o json 2>/dev/null; kc get pods -n "$NS_OBSERVABILITY" -o json 2>/dev/null; } |
     jq -rs '.[].items[] | select(.status.phase == "Running" or .status.phase == "Pending")
       | .spec.containers[] | .resources.requests.memory // empty')
-  servers=$(mcp_rendered_memory)
+  servers=$(mcp_rendered_memory) || die "$E_DEPLOY" "не удалось посчитать память MCP-серверов"
   alloc=$(to_bytes "$(kc get nodes -o jsonpath='{.items[0].status.allocatable.memory}')")
   capacity=$(to_bytes "$(kc get nodes -o jsonpath='{.items[0].status.capacity.memory}')")
   verdict=$(mcp_budget "$others" "$servers" "$alloc" "$capacity")
@@ -185,8 +190,8 @@ deploy_mcp() {
     kc delete ns "$NS_MCP" --ignore-not-found --wait=false >/dev/null
     return
   fi
-  kc create ns "$NS_MCP" --dry-run=client -o yaml |
-    yq '.metadata.labels."app.kubernetes.io/part-of" = "hammurapi-stand"' | apply_stdin
+  kc create ns "$NS_MCP" --dry-run=client -o json |
+    jq '.metadata.labels["app.kubernetes.io/part-of"] = "hammurapi-stand"' | apply_stdin
   ensure_mcp_secrets
   copy_pull_secret
   local args=()
