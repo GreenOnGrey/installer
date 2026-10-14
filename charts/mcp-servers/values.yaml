@@ -34,6 +34,8 @@ yandexMail:
   # Собственный сервер IMAP только для чтения (images/imap-mcp), тег — его VERSION.
   image: ghcr.io/greenongrey/imap-mcp:0.1.0
   imapHost: imap.yandex.com
+  # Ссылка на письмо: поиск по Message-ID в веб-интерфейсе ({msgid} — без угловых скобок).
+  webLink: "https://mail.yandex.ru/#search?request={msgid}"
   resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
 
 # Кто вызывает серверы: api Nabu (прокси MCP) и проверки стенда.

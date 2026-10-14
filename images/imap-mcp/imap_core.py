@@ -26,6 +26,7 @@ import ssl
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from email.message import Message
@@ -41,7 +42,12 @@ MAX_RESULTS = 50
 MAX_MESSAGE_BYTES = int(os.environ.get("MAX_MESSAGE_BYTES", str(25 << 20)))
 CACHE_TTL = 300.0
 
-HEADER_FIELDS = "FROM TO CC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES"
+HEADER_FIELDS = "FROM TO CC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES LIST-UNSUBSCRIBE LIST-ID PRECEDENCE AUTO-SUBMITTED"
+# Ссылка на письмо в веб-интерфейсе провайдера: {msgid} — Message-ID без угловых
+# скобок (FTR.NAB.CMN-0003 R6: заметка ведёт к письму). Пусто — без ссылки.
+WEB_LINK = os.environ.get("WEB_LINK", "https://mail.yandex.ru/#search?request={msgid}")
+# Папки, из которых не читаются ни поиск по ящику, ни цепочки.
+SKIP_ROLES = {"Trash", "Junk", "Spam", "Drafts"}
 
 
 class AuthError(Exception):
@@ -206,7 +212,7 @@ def list_folders(conn) -> list[dict]:
         raw = m.group("name").decode()
         if raw.startswith('"') and raw.endswith('"'):
             raw = raw[1:-1].replace('\\"', '"').replace("\\\\", "\\")
-        special = next((f[1:] for f in flags if f in ("\\Inbox", "\\Sent", "\\Drafts", "\\Trash", "\\Junk", "\\Archive", "\\Spam")), None)
+        special = next((f[1:] for f in flags if f in ("\\Inbox", "\\Sent", "\\Drafts", "\\Trash", "\\Junk", "\\Archive", "\\Spam", "\\All")), None)
         if raw.upper() == "INBOX":
             special = "Inbox"
         out.append({"name": decode_folder(raw), "special": special})
@@ -251,6 +257,7 @@ class Query:
     before: str = ""  # ГГГГ-ММ-ДД, не включая
     unseen: bool = False
     limit: int = 20
+    offset: int = 0  # пропустить столько новейших писем: постраничный обход
 
 
 def search(conn, q: Query) -> list[dict]:
@@ -287,6 +294,8 @@ def search(conn, q: Query) -> list[dict]:
     _ok(typ, data, "SEARCH")
     uids = (data[0] or b"").split()
     uids.sort(key=int, reverse=True)
+    if not local:
+        uids = uids[max(0, int(q.offset or 0)):]
     limit = max(1, min(int(q.limit or 20), MAX_RESULTS))
     out: list[dict] = []
     for chunk_start in range(0, len(uids), limit):
@@ -338,6 +347,10 @@ def fetch_headers(conn, uids: list[bytes]) -> list[dict]:
             "subject": _decode(msg.get("Subject")),
             "date": _date(msg.get("Date")),
             "messageId": (msg.get("Message-ID") or "").strip(),
+            "inReplyTo": (msg.get("In-Reply-To") or "").strip(),
+            "threadId": thread_id(msg),
+            "bulk": bulk(msg),
+            "webLink": web_link(msg.get("Message-ID")),
             "seen": "\\Seen" in flags,
             "size": int(size.group(1)) if size else None,
         }
@@ -380,6 +393,64 @@ def html_to_text(s: str) -> str:
     s = html.unescape(s)
     s = re.sub(r"[ \t\r\f\v]+", " ", s)
     return re.sub(r"\n\s*\n+", "\n\n", s).strip()
+
+
+_MSGID = re.compile(r"<[^<>\s]+>")
+
+
+def thread_id(msg: Message) -> str:
+    """Цепочка письма — Message-ID её первого письма: первый в References, иначе
+    In-Reply-To, иначе собственный (IMAP не даёт идентификатора цепочки)."""
+    for header in ("References", "In-Reply-To", "Message-ID"):
+        found = _MSGID.findall(msg.get(header) or "")
+        if found:
+            return found[0]
+    return (msg.get("Message-ID") or "").strip()
+
+
+def bulk(msg: Message) -> bool:
+    """Рассылка или автоматическое письмо — по заголовкам (RFC 2369, 3834)."""
+    precedence = (msg.get("Precedence") or "").strip().lower()
+    auto = (msg.get("Auto-Submitted") or "no").strip().lower()
+    return bool(msg.get("List-Unsubscribe") or msg.get("List-Id")) or precedence in ("bulk", "list", "junk") or auto != "no"
+
+
+def web_link(message_id: str | None) -> str:
+    mid = (message_id or "").strip().strip("<>")
+    if not WEB_LINK or not mid:
+        return ""
+    return WEB_LINK.replace("{msgid}", urllib.parse.quote(mid, safe=""))
+
+
+def thread_folders(conn) -> list[str]:
+    """Папки для поиска по всему ящику: без корзины, спама и черновиков. Если у
+    ящика есть папка «Вся почта» (\\All, Gmail), достаточно её одной."""
+    folders = list_folders(conn)
+    every = [f["name"] for f in folders if f["special"] == "All"]
+    return every or [f["name"] for f in folders if f["special"] not in SKIP_ROLES]
+
+
+def read_thread(conn, thread: str, max_chars: int = 40000) -> dict:
+    """Письма цепочки из всех папок, по дате; письма остаются непрочитанными."""
+    thread = thread.strip()
+    if not _MSGID.fullmatch(thread):
+        raise MailError("thread_id is the Message-ID of the first message of the thread, like <abc@example.com>")
+    found: dict[str, tuple[str, int, dict]] = {}
+    for folder in thread_folders(conn):
+        _examine(conn, folder)
+        typ, data = conn.uid("SEARCH", "OR", "HEADER", "Message-ID", quote(thread), "HEADER", "References", quote(thread))
+        _ok(typ, data, "SEARCH")
+        uids = (data[0] or b"").split()
+        for item in fetch_headers(conn, uids):
+            key = item["messageId"] or f"{folder}:{item['uid']}"
+            found.setdefault(key, (folder, item["uid"], item))
+    if not found:
+        raise MailError(f"there is no thread {thread}")
+    per = max(2000, int(max_chars or 40000) // len(found))
+    messages = []
+    for folder, uid, _ in sorted(found.values(), key=lambda v: v[2].get("date") or ""):
+        messages.append(read_message(conn, folder, uid, per))
+    return {"threadId": thread, "messages": messages}
 
 
 def read_message(conn, folder: str, uid: int, max_chars: int = 20000) -> dict:

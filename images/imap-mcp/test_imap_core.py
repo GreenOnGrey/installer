@@ -13,6 +13,7 @@ RAW = (
     b"Subject: =?utf-8?b?0J/QvtGB0YLQsNCy0LrQsA==?=\r\n"
     b"Date: Tue, 13 Oct 2026 10:15:00 +0300\r\n"
     b"Message-ID: <m1@example.ru>\r\n"
+    b"References: <root@example.ru> <m0@example.ru>\r\n"
     b"MIME-Version: 1.0\r\n"
     b"Content-Type: multipart/mixed; boundary=b\r\n\r\n"
     b"--b\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>\xd0\xa1\xd1\x80\xd0\xbe\xd0\xba &amp; 15.11</p><script>x()</script>\r\n"
@@ -140,6 +141,51 @@ class Core(unittest.TestCase):
             self.assertFalse(any("BODY.PEEK[]" in str(c) for c in conn.cmds))
         finally:
             core.MAX_MESSAGE_BYTES = old
+
+
+class Threads(unittest.TestCase):
+    def test_search_gives_thread_bulk_and_link(self):
+        out = core.search(FakeIMAP(), core.Query())
+        self.assertEqual(out[0]["threadId"], "<root@example.ru>")
+        self.assertFalse(out[0]["bulk"])
+        self.assertEqual(out[0]["webLink"], "https://mail.yandex.ru/#search?request=m1%40example.ru")
+
+    def test_bulk_by_headers(self):
+        msg = core.email.message_from_bytes(b"List-Unsubscribe: <mailto:x@y>\r\nFrom: a@b.c\r\n\r\n")
+        self.assertTrue(core.bulk(msg))
+        self.assertTrue(core.bulk(core.email.message_from_bytes(b"Auto-Submitted: auto-replied\r\n\r\n")))
+        self.assertFalse(core.bulk(core.email.message_from_bytes(b"Auto-Submitted: no\r\n\r\n")))
+
+    def test_thread_id_without_references(self):
+        msg = core.email.message_from_bytes(b"Message-ID: <solo@x>\r\n\r\n")
+        self.assertEqual(core.thread_id(msg), "<solo@x>")
+        msg = core.email.message_from_bytes(b"Message-ID: <b@x>\r\nIn-Reply-To: <a@x>\r\n\r\n")
+        self.assertEqual(core.thread_id(msg), "<a@x>")
+
+    def test_offset_pages(self):
+        conn = FakeIMAP()
+        self.assertEqual([m["uid"] for m in core.search(conn, core.Query(offset=1))], [3])
+
+    def test_read_thread_searches_folders_and_peeks(self):
+        conn = FakeIMAP()
+        t = core.read_thread(conn, "<root@example.ru>")
+        searches = [c for c in conn.cmds if c[0] == "UID" and c[1] == "SEARCH"]
+        self.assertEqual(searches[0][2], ("OR", "HEADER", "Message-ID", '"<root@example.ru>"', "HEADER", "References", '"<root@example.ru>"'))
+        self.assertEqual(len(searches), 2)  # INBOX и «Отправленные»; Archive — \\Noselect
+        self.assertEqual(t["threadId"], "<root@example.ru>")
+        self.assertTrue(all("BODY.PEEK" in str(c) for c in conn.cmds if c[0] == "UID" and c[1] == "FETCH"))
+        # одно и то же письмо из двух папок — один раз (письмо без Message-ID не опознать)
+        ids = [m["messageId"] for m in t["messages"] if m["messageId"]]
+        self.assertEqual(ids, ["<m1@example.ru>"])
+
+    def test_read_thread_needs_message_id(self):
+        with self.assertRaises(core.MailError):
+            core.read_thread(FakeIMAP(), "subject words")
+
+    def test_all_mail_is_enough(self):
+        conn = FakeIMAP(folders=[b'(\\HasNoChildren) "/" "INBOX"', b'(\\HasNoChildren \\All) "/" "[Gmail]/All Mail"',
+                                 b'(\\HasNoChildren \\Trash) "/" "[Gmail]/Trash"'])
+        self.assertEqual(core.thread_folders(conn), ["[Gmail]/All Mail"])
 
 
 class Resolve(unittest.TestCase):

@@ -90,15 +90,17 @@ async def search_messages(
     before: str = "",
     unseen: bool = False,
     limit: int = 20,
+    offset: int = 0,
 ) -> str:
     """Finds messages in a folder, newest first. All conditions are optional and combined with AND.
 
     sender, recipient, subject, text: substrings; since and before: dates YYYY-MM-DD (before is exclusive);
-    unseen: only unread messages; limit: at most 50. Returns uid, from, to, cc, subject, date and whether
-    the message is read; read the text with read_message.
+    unseen: only unread messages; limit: at most 50; offset: skip that many newest messages (paging).
+    Returns uid, from, to, cc, subject, date, threadId, whether the message is read and whether it is a
+    mailing (bulk); read the text with read_message or the whole thread with read_thread.
     """
     q = core.Query(folder=folder or "INBOX", sender=sender, recipient=recipient, subject=subject, text=text,
-                   since=since, before=before, unseen=unseen, limit=limit)
+                   since=since, before=before, unseen=unseen, limit=limit, offset=offset)
     return await _run(ctx, lambda conn: core.search(conn, q))
 
 
@@ -107,6 +109,14 @@ async def read_message(ctx: Context, folder: str, uid: int, max_chars: int = 200
     """Reads one message by folder and uid: headers, text (HTML without markup) and the list of attachments
     (names and sizes, without content). The message stays unread."""
     return await _run(ctx, lambda conn: core.read_message(conn, folder, uid, max_chars))
+
+
+@mcp.tool(annotations=READ)
+async def read_thread(ctx: Context, thread_id: str, max_chars: int = 40000) -> str:
+    """Reads a whole thread from every folder of the mailbox, oldest first: headers and text of each
+    message. thread_id is the threadId of search_messages (the Message-ID of the first message).
+    The messages stay unread."""
+    return await _run(ctx, lambda conn: core.read_thread(conn, thread_id, max_chars))
 
 
 def _plain(status: int, body: bytes, content_type: bytes = b"application/json"):

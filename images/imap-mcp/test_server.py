@@ -59,7 +59,7 @@ class Server(unittest.TestCase):
             self.assertEqual(c.post("/mcp", json=INIT, headers=auth).status_code, 200)
             tools = c.post("/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}, headers=auth).json()
             names = {t["name"]: t["annotations"]["readOnlyHint"] for t in tools["result"]["tools"]}
-            self.assertEqual(names, {"list_folders": True, "search_messages": True, "read_message": True})
+            self.assertEqual(names, {"list_folders": True, "search_messages": True, "read_message": True, "read_thread": True})
             res = c.post("/mcp", json={"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                                        "params": {"name": "list_folders", "arguments": {}}}, headers=auth).json()
         self.assertFalse(res["result"].get("isError"))

@@ -30,6 +30,8 @@ spec:
             - { name: USERINFO_URL, value: "https://login.yandex.ru/info?format=json" }
             - { name: USERINFO_AUTH, value: OAuth }
             - { name: USERINFO_FIELD, value: default_email }
+            # ссылка на письмо в заметках памяти коммуникаций (FTR.NAB.CMN-0003 R6)
+            - { name: WEB_LINK, value: {{ .Values.yandexMail.webLink | quote }} }
             - { name: PORT, value: "8000" }
           readinessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10 }
           livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 30 }
