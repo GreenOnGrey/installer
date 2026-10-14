@@ -21,7 +21,7 @@ env:
 
 jobs:
   # Образы MCP-серверов без официальных образов (FTR.NAB.CMN-0006 tech §2.7):
-  # ghcr.io/<организация>/docling-mcp и workspace-mcp, тег — версия пакета из
+  # ghcr.io/<организация>/docling-mcp и imap-mcp, тег — версия из
   # config/versions.env. Уже опубликованный тег не пересобирается.
   publish-images:
     runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
@@ -149,6 +149,12 @@ jobs:
           GRAFANA_GITHUB_CLIENT_ID: ${{ vars.GRAFANA_GITHUB_CLIENT_ID }}
           GRAFANA_GITHUB_ORG: ${{ vars.GRAFANA_GITHUB_ORG }}
           GRAFANA_GITHUB_CLIENT_SECRET: ${{ secrets.GRAFANA_GITHUB_CLIENT_SECRET }}
+          # MCP-серверы стенда (FTR.NAB.CMN-0006): опции, не секреты.
+          MCP_DOCLING: ${{ vars.MCP_DOCLING }}
+          MCP_SEARCH: ${{ vars.MCP_SEARCH }}
+          MCP_YANDEX_MAIL: ${{ vars.MCP_YANDEX_MAIL }}
+          MCP_DOCLING_MAX_MB: ${{ vars.MCP_DOCLING_MAX_MB }}
+          MCP_SEARCH_ENGINES: ${{ vars.MCP_SEARCH_ENGINES }}
         # Машине прода не нужен доступ к GitHub (deploy keys запрещены политикой
         # организации): раннер передаёт ей выгрузку тега по тому же SSH.
         run: |
@@ -161,7 +167,8 @@ jobs:
           fi
           # Заданные параметры — в stdin выкатки (секрет не попадает в argv и на диск).
           for k in PUBLIC_ACCESS ACME_EMAIL ACME_ISSUER PUBLIC_BASE_DOMAIN PUBLIC_IP \
-            GRAFANA_GITHUB_CLIENT_ID GRAFANA_GITHUB_ORG GRAFANA_GITHUB_CLIENT_SECRET; do
+            GRAFANA_GITHUB_CLIENT_ID GRAFANA_GITHUB_ORG GRAFANA_GITHUB_CLIENT_SECRET \
+            MCP_DOCLING MCP_SEARCH MCP_YANDEX_MAIL MCP_DOCLING_MAX_MB MCP_SEARCH_ENGINES; do
             if [[ -n ${!k} ]]; then printf '%s=%s\n' "$k" "$(printf '%s' "${!k}" | tr -d '\r\n')"; fi
           done | remote "bash $PROD_DIR/deploy-remote.sh up $PROD_DIR $TAG $SHA $ACTOR"
 

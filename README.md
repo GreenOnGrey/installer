@@ -158,7 +158,6 @@ TCP-подключение: токен получает само приложе�
 |---|---|---|---|
 | `MCP_DOCLING=true` | Разбор документов: `docling-serve` (CPU, OCR `ru`, `en`) и `docling-mcp` | ~2,3 / 5 ГиБ | ~4,4 ГБ |
 | `MCP_SEARCH=true` | Веб-поиск: SearXNG и `mcp-searxng` | ~0,4 / 0,8 ГиБ | ~0,3 ГБ |
-| `MCP_GMAIL=true` | Gmail только для чтения: `workspace-mcp` | ~0,2 / 0,5 ГиБ | ~0,3 ГБ |
 | `MCP_YANDEX_MAIL=true` | Яндекс Почта только для чтения: собственный сервер `imap-mcp` | ~0,06 / 0,25 ГиБ | ~0,1 ГБ |
 
 Перед развёртыванием `up` проверяет бюджет памяти (две трети памяти ноды, как проверка `resources`) и,
@@ -167,9 +166,8 @@ TCP-подключение: токен получает само приложе�
 рекомендуется `MK_MEMORY=16g`.
 
 Другие параметры: `MCP_DOCLING_MAX_MB` — предельный размер документа для `docling-serve`;
-`MCP_SEARCH_ENGINES` — поисковые системы SearXNG; `MCP_GMAIL_GOOGLE_CLIENT_ID` — OAuth-клиент Google
-(обязателен при `MCP_GMAIL=true`). Ключи доступа генерируются при первом `up` и хранятся в секретах
-namespace `mcp`. Образы `docling-mcp`, `workspace-mcp` и `imap-mcp` берутся из `ghcr.io/greenongrey` с секретом
+`MCP_SEARCH_ENGINES` — поисковые системы SearXNG. Ключи доступа генерируются при первом `up` и хранятся
+в секретах namespace `mcp`. Образы `docling-mcp` и `imap-mcp` берутся из `ghcr.io/greenongrey` с секретом
 `ghcr-pull`, который `up` копирует из namespace `nabu`.
 
 **Внесение в каталог Nabu.** `./hammurapi-infra.sh creds` выводит адреса и ключи. В админке Nabu →
@@ -182,21 +180,10 @@ namespace `mcp`. Образы `docling-mcp`, `workspace-mcp` и `imap-mcp` бе�
   `source` конвертации как «Файл пространства». Остальные инструменты (список и изменение кэша,
   работа с диском сервера) не разрешайте.
 - **Веб-поиск** — `http://search.mcp.svc:3000/mcp`, платформенный, `Authorization: Bearer <ключ>`.
-- **Gmail** — `http://gmail.mcp.svc:8000/mcp`, персональный, OAuth: authorize
-  `https://accounts.google.com/o/oauth2/v2/auth`, token `https://oauth2.googleapis.com/token`, client ID и
-  secret клиента Google, scope `https://www.googleapis.com/auth/gmail.readonly`. Проверка позиции идёт с
-  личным доступом администратора — сначала подключите её в «Подключениях».
 - **Яндекс Почта** — `http://yandex-mail.mcp.svc:8000/mcp`, персональный, OAuth: authorize
   `https://oauth.yandex.ru/authorize`, token `https://oauth.yandex.ru/token`, ClientID и Client secret
-  приложения Яндекса, scopes `mail:imap_ro login:email`. Все инструменты сервера только читают.
-
-**OAuth-клиент Google для Gmail.** В Google Cloud Console включите Gmail API, создайте OAuth client типа
-Web application с redirect URI — OAuth callback позиции из формы каталога Nabu. Два варианта:
-
-- *режим тестирования* — до 100 тестовых пользователей, вписанных в «Audience»; Google просит войти заново
-  раз в 7 дней, верификация не нужна;
-- *Internal* — клиент в Google Workspace заказчика: без верификации и без 7-дневного срока, но только для
-  ящиков этого домена (личный `@gmail.com` не подойдёт).
+  приложения Яндекса, scopes `mail:imap_ro login:email`. Все инструменты сервера только читают. Проверка
+  позиции идёт с личным доступом администратора — сначала подключите её в «Подключениях».
 
 **OAuth-приложение Яндекса для Яндекс Почты.** На [oauth.yandex.ru](https://oauth.yandex.ru) создайте
 приложение «Веб-сервисы» с Redirect URI — OAuth callback позиции из формы каталога Nabu — и доступами
@@ -214,9 +201,6 @@ Web application с redirect URI — OAuth callback позиции из форм�
 
 Пока доступ выключен, инструменты отвечают ошибкой с тем, что включить.
 
-`gmail.readonly` — ограниченная область: для публичного production-клиента Google требует верификацию и
-проверку безопасности CASA; стенд её не проходит.
-
 ## Выкатка на прод
 
 Прод — демо-стенд в Google Cloud. Workflow [`deploy-prod`](.github/workflows/deploy-prod.yml)
@@ -229,7 +213,7 @@ Web application с redirect URI — OAuth callback позиции из форм�
   тег, хранятся последние 5 выгрузок. Машине прода не нужен доступ к GitHub — deploy keys
   запрещены политикой организации;
 - `/opt/hammurapi-infra/local.env` и файлы секретов остаются на машине и в workflow не
-  передаются; исключение — публичный доступ и вход в Grafana через GitHub (ниже): их параметры идут в
+  передаются; исключение — публичный доступ, вход в Grafana через GitHub и MCP-серверы (ниже): их параметры идут в
   `up` через stdin SSH-сессии и на диск не пишутся. Журналы всех запусков — в `/opt/hammurapi-infra/logs`;
 - выкатки идут по одной (`concurrency`), параллельный `up` на машине блокирует
   `/var/lock/hammurapi-infra.lock` (код 17);
@@ -249,6 +233,8 @@ Web application с redirect URI — OAuth callback позиции из форм�
 | `PUBLIC_ACCESS`, `ACME_EMAIL` | переменные | публичный доступ | `true` и адрес для Let's Encrypt; `ACME_ISSUER`, `PUBLIC_BASE_DOMAIN`, `PUBLIC_IP` — по желанию ([docs/hammurapi.md](docs/hammurapi.md#13-конфигурация-стенда)) |
 | `GRAFANA_GITHUB_CLIENT_ID`, `GRAFANA_GITHUB_ORG` | переменные | вход в Grafana через GitHub | OAuth-приложение организации; организация по умолчанию — `GreenOnGrey` ([docs/hammurapi.md](docs/hammurapi.md#12-oauth-приложение-github-для-grafana)) |
 | `GRAFANA_GITHUB_CLIENT_SECRET` | секрет | вход в Grafana через GitHub | Client secret OAuth-приложения |
+| `MCP_DOCLING`, `MCP_SEARCH`, `MCP_YANDEX_MAIL` | переменные | MCP-серверы | `true` включает сервер (раздел «MCP-серверы»); незаданная переменная — значение из `local.env` |
+| `MCP_DOCLING_MAX_MB`, `MCP_SEARCH_ENGINES` | переменные | MCP-серверы | Параметры серверов |
 
 Подготовка машины прода — в [docs/gcp.md](docs/gcp.md#машина-прода).
 

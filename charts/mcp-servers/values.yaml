@@ -1,5 +1,5 @@
 # MCP-серверы стенда (FTR.NAB.CMN-0006, tech §2.5). Включение — опциями
-# MCP_DOCLING, MCP_SEARCH, MCP_GMAIL, MCP_YANDEX_MAIL; образы и версии — config/versions.env.
+# MCP_DOCLING, MCP_SEARCH, MCP_YANDEX_MAIL; образы и версии — config/versions.env.
 # Ключи доступа приходят из секретов namespace (их создаёт hammurapi-infra.sh).
 
 docling:
@@ -28,14 +28,6 @@ search:
     resources: { requests: { cpu: 50m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
   # Поисковые системы SearXNG (решение 3: без Google — он быстрее всех блокирует IP дата-центра).
   engines: [duckduckgo, bing, brave, mojeek, wikipedia, github, stackoverflow, arxiv]
-
-gmail:
-  enabled: false
-  image: ghcr.io/greenongrey/workspace-mcp:2.1.0
-  # OAuth-клиент Google, которым Nabu получает токены пользователей; сервер
-  # проверяет, что токен выдан этому клиенту. Обязателен при gmail.enabled.
-  googleClientId: ""
-  resources: { requests: { cpu: 20m, memory: 192Mi }, limits: { cpu: 500m, memory: 512Mi } }
 
 yandexMail:
   enabled: false

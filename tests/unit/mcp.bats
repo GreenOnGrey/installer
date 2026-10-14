@@ -29,7 +29,7 @@ esac'
 }
 
 @test "STD-01: по умолчанию все серверы выключены" {
-  [ "$MCP_DOCLING" = false ] && [ "$MCP_SEARCH" = false ] && [ "$MCP_GMAIL" = false ]
+  [ "$MCP_DOCLING" = false ] && [ "$MCP_SEARCH" = false ] && [ "$MCP_YANDEX_MAIL" = false ]
   run mcp_enabled
   [ "$status" -ne 0 ]
 }
@@ -39,13 +39,6 @@ esac'
   run validate_mcp_config
   [ "$status" -eq 2 ]
   [[ $output == *"MCP_DOCLING должен быть true или false"* ]]
-}
-
-@test "Gmail без client ID Google — код 2" {
-  MCP_GMAIL=true MCP_GMAIL_GOOGLE_CLIENT_ID=
-  run validate_mcp_config
-  [ "$status" -eq 2 ]
-  [[ $output == *MCP_GMAIL_GOOGLE_CLIENT_ID* ]]
 }
 
 @test "неверный список поисковых систем — код 2" {
@@ -127,21 +120,19 @@ esac'
 }
 
 @test "значения чарта — из versions.env и конфигурации" {
-  MCP_DOCLING=true MCP_GMAIL=true MCP_GMAIL_GOOGLE_CLIENT_ID=cid.apps.googleusercontent.com
+  MCP_DOCLING=true
   run mcp_helm_args
   [[ $output == *"docling.enabled=true"* ]]
-  [[ $output == *"gmail.googleClientId=cid.apps.googleusercontent.com"* ]]
   [[ $output == *"ghcr.io/greenongrey/docling-mcp:$DOCLING_MCP_VERSION"* ]]
   [[ $output == *"search.engines=[\"duckduckgo\""* ]]
 }
 
 @test "STD-17: creds — адреса и способ доступа только включённых серверов" {
-  MCP_SEARCH=true MCP_GMAIL=true MCP_GMAIL_GOOGLE_CLIENT_ID=cid MCP_YANDEX_MAIL=true
+  MCP_SEARCH=true MCP_YANDEX_MAIL=true
   printf 'k-search' >"$KUBE_SECRETS/mcp-search-key"
   run mcp_creds_json
   [ "$(jq -r '.search.url' <<<"$output")" = "http://search.mcp.svc:3000/mcp" ]
   [ "$(jq -r '.search.value' <<<"$output")" = "Bearer k-search" ]
-  [ "$(jq -r '.gmail.oauth.scopes[0]' <<<"$output")" = "https://www.googleapis.com/auth/gmail.readonly" ]
   [ "$(jq -r 'has("docling")' <<<"$output")" = false ]
   [ "$(jq -r '."yandex-mail".url' <<<"$output")" = "http://yandex-mail.mcp.svc:8000/mcp" ]
   [ "$(jq -c '."yandex-mail".oauth.scopes' <<<"$output")" = '["mail:imap_ro","login:email"]' ]
@@ -197,5 +188,5 @@ esac'
   [ "$(jq -r '.search.tools' <<<"$output")" = 4 ]
   [ "$(jq -r '.search.checks | length' <<<"$output")" = 2 ]
   [ "$(jq -r '.docling.ready' <<<"$output")" = false ]
-  [ "$(jq -r '.gmail.enabled' <<<"$output")" = false ]
+  [ "$(jq -r '."yandex-mail".enabled' <<<"$output")" = false ]
 }

@@ -108,6 +108,16 @@ fake_release() {
   [[ $(uname) != Linux ]] || [ "$(readlink "$d/current")" = releases/v1.0.0 ]
 }
 
+@test "FTR.NAB.CMN-0006: опции MCP-серверов из GitHub — в окружение up" {
+  local d=$BATS_TEST_TMPDIR/prod
+  mkdir -p "$d/releases/v1.0.0" "$d/logs"
+  printf '#!/usr/bin/env bash\necho "mcp=${MCP_DOCLING:-}/${MCP_YANDEX_MAIL:-} engines=${MCP_SEARCH_ENGINES:-}"\n' >"$d/releases/v1.0.0/hammurapi-infra.sh"
+  run bash "$ROOT/.github/scripts/deploy-remote.sh" up "$d" v1.0.0 abc anna \
+    <<<$'MCP_DOCLING=true\nMCP_YANDEX_MAIL=true\nMCP_SEARCH_ENGINES=bing,mojeek\n'
+  [ "$status" -eq 0 ]
+  [[ $output == *"mcp=true/true engines=bing,mojeek"* ]]
+}
+
 @test "PUB-15: чужой параметр из GitHub — код 2, up не запускается" {
   local d=$BATS_TEST_TMPDIR/prod
   fake_release "$d"

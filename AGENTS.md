@@ -35,8 +35,8 @@ charts/hammurapi-web     the SPA
 charts/nabu-core         Nabu: api, worker, agent, relay, migrate, cleaner, RBAC for sandboxes
 charts/nabu-web          the SPA of Nabu
 charts/landing           the site of GreenOnGrey: nginx with static pages
-charts/mcp-servers       optional MCP servers of the stand (FTR.NAB.CMN-0006): docling, search, gmail, yandex-mail;
-                         lib/mcp.sh deploys them by MCP_* options, images/ builds docling-mcp, workspace-mcp and
+charts/mcp-servers       optional MCP servers of the stand (FTR.NAB.CMN-0006): docling, search, yandex-mail;
+                         lib/mcp.sh deploys them by MCP_* options, images/ builds docling-mcp and
                          imap-mcp (our own read-only IMAP server: python -m unittest in images/imap-mcp)
 config/                  defaults.env, versions.env (chart and tool versions)
 values/                  Helm values of the stand's components

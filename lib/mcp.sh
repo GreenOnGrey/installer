@@ -1,7 +1,7 @@
 # shellcheck shell=bash disable=SC2016
 # SC2016: скрипты проб намеренно в одинарных кавычках — они выполняются в контейнерах.
 # MCP-серверы стенда (FTR.NAB.CMN-0006, tech §2): разбор документов, веб-поиск,
-# Gmail и Яндекс Почта только для чтения. Каждый включается своей опцией; namespace $NS_MCP,
+# Яндекс Почта только для чтения. Каждый включается своей опцией; namespace $NS_MCP,
 # один релиз mcp-servers. Ключи генерируются при первом `up` и хранятся только
 # в секретах namespace.
 
@@ -9,10 +9,10 @@ MCP_RELEASE=mcp-servers
 
 # --- Свойства серверов: одна таблица вместо ветвлений по серверу ---
 
-MCP_SERVERS=(docling search gmail yandex-mail)
+MCP_SERVERS=(docling search yandex-mail)
 # сервис и порт MCP; Deployment'ы сервера (готовность в status)
-declare -gA MCP_SERVICE=([docling]=docling-mcp:8080 [search]=search:3000 [gmail]=gmail:8000 [yandex-mail]=yandex-mail:8000)
-declare -gA MCP_DEPLOYMENTS=([docling]="docling-mcp docling-serve" [search]=search [gmail]=gmail [yandex-mail]=yandex-mail)
+declare -gA MCP_SERVICE=([docling]=docling-mcp:8080 [search]=search:3000 [yandex-mail]=yandex-mail:8000)
+declare -gA MCP_DEPLOYMENTS=([docling]="docling-mcp docling-serve" [search]=search [yandex-mail]=yandex-mail)
 # секреты, которые `up` создаёт для сервера
 declare -gA MCP_SECRETS=([docling]="mcp-docling-serve-key mcp-docling-key" [search]="mcp-search-key mcp-searxng-secret")
 # платформенный ключ доступа (секрет) — только у платформенных серверов
@@ -22,7 +22,6 @@ declare -gA MCP_WANT_TOOLS=([docling]="convert_document_into_docling_document ex
   [search]="searxng_web_search web_url_read")
 # OAuth персональных серверов для каталога Nabu (creds)
 declare -gA MCP_OAUTH=(
-  [gmail]='{"authorizeUrl":"https://accounts.google.com/o/oauth2/v2/auth","tokenUrl":"https://oauth2.googleapis.com/token","scopes":["https://www.googleapis.com/auth/gmail.readonly"]}'
   [yandex-mail]='{"authorizeUrl":"https://oauth.yandex.ru/authorize","tokenUrl":"https://oauth.yandex.ru/token","scopes":["mail:imap_ro","login:email"]}')
 # подсказки позиции каталога: разрешённые инструменты и файловые аргументы (README, «Внесение в каталог»)
 declare -gA MCP_CATALOG_HINT=(
@@ -67,9 +66,6 @@ validate_mcp_config() {
   fi
   [[ $MCP_SEARCH_ENGINES =~ ^[a-z0-9_]+(,[a-z0-9_]+)*$ ]] ||
     die "$E_USAGE" "MCP_SEARCH_ENGINES: имена систем SearXNG через запятую, например duckduckgo,bing"
-  if mcp_on gmail; then
-    require_param MCP_GMAIL MCP_GMAIL_GOOGLE_CLIENT_ID
-  fi
 }
 
 # mcp_helm_args — значения чарта из конфигурации и config/versions.env.
@@ -77,13 +73,12 @@ mcp_helm_args() {
   local engines
   engines=$(tr ',' '\n' <<<"$MCP_SEARCH_ENGINES" | jq -Rnc '[inputs | select(length > 0)]' 2>/dev/null ||
     printf '[]')
-  local docling search gmail yandex
+  local docling search yandex
   docling=$(mcp_on docling && echo true || echo false)
   search=$(mcp_on search && echo true || echo false)
-  gmail=$(mcp_on gmail && echo true || echo false)
   yandex=$(mcp_on yandex-mail && echo true || echo false)
   printf '%s\n' \
-    --set "docling.enabled=$docling" --set "search.enabled=$search" --set "gmail.enabled=$gmail" \
+    --set "docling.enabled=$docling" --set "search.enabled=$search" \
     --set "yandexMail.enabled=$yandex" \
     --set-string "docling.serve.image=$DOCLING_SERVE_IMAGE" \
     --set-string "docling.mcp.image=$MCP_IMAGE_REGISTRY/docling-mcp:$DOCLING_MCP_VERSION" \
@@ -92,8 +87,6 @@ mcp_helm_args() {
     --set-string "search.mcp.image=$MCP_SEARXNG_IMAGE" \
     --set-string "search.searxng.image=$SEARXNG_IMAGE" \
     --set-json "search.engines=$engines" \
-    --set-string "gmail.image=$MCP_IMAGE_REGISTRY/workspace-mcp:$WORKSPACE_MCP_VERSION" \
-    --set-string "gmail.googleClientId=${MCP_GMAIL_GOOGLE_CLIENT_ID:-}" \
     --set-string "yandexMail.image=$MCP_IMAGE_REGISTRY/imap-mcp:$IMAP_MCP_VERSION" \
     --set-string "s3.namespace=$NS_STORAGES"
 }
@@ -216,9 +209,6 @@ mcp_creds_json() {
     fi
     if [[ -n ${MCP_OAUTH[$srv]:-} ]]; then
       entry=$(jq -c --argjson o "${MCP_OAUTH[$srv]}" '. + {oauth: $o}' <<<"$entry")
-    fi
-    if [[ $srv == gmail ]]; then
-      entry=$(jq -c --arg c "${MCP_GMAIL_GOOGLE_CLIENT_ID:-}" '.oauth.clientId = $c' <<<"$entry")
     fi
     if [[ -n ${MCP_CATALOG_HINT[$srv]:-} ]]; then
       entry=$(jq -c --argjson h "${MCP_CATALOG_HINT[$srv]}" '. + $h' <<<"$entry")

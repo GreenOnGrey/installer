@@ -168,14 +168,13 @@ crd_schemas() {
 mcp_chart() {
   printf '\nMCP-серверы\n'
   local combo dir f args=()
-  for combo in docling search gmail yandex-mail all; do
-    MCP_DOCLING=false MCP_SEARCH=false MCP_GMAIL=false MCP_YANDEX_MAIL=false MCP_GMAIL_GOOGLE_CLIENT_ID=cid.apps.googleusercontent.com
+  for combo in docling search yandex-mail all; do
+    MCP_DOCLING=false MCP_SEARCH=false MCP_YANDEX_MAIL=false
     case $combo in
       docling) MCP_DOCLING=true ;;
       search) MCP_SEARCH=true ;;
-      gmail) MCP_GMAIL=true ;;
       yandex-mail) MCP_YANDEX_MAIL=true ;;
-      all) MCP_DOCLING=true MCP_SEARCH=true MCP_GMAIL=true MCP_YANDEX_MAIL=true ;;
+      all) MCP_DOCLING=true MCP_SEARCH=true MCP_YANDEX_MAIL=true ;;
     esac
     dir=$OUT/mcp-$combo
     mkdir -p "$dir"
@@ -196,9 +195,8 @@ mcp_chart() {
     case $combo in
       docling) want="docling-mcp docling-serve " ;;
       search) want="search " ;;
-      gmail) want="gmail " ;;
       yandex-mail) want="yandex-mail " ;;
-      all) want="docling-mcp docling-serve gmail search yandex-mail " ;;
+      all) want="docling-mcp docling-serve search yandex-mail " ;;
     esac
     if [[ $deps == "$want" ]]; then pass "STD-02 $combo: только $want"; else fail "STD-02 $combo: Deployment'ы «$deps», ожидались «$want»"; fi
     local bad
@@ -219,7 +217,7 @@ mcp_chart() {
     else
       fail "SEC-04 $combo: egress-internet не исключает частные сети"
     fi
-    if [[ $combo == gmail || $combo == yandex-mail ]] || grep -Eq '(mcp-[a-z-]+-key|searxng-secret)' "$f" && ! grep -Eq 'value: "?[0-9a-f]{64}' "$f"; then
+    if [[ $combo == yandex-mail ]] || grep -Eq '(mcp-[a-z-]+-key|searxng-secret)' "$f" && ! grep -Eq 'value: "?[0-9a-f]{64}' "$f"; then
       pass "STD-14 $combo: ключи только из секретов"
     else
       fail "STD-14 $combo: ключи не из секретов"
@@ -230,11 +228,6 @@ mcp_chart() {
     pass "SRC-06: SearXNG — заданные системы, без Google, лимитер выключен"
   else
     fail "SRC-06: настройки SearXNG"
-  fi
-  if helm template x "$ROOT/charts/mcp-servers" --set gmail.enabled=true >/dev/null 2>&1; then
-    fail "Gmail без client ID Google рендерится"
-  else
-    pass "Gmail без client ID Google не рендерится"
   fi
 }
 

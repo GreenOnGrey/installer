@@ -17,7 +17,7 @@ metadata:
   labels: {{- include "mcp.labels" . | nindent 4 }}
 spec:
   podSelector:
-    matchExpressions: [{ key: app.kubernetes.io/name, operator: In, values: [docling-mcp, search, gmail, yandex-mail] }]
+    matchExpressions: [{ key: app.kubernetes.io/name, operator: In, values: [docling-mcp, search, yandex-mail] }]
   policyTypes: [Ingress]
   ingress:
     - from:
@@ -60,7 +60,7 @@ metadata:
   labels: {{- include "mcp.labels" . | nindent 4 }}
 spec:
   podSelector:
-    matchExpressions: [{ key: app.kubernetes.io/name, operator: In, values: [docling-serve, search, gmail, yandex-mail] }]
+    matchExpressions: [{ key: app.kubernetes.io/name, operator: In, values: [docling-serve, search, yandex-mail] }]
   policyTypes: [Egress]
   egress:
     - to:

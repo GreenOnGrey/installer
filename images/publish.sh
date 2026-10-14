@@ -21,8 +21,8 @@ if ((!test_only)); then
 fi
 
 # imap-mcp — собственный сервер: собирается из исходников каталога, версия — IMAP_MCP_VERSION.
-declare -A VERSIONS=([docling-mcp]=$DOCLING_MCP_VERSION [workspace-mcp]=$WORKSPACE_MCP_VERSION [imap-mcp]=$IMAP_MCP_VERSION)
-for name in docling-mcp workspace-mcp imap-mcp; do
+declare -A VERSIONS=([docling-mcp]=$DOCLING_MCP_VERSION [imap-mcp]=$IMAP_MCP_VERSION)
+for name in docling-mcp imap-mcp; do
   version=${VERSIONS[$name]}
   image=$registry/$name:$version
   if ((!test_only)) && docker manifest inspect "$image" >/dev/null 2>&1; then

@@ -32,7 +32,9 @@ case $mode in
     # Только ключи из списка и только в окружение up: на диск не пишутся, в argv не
     # попадают; окружение важнее local.env (load_config).
     allowed=" PUBLIC_ACCESS ACME_EMAIL ACME_ISSUER PUBLIC_BASE_DOMAIN PUBLIC_IP"
-    allowed+=" GRAFANA_GITHUB_CLIENT_ID GRAFANA_GITHUB_CLIENT_SECRET GRAFANA_GITHUB_ORG "
+    allowed+=" GRAFANA_GITHUB_CLIENT_ID GRAFANA_GITHUB_CLIENT_SECRET GRAFANA_GITHUB_ORG"
+    # MCP-серверы стенда (FTR.NAB.CMN-0006)
+    allowed+=" MCP_DOCLING MCP_SEARCH MCP_YANDEX_MAIL MCP_DOCLING_MAX_MB MCP_SEARCH_ENGINES "
     if [[ ! -t 0 ]]; then
       while IFS= read -r line || [[ -n $line ]]; do
         line=${line%$'\r'}
