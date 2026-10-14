@@ -2,3 +2,7 @@ config/local.env
 logs/
 .work/
 charts/hammurapi-dashboards/files/
+
+# Python (images/imap-mcp)
+__pycache__/
+*.pyc

@@ -22,6 +22,8 @@ source "$ROOT/lib/checks.sh"
 source "$ROOT/lib/deploy.sh"
 # shellcheck source=../lib/public.sh
 source "$ROOT/lib/public.sh"
+# shellcheck source=../lib/mcp.sh
+source "$ROOT/lib/mcp.sh"
 setup_color
 load_config "$ROOT" /dev/null
 KUBE_VERSION=${K8S_VERSION#v}
@@ -73,16 +75,21 @@ jq() { command jq "$@" | tr -d '\r'; }
 # docs_json <файлы…> — все объекты манифестов как поток JSON.
 docs_json() { cat "$@" | yq -o=json -I=0 'select(. != null)'; }
 
-check_resources() {
-  local dir=$1 missing
-  missing=$(docs_json "$dir"/helm-*.log | jq -r '
+# resources_missing <файлы…> — контейнеры без запросов или лимитов.
+resources_missing() {
+  docs_json "$@" | jq -r '
     select(.kind | IN("Deployment", "StatefulSet", "DaemonSet", "Job", "Pod", "CronJob"))
     | (if .kind == "Pod" then .spec elif .kind == "CronJob" then .spec.jobTemplate.spec.template.spec else .spec.template.spec end) as $s
     | "\(.kind)/\(.metadata.name)" as $o
     | (($s.containers // []) + ($s.initContainers // []))[]
     | select((.resources.requests.cpu // "") == "" or (.resources.requests.memory // "") == ""
         or (.resources.limits.cpu // "") == "" or (.resources.limits.memory // "") == "")
-    | "\($o)/\(.name)"')
+    | "\($o)/\(.name)"'
+}
+
+check_resources() {
+  local dir=$1 missing
+  missing=$(resources_missing "$dir"/helm-*.log)
   missing+=$(docs_json "$dir"/helm-storages.log | jq -r '
     select(.kind == "KafkaNodePool" or .kind == "Cluster")
     | select((.spec.resources.requests.memory // "") == "" or (.spec.resources.limits.memory // "") == "")
@@ -152,6 +159,83 @@ crd_schemas() {
         jq --arg v "$v" '.spec.versions[] | select(.name == $v) | .schema.openAPIV3Schema' <<<"$crd" >"$schemas/$group/${kind}_$v.json"
       done
     done
+}
+
+# --- FTR.NAB.CMN-0006: MCP-серверы ---
+
+# mcp_chart — релиз mcp-servers при каждой опции отдельно и при всех вместе:
+# kubeconform, запросы и лимиты, безопасность контейнеров, сетевые политики (M).
+mcp_chart() {
+  printf '\nMCP-серверы\n'
+  local combo dir f args=()
+  for combo in docling search gmail yandex-mail all; do
+    MCP_DOCLING=false MCP_SEARCH=false MCP_GMAIL=false MCP_YANDEX_MAIL=false MCP_GMAIL_GOOGLE_CLIENT_ID=cid.apps.googleusercontent.com
+    case $combo in
+      docling) MCP_DOCLING=true ;;
+      search) MCP_SEARCH=true ;;
+      gmail) MCP_GMAIL=true ;;
+      yandex-mail) MCP_YANDEX_MAIL=true ;;
+      all) MCP_DOCLING=true MCP_SEARCH=true MCP_GMAIL=true MCP_YANDEX_MAIL=true ;;
+    esac
+    dir=$OUT/mcp-$combo
+    mkdir -p "$dir"
+    f=$dir/mcp-servers.yaml
+    mapfile -t args < <(mcp_helm_args)
+    if ! helm template "$MCP_RELEASE" "$ROOT/charts/mcp-servers" -n mcp --kube-version "$KUBE_VERSION" "${args[@]}" >"$f" 2>&1; then
+      fail "STD-02 $combo: чарт mcp-servers не рендерится: $(tail -1 "$f")"
+      continue
+    fi
+    kubeconform_file "$f" "mcp-servers $combo"
+    local missing
+    missing=$(resources_missing "$f")
+    if [[ -z $missing ]]; then pass "RES-01 mcp-servers $combo: запросы и лимиты заданы"; else
+      fail "RES-01 mcp-servers $combo: нет запросов или лимитов: $(echo "$missing" | tr '\n' ' ')"
+    fi
+    local deps want
+    deps=$(docs_json "$f" | jq -r 'select(.kind == "Deployment") | .metadata.name' | sort | tr '\n' ' ')
+    case $combo in
+      docling) want="docling-mcp docling-serve " ;;
+      search) want="search " ;;
+      gmail) want="gmail " ;;
+      yandex-mail) want="yandex-mail " ;;
+      all) want="docling-mcp docling-serve gmail search yandex-mail " ;;
+    esac
+    if [[ $deps == "$want" ]]; then pass "STD-02 $combo: только $want"; else fail "STD-02 $combo: Deployment'ы «$deps», ожидались «$want»"; fi
+    local bad
+    bad=$(docs_json "$f" | jq -r 'select(.kind == "Deployment") | .metadata.name as $d | .spec.template.spec as $s
+      | select($s.automountServiceAccountToken != false or $s.securityContext.runAsNonRoot != true) // empty | $d,
+      ($s.containers[] | select(.securityContext.allowPrivilegeEscalation != false or .securityContext.runAsNonRoot != true) | "\($d)/\(.name)")')
+    if [[ -z $bad ]]; then pass "SEC-06 $combo: не root, без токена ServiceAccount"; else fail "SEC-06 $combo: $(echo "$bad" | tr '\n' ' ')"; fi
+    local pols
+    pols=$(docs_json "$f" | jq -r 'select(.kind == "NetworkPolicy") | .metadata.name' | sort | tr '\n' ' ')
+    if [[ $pols == *default-deny* && $pols == *from-nabu* && $pols == *egress-internet* && $pols == *docling-serve-in* ]]; then
+      pass "SEC-05 $combo: сетевые политики на месте"
+    else
+      fail "SEC-05 $combo: политики «$pols»"
+    fi
+    if docs_json "$f" | jq -e 'select(.kind == "NetworkPolicy" and .metadata.name == "egress-internet")
+        | .spec.egress[0].to[0].ipBlock.except | (index("10.0.0.0/8") != null and index("169.254.0.0/16") != null)' >/dev/null; then
+      pass "SEC-04 $combo: выход в интернет без частных сетей и метаданных облака"
+    else
+      fail "SEC-04 $combo: egress-internet не исключает частные сети"
+    fi
+    if [[ $combo == gmail || $combo == yandex-mail ]] || grep -Eq '(mcp-[a-z-]+-key|searxng-secret)' "$f" && ! grep -Eq 'value: "?[0-9a-f]{64}' "$f"; then
+      pass "STD-14 $combo: ключи только из секретов"
+    else
+      fail "STD-14 $combo: ключи не из секретов"
+    fi
+  done
+  if docs_json "$OUT/mcp-search/mcp-servers.yaml" | jq -r 'select(.kind == "ConfigMap" and .metadata.name == "searxng-settings") | .data["settings.yml"]' |
+    yq -e '.server.limiter == false and (.use_default_settings.engines.keep_only | length) == 8 and (.use_default_settings.engines.keep_only | contains(["google"]) | not)' >/dev/null; then
+    pass "SRC-06: SearXNG — заданные системы, без Google, лимитер выключен"
+  else
+    fail "SRC-06: настройки SearXNG"
+  fi
+  if helm template x "$ROOT/charts/mcp-servers" --set gmail.enabled=true >/dev/null 2>&1; then
+    fail "Gmail без client ID Google рендерится"
+  else
+    pass "Gmail без client ID Google не рендерится"
+  fi
 }
 
 # --- FTR.HMR.INFRA-0002: чарты Hammurapi и публичный доступ ---
@@ -435,6 +519,7 @@ main() {
   nabu_charts
   landing_chart
   public_access_charts
+  mcp_chart
 
   if ((FAILURES)); then
     printf '\n%sНе прошло проверок: %d%s\n' "$C_RED" "$FAILURES" "$C_RESET"

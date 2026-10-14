@@ -354,7 +354,8 @@ check_storages() {
 # collect_resources — сумма запросов памяти и контейнеры без запросов/лимитов.
 check_resources() {
   local pods missing
-  pods=$(kc get pods -n "$NS_STORAGES" -o json; kc get pods -n "$NS_OBSERVABILITY" -o json)
+  pods=$(kc get pods -n "$NS_STORAGES" -o json; kc get pods -n "$NS_OBSERVABILITY" -o json
+    if mcp_enabled; then kc get pods -n "$NS_MCP" -l 'app.kubernetes.io/part-of=mcp-servers' -o json; fi)
   missing=$(jq -rs '[.[].items[] | select(.status.phase == "Running" or .status.phase == "Pending")
       | .metadata.namespace as $ns | .metadata.name as $p
       | (.spec.containers + (.spec.initContainers // []))[]
@@ -404,6 +405,7 @@ run_checks() {
     record logs fail "не запустился пробный под checks-probe"
   fi
   check_storages
+  check_mcp
   check_resources
   check_public
   cleanup_probes

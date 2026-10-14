@@ -1,0 +1,109 @@
+# Сетевые политики (FTR.NAB.CMN-0006 R16, tech §2.5); их применяет kindnet стенда.
+# Вход — только api Nabu и проверки стенда; выход — интернет без частных сетей
+# и метаданных облака, docling-serve — ещё S3 стенда.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: from-nabu
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions: [{ key: app.kubernetes.io/name, operator: In, values: [docling-mcp, search, gmail, yandex-mail] }]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ .Values.callers.namespace }} } }
+          podSelector: { matchLabels: {{ toJson .Values.callers.podLabels }} }
+        - podSelector: { matchLabels: { app.kubernetes.io/name: checks-probe } }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: docling-serve-in
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: docling-serve } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: docling-mcp } }
+        - podSelector: { matchLabels: { app.kubernetes.io/name: checks-probe } }
+      ports: [{ port: 5001 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-dns
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-internet
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions: [{ key: app.kubernetes.io/name, operator: In, values: [docling-serve, search, gmail, yandex-mail] }]
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 127.0.0.0/8]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-s3
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: docling-serve } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ .Values.s3.namespace }} } }
+      ports:
+        {{- range .Values.s3.ports }}
+        - { port: {{ . }} }
+        {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-docling
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: docling-mcp } }
+  policyTypes: [Egress]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: docling-serve } } }]
+      ports: [{ port: 5001 }]
+---
+# Пробный под проверок стенда ходит к серверам namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-probe
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: checks-probe } }
+  policyTypes: [Egress]
+  egress:
+    - to: [{ podSelector: {} }]

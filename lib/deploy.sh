@@ -40,6 +40,15 @@ release() {
   RELEASES+=("$name $version")
 }
 
+# release_local <релиз> <ns> <каталог чарта> [аргументы helm…] — релиз
+# локального чарта; в сводке версия — «локальный».
+release_local() {
+  local name=$1 ns=$2 chart=$3
+  shift 3
+  release "$name" "$ns" "$chart" - - "$@"
+  RELEASES[-1]="$name локальный"
+}
+
 # uninstall_if_present <релиз> <ns> — для хранилищ, переведённых во внешний режим.
 uninstall_if_present() {
   if hm status "$1" -n "$2" >/dev/null 2>&1; then
@@ -151,12 +160,13 @@ deploy_observability() {
     --set-string "grafana\.ini.plugins.preinstall_sync=victoriametrics-logs-datasource@$VL_PLUGIN_VERSION" \
     --set "persistence.size=$GRAFANA_STORAGE" "${grafana_public[@]}"
   stage_dashboards "$WORK_DIR/hammurapi-dashboards"
-  release dashboards "$ns" "$WORK_DIR/hammurapi-dashboards" - -
-  RELEASES[-1]="dashboards локальный"
+  release_local dashboards "$ns" "$WORK_DIR/hammurapi-dashboards"
 }
 
 deploy_all() {
   step deploy
+  # R3 FTR.NAB.CMN-0006: бюджет памяти MCP-серверов — до любых изменений стенда
+  mcp_preflight
   helm_repos
   deploy_operators
   ensure_secrets
@@ -167,6 +177,7 @@ deploy_all() {
   deploy_storages
   deploy_observability
   deploy_public
+  deploy_mcp
   step deploy
   ok "все релизы развёрнуты"
 }

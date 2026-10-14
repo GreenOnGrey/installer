@@ -22,6 +22,8 @@ source "$ROOT/lib/checks.sh"
 source "$ROOT/lib/deploy.sh"
 # shellcheck source=lib/public.sh
 source "$ROOT/lib/public.sh"
+# shellcheck source=lib/mcp.sh
+source "$ROOT/lib/mcp.sh"
 
 usage() {
   cat <<'EOF'
@@ -249,9 +251,10 @@ status_json() {
   jq -n --arg profile "$MK_PROFILE" --arg st "$profile_status" --arg k8s "$K8S_VERSION" \
     --argjson version "$version" --argjson releases "$releases" --argjson pods "$pods" --argjson public "$public" \
     --argjson checks "$(checks_json)" --argjson req "$MEM_REQUESTED" --argjson alloc "$MEM_ALLOCATABLE" \
+    --argjson mcp "$(mcp_status_json)" \
     --arg pg "$POSTGRES_MODE" --arg kafka "$KAFKA_MODE" --arg s3 "$S3_MODE" \
     '{profile: {name: $profile, status: $st, kubernetes: $k8s}, version: $version,
-      storages: {postgres: $pg, kafka: $kafka, s3: $s3}, public: $public,
+      storages: {postgres: $pg, kafka: $kafka, s3: $s3}, public: $public, mcp: $mcp,
       releases: $releases, pods: $pods, checks: $checks,
       resources: {requestedMemoryBytes: $req, allocatableMemoryBytes: $alloc,
         requestedPercent: (if $alloc > 0 then ($req * 100 / $alloc | floor) else 0 end)},
@@ -268,6 +271,7 @@ status_text() {
     printf '\nПоды\n'
     kc get pods -n "$NS_STORAGES" 2>/dev/null | sed 's/^/  /' || true
     kc get pods -n "$NS_OBSERVABILITY" --no-headers 2>/dev/null | sed 's/^/  /' || true
+    mcp_enabled && { kc get pods -n "$NS_MCP" --no-headers 2>/dev/null | sed 's/^/  /' || true; }
     printf '\nРесурсы    %s\n' "$(resources_line)"
   fi
   printf '\nПроверки\n'
@@ -303,14 +307,15 @@ cmd_creds() {
       --arg ssvc "s3.$ns.svc:9000" --arg se "${s3[endpoint]}" --arg sr "${s3[region]}" --arg sb "${s3[bucket]}" \
       --arg sa "${s3[access_key]}" --arg ss "${s3[secret_key]}" --arg sp "${s3[path_style]}" \
       --arg gu "$gf_user" --arg gp "$gf_pass" --arg ns "$ns" --arg obs "$NS_OBSERVABILITY" --arg pgm "$POSTGRES_MODE" \
-      --arg km2 "$KAFKA_MODE" --arg sm "$S3_MODE" \
+      --arg km2 "$KAFKA_MODE" --arg sm "$S3_MODE" --argjson mcp "$(mcp_creds_json)" \
       '{postgres: {mode: $pgm, service: $pgsvc, secret: "\($ns)/postgres-conn", host: $pghost, port: $pgport, database: $pgdb,
           username: $pguser, password: $pgpass, sslmode: $pgssl, uri: $pguri},
         kafka: {mode: $km2, service: $ksvc, secret: "\($ns)/kafka-conn", bootstrap_servers: $kb, security_protocol: $kp,
           sasl_mechanism: $km, username: $ku, password: $kpass},
         s3: {mode: $sm, service: $ssvc, secret: "\($ns)/s3-conn", endpoint: $se, region: $sr, bucket: $sb,
           access_key: $sa, secret_key: $ss, path_style: $sp},
-        grafana: {service: "grafana.\($obs).svc:80", secret: "\($obs)/grafana-admin", user: $gu, password: $gp}}'
+        grafana: {service: "grafana.\($obs).svc:80", secret: "\($obs)/grafana-admin", user: $gu, password: $gp},
+        mcp: $mcp}'
     return
   fi
   cat <<EOF
@@ -338,6 +343,7 @@ Grafana
   логин     $gf_user
   пароль    $gf_pass
 EOF
+  mcp_creds_text
 }
 
 # --- down ---

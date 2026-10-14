@@ -35,6 +35,9 @@ charts/hammurapi-web     the SPA
 charts/nabu-core         Nabu: api, worker, agent, relay, migrate, cleaner, RBAC for sandboxes
 charts/nabu-web          the SPA of Nabu
 charts/landing           the site of GreenOnGrey: nginx with static pages
+charts/mcp-servers       optional MCP servers of the stand (FTR.NAB.CMN-0006): docling, search, gmail, yandex-mail;
+                         lib/mcp.sh deploys them by MCP_* options, images/ builds docling-mcp, workspace-mcp and
+                         imap-mcp (our own read-only IMAP server: python -m unittest in images/imap-mcp)
 config/                  defaults.env, versions.env (chart and tool versions)
 values/                  Helm values of the stand's components
 dashboards/              Grafana dashboards
@@ -45,7 +48,7 @@ tests/unit/*.bats        unit tests (Linux); tests/manifests.sh — rendered man
 
 ```sh
 shellcheck -x hammurapi-infra.sh                       # CI pins shellcheck v0.11.0
-shellcheck -x tests/manifests.sh tests/e2e/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/landing-deploy bin/ingress-forward bin/stand-autostart
+shellcheck -x tests/manifests.sh tests/e2e/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/landing-deploy bin/ingress-forward bin/stand-autostart images/publish.sh images/*/test.sh
 bats tests/unit                                        # Linux; needs jq, yq for some tests
 bash tests/manifests.sh                                # helm, kubeconform, jq, yq, network
 helm lint charts/hammurapi-core --set image.tag=v1 --set publicBaseDomain=x.example

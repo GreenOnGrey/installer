@@ -20,9 +20,31 @@ env:
   PROD_DIR: /opt/hammurapi-infra
 
 jobs:
+  # Образы MCP-серверов без официальных образов (FTR.NAB.CMN-0006 tech §2.7):
+  # ghcr.io/<организация>/docling-mcp и workspace-mcp, тег — версия пакета из
+  # config/versions.env. Уже опубликованный тег не пересобирается.
+  publish-images:
+    runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
+    permissions: { contents: read, packages: write }
+    steps:
+      - name: Тег
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          [[ $INPUT_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::тег «$INPUT_TAG» не в формате vX.Y.Z"; exit 1; }
+          echo "tag=$INPUT_TAG" >>"$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { ref: "refs/tags/${{ steps.tag.outputs.tag }}" }
+      - name: build, test, scan, push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: images/publish.sh "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+
   # Чарты hammurapi-core, hammurapi-web, nabu-core, nabu-web и landing в oci://ghcr.io/<организация>/charts:
   # версия чартов совпадает с версией стенда (техспека FTR.HMR.INFRA-0002, п. 11).
   publish-charts:
+    needs: publish-images
     runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
     permissions: { contents: read, packages: write }
     outputs:

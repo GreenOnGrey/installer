@@ -1,0 +1,56 @@
+# MCP-серверы стенда (FTR.NAB.CMN-0006, tech §2.5). Включение — опциями
+# MCP_DOCLING, MCP_SEARCH, MCP_GMAIL, MCP_YANDEX_MAIL; образы и версии — config/versions.env.
+# Ключи доступа приходят из секретов namespace (их создаёт hammurapi-infra.sh).
+
+docling:
+  enabled: false
+  serve:
+    image: quay.io/docling-project/docling-serve-cpu:v1.37.0
+    # Разбор документа на CPU: модели раскладки, таблиц и OCR в памяти процесса.
+    resources: { requests: { cpu: 500m, memory: 2Gi }, limits: { cpu: "2", memory: 4Gi } }
+    maxFileMB: 25
+  mcp:
+    image: ghcr.io/greenongrey/docling-mcp:3.3.0
+    resources: { requests: { cpu: 50m, memory: 256Mi }, limits: { cpu: "1", memory: 1Gi } }
+    # Языки распознавания сканов (EasyOCR).
+    ocrLang: "ru,en"
+  auth:
+    image: nginxinc/nginx-unprivileged:1.31-alpine
+    resources: { requests: { cpu: 10m, memory: 16Mi }, limits: { cpu: 200m, memory: 64Mi } }
+
+search:
+  enabled: false
+  mcp:
+    image: isokoliuk/mcp-searxng:2.6.0
+    resources: { requests: { cpu: 20m, memory: 128Mi }, limits: { cpu: 500m, memory: 256Mi } }
+  searxng:
+    image: searxng/searxng:2026.10.11-ad46ebd7d
+    resources: { requests: { cpu: 50m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
+  # Поисковые системы SearXNG (решение 3: без Google — он быстрее всех блокирует IP дата-центра).
+  engines: [duckduckgo, bing, brave, mojeek, wikipedia, github, stackoverflow, arxiv]
+
+gmail:
+  enabled: false
+  image: ghcr.io/greenongrey/workspace-mcp:2.1.0
+  # OAuth-клиент Google, которым Nabu получает токены пользователей; сервер
+  # проверяет, что токен выдан этому клиенту. Обязателен при gmail.enabled.
+  googleClientId: ""
+  resources: { requests: { cpu: 20m, memory: 192Mi }, limits: { cpu: 500m, memory: 512Mi } }
+
+yandexMail:
+  enabled: false
+  # Собственный сервер IMAP только для чтения (images/imap-mcp), тег — его VERSION.
+  image: ghcr.io/greenongrey/imap-mcp:0.1.0
+  imapHost: imap.yandex.com
+  resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
+
+# Кто вызывает серверы: api Nabu (прокси MCP) и проверки стенда.
+callers:
+  namespace: nabu
+  podLabels: { app.kubernetes.io/name: nabu, app.kubernetes.io/component: api }
+# S3 стенда: копии файлов пространства для разбора документов (R14).
+s3:
+  namespace: storages
+  ports: [9000, 8333]
+
+imagePullSecrets: [{ name: ghcr-pull }]

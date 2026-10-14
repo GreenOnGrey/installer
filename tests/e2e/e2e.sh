@@ -68,8 +68,8 @@ stage UP-01 "up на чистой машине (цель ≤ 20 мин)" "$H up 
 stage CMD-01 "status --json" "$H status --json --no-color | jq -e '.ok and (.checks | length) >= 6'"
 stage CMD-02 "creds: адреса и пароли всех хранилищ и Grafana" \
   "$H creds --json | jq -e '.postgres.password != \"\" and .s3.secret_key != \"\" and .grafana.password != \"\" and .kafka.bootstrap_servers != \"\"'"
-stage OBS-04 "шесть дашбордов в папке Hammurapi Infra" \
-  "kubectl --context hammurapi -n observability get cm -l grafana_dashboard=1 -o name | wc -l | grep -qx 6"
+stage OBS-04 "семь дашбордов в папке Hammurapi Infra" \
+  "kubectl --context hammurapi -n observability get cm -l grafana_dashboard=1 -o name | wc -l | grep -qx 7"
 stage OBS-05 "вход в Grafana без пароля запрещён" \
   "kubectl --context hammurapi -n observability run gf-anon --rm -i --restart=Never --image=curlimages/curl:8.22.0 -- \
      curl -s -o /dev/null -w '%{http_code}' http://grafana/api/dashboards/uid/hammurapi-kafka | grep -qx 401"

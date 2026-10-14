@@ -1,0 +1,54 @@
+{{- if .Values.gmail.enabled }}
+{{- $client := required "gmail.googleClientId обязателен (MCP_GMAIL_GOOGLE_CLIENT_ID)" .Values.gmail.googleClientId }}
+# Gmail только для чтения (FTR.NAB.CMN-0006 R11, R12): workspace-mcp проверяет
+# токен Google пользователя, который подставляет прокси Nabu, и ничего не
+# хранит. Вложения закрыты на сервере (product, скоуп).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gmail
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+    app.kubernetes.io/name: gmail
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: gmail } }
+  template:
+    metadata:
+      labels: {{- include "mcp.labels" . | nindent 8 }}
+        app.kubernetes.io/name: gmail
+    spec:
+      {{- include "mcp.podSecurity" . | nindent 6 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: gmail
+          image: {{ .Values.gmail.image }}
+          args: ["--transport", "streamable-http", "--tools", "gmail", "--read-only"]
+          ports: [{ name: http, containerPort: 8000 }]
+          env:
+            - { name: MCP_ENABLE_OAUTH21, value: "true" }
+            - { name: EXTERNAL_OAUTH21_PROVIDER, value: "true" }
+            - { name: WORKSPACE_MCP_STATELESS_MODE, value: "true" }
+            - { name: GOOGLE_OAUTH_CLIENT_ID, value: {{ $client | quote }} }
+            - { name: WORKSPACE_MCP_HOST, value: "0.0.0.0" }
+            - { name: WORKSPACE_MCP_PORT, value: "8000" }
+            - { name: WORKSPACE_MCP_DISABLED_TOOLS, value: "get_gmail_attachment_content" }
+            - { name: WORKSPACE_MCP_LOG_LEVEL, value: "INFO" }
+            - { name: HOME, value: /tmp }
+          readinessProbe: { tcpSocket: { port: http }, periodSeconds: 10 }
+          resources: {{- toYaml .Values.gmail.resources | nindent 12 }}
+          {{- include "mcp.containerSecurity" . | nindent 10 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes:
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gmail
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  selector: { app.kubernetes.io/name: gmail }
+  ports: [{ name: http, port: 8000, targetPort: http }]
+{{- end }}

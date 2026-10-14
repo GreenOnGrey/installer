@@ -20,7 +20,7 @@
                            секреты postgres-conn, kafka-conn, s3-conn
   namespace observability  VictoriaMetrics (метрики, 7 дней)  VictoriaLogs (логи, 3 дня)
                            vmagent + kube-state-metrics + node-exporter   Vector (логи всех подов)
-                           Grafana: 2 источника данных и 6 дашбордов в папке «Hammurapi Infra»
+                           Grafana: 2 источника данных и 7 дашбордов в папке «Hammurapi Infra»
 ```
 
 Объектное хранилище — SeaweedFS, а не MinIO, как в архитектуре: образы MinIO community больше
@@ -146,6 +146,76 @@ TCP-подключение: токен получает само приложе�
 
 Пример для Google Cloud (Cloud SQL, Managed Service for Apache Kafka, Cloud Storage) —
 [docs/gcp.md](docs/gcp.md).
+
+## MCP-серверы
+
+Необязательные MCP-серверы для агентов Nabu (`FTR.NAB.CMN-0006`). Каждый включается своей опцией в
+`config/local.env`, по умолчанию все выключены; выключенный сервер удаляется при следующем `up`.
+Серверы ставятся релизом `mcp-servers` в namespace `mcp` и доступны только `api` Nabu (сетевые политики,
+их применяет kindnet стенда) — наружу ничего не публикуется.
+
+| Опция | Сервер | Память (запрос / лимит) | Образ, диск |
+|---|---|---|---|
+| `MCP_DOCLING=true` | Разбор документов: `docling-serve` (CPU, OCR `ru`, `en`) и `docling-mcp` | ~2,3 / 5 ГиБ | ~4,4 ГБ |
+| `MCP_SEARCH=true` | Веб-поиск: SearXNG и `mcp-searxng` | ~0,4 / 0,8 ГиБ | ~0,3 ГБ |
+| `MCP_GMAIL=true` | Gmail только для чтения: `workspace-mcp` | ~0,2 / 0,5 ГиБ | ~0,3 ГБ |
+| `MCP_YANDEX_MAIL=true` | Яндекс Почта только для чтения: собственный сервер `imap-mcp` | ~0,06 / 0,25 ГиБ | ~0,1 ГБ |
+
+Перед развёртыванием `up` проверяет бюджет памяти (две трети памяти ноды, как проверка `resources`) и,
+если серверы не помещаются, завершается с кодом 2 и пишет, какой `MK_MEMORY` нужен; профиль minikube с
+новой памятью создаётся заново (`down`, затем `up`). С разбором документов на стенде по умолчанию (12 ГБ)
+рекомендуется `MK_MEMORY=16g`.
+
+Другие параметры: `MCP_DOCLING_MAX_MB` — предельный размер документа для `docling-serve`;
+`MCP_SEARCH_ENGINES` — поисковые системы SearXNG; `MCP_GMAIL_GOOGLE_CLIENT_ID` — OAuth-клиент Google
+(обязателен при `MCP_GMAIL=true`). Ключи доступа генерируются при первом `up` и хранятся в секретах
+namespace `mcp`. Образы `docling-mcp`, `workspace-mcp` и `imap-mcp` берутся из `ghcr.io/greenongrey` с секретом
+`ghcr-pull`, который `up` копирует из namespace `nabu`.
+
+**Внесение в каталог Nabu.** `./hammurapi-infra.sh creds` выводит адреса и ключи. В админке Nabu →
+«Каталог» → «MCP-сервер»:
+
+- **Документы** — адрес `http://docling-mcp.mcp.svc:8080/mcp`, платформенный, заголовок
+  `Authorization: Bearer <ключ>`. После проверки разрешите `convert_document_into_docling_document`,
+  `export_docling_document_to_markdown`, `get_overview_of_document_anchors`,
+  `search_for_text_in_document_anchors`, `get_text_of_document_item_at_anchor` и отметьте аргумент
+  `source` конвертации как «Файл пространства». Остальные инструменты (список и изменение кэша,
+  работа с диском сервера) не разрешайте.
+- **Веб-поиск** — `http://search.mcp.svc:3000/mcp`, платформенный, `Authorization: Bearer <ключ>`.
+- **Gmail** — `http://gmail.mcp.svc:8000/mcp`, персональный, OAuth: authorize
+  `https://accounts.google.com/o/oauth2/v2/auth`, token `https://oauth2.googleapis.com/token`, client ID и
+  secret клиента Google, scope `https://www.googleapis.com/auth/gmail.readonly`. Проверка позиции идёт с
+  личным доступом администратора — сначала подключите её в «Подключениях».
+- **Яндекс Почта** — `http://yandex-mail.mcp.svc:8000/mcp`, персональный, OAuth: authorize
+  `https://oauth.yandex.ru/authorize`, token `https://oauth.yandex.ru/token`, ClientID и Client secret
+  приложения Яндекса, scopes `mail:imap_ro login:email`. Все инструменты сервера только читают.
+
+**OAuth-клиент Google для Gmail.** В Google Cloud Console включите Gmail API, создайте OAuth client типа
+Web application с redirect URI — OAuth callback позиции из формы каталога Nabu. Два варианта:
+
+- *режим тестирования* — до 100 тестовых пользователей, вписанных в «Audience»; Google просит войти заново
+  раз в 7 дней, верификация не нужна;
+- *Internal* — клиент в Google Workspace заказчика: без верификации и без 7-дневного срока, но только для
+  ящиков этого домена (личный `@gmail.com` не подойдёт).
+
+**OAuth-приложение Яндекса для Яндекс Почты.** На [oauth.yandex.ru](https://oauth.yandex.ru) создайте
+приложение «Веб-сервисы» с Redirect URI — OAuth callback позиции из формы каталога Nabu — и доступами
+«Чтение писем в почтовом ящике по IMAP» (`mail:imap_ro`) и «Доступ к адресу электронной почты»
+(`login:email`). С `mail:imap_ro` Яндекс сам запрещает изменять ящик; сервер ещё и открывает папки только
+на чтение и не помечает письма прочитанными. Доступ к почте по IMAP должен быть включён:
+
+- *в ящике* (личном и в Яндекс 360) — пользователь в настройках Яндекс Почты, раздел «Почтовые
+  программы», блок «Разрешить доступ к почтовому ящику с помощью почтовых клиентов»: «С сервера
+  imap.yandex.ru по протоколу IMAP» и «Пароли приложений и OAuth-токены»;
+- *в организации Яндекс 360* — администратор может запретить сотрудникам почтовые программы или
+  сторонние приложения политиками безопасности в [admin.yandex.ru](https://admin.yandex.ru); тогда он
+  должен разрешить их (или приложение Nabu). Названия пунктов зависят от тарифа и версии кабинета —
+  сверяйтесь со справкой Яндекс 360 для бизнеса.
+
+Пока доступ выключен, инструменты отвечают ошибкой с тем, что включить.
+
+`gmail.readonly` — ограниченная область: для публичного production-клиента Google требует верификацию и
+проверку безопасности CASA; стенд её не проходит.
 
 ## Выкатка на прод
 

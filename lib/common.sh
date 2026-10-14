@@ -180,6 +180,7 @@ validate_config() {
   fi
   [[ $MK_MEMORY =~ ^[0-9]+[gGmM]$ ]] || die "$E_USAGE" "MK_MEMORY: ожидается число с g или m, например 12g"
   validate_public_config
+  validate_mcp_config
 }
 
 # validate_public_config — параметры публичного доступа (FTR.HMR.INFRA-0002, R21).
