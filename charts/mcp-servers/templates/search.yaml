@@ -53,6 +53,9 @@ spec:
             - { name: MCP_HTTP_HARDEN, value: "true" }
             - { name: MCP_HTTP_AUTH_TOKEN, valueFrom: { secretKeyRef: { name: mcp-search-key, key: key } } }
             - { name: MCP_HTTP_STATELESS, value: "true" }
+            # С MCP_HTTP_HARDEN сервер не стартует без списка Origin. Запросы без Origin
+            # (прокси Nabu, проверки стенда) проходят при любом списке; браузерам здесь делать нечего.
+            - { name: MCP_HTTP_ALLOWED_ORIGINS, value: "http://127.0.0.1" }
             # Host, с которым приходят прокси Nabu и проверки стенда.
             - name: MCP_HTTP_ALLOWED_HOSTS
               value: "search.{{ .Release.Namespace }}.svc:3000,search.{{ .Release.Namespace }}.svc.cluster.local:3000,search.{{ .Release.Namespace }}:3000,search:3000,127.0.0.1:3000,localhost:3000"
