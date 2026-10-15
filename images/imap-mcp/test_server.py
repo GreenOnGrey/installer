@@ -78,6 +78,41 @@ class Server(unittest.TestCase):
                                      "params": {"name": "list_folders", "arguments": {}}}, headers=auth)
         self.assertEqual(r.status_code, 401)
 
+    def call_list_folders(self):
+        auth = {**H, "Authorization": "Bearer good"}
+        with self.client() as c:
+            return c.post("/mcp", json={"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                                        "params": {"name": "list_folders", "arguments": {}}}, headers=auth).json()["result"]
+
+    def test_dropped_connection_is_retried_once(self):
+        """Обрыв соединения сервером: один повтор на новом соединении."""
+        calls = []
+
+        def flaky(conn):
+            calls.append(conn)
+            if len(calls) == 1:
+                raise core.imaplib.IMAP4.abort("command: SEARCH => socket error: EOF")
+            return [{"name": "INBOX", "special": "Inbox"}]
+
+        core.list_folders = flaky
+        res = self.call_list_folders()
+        self.assertFalse(res.get("isError"))
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(self.seen), 2)
+
+    def test_failure_reason_without_mailbox_data(self):
+        """Второй обрыв — ошибка с причиной; строка ответа сервера в неё не попадает."""
+        def broken(conn):
+            raise core.imaplib.IMAP4.abort("unexpected response: '* 5 FETCH (Subject: secret)'")
+
+        core.list_folders = broken
+        with self.assertLogs("imap-mcp", "WARNING") as logs:
+            res = self.call_list_folders()
+        self.assertTrue(res.get("isError"))
+        text = res["content"][0]["text"]
+        self.assertIn("abort: unexpected response", text)
+        self.assertNotIn("secret", text + " ".join(logs.output))
+
 
 if __name__ == "__main__":
     unittest.main()

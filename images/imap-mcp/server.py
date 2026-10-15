@@ -8,6 +8,7 @@ Streamable HTTP без состояния: между запросами в па
 
 from __future__ import annotations
 
+import imaplib
 import json
 import logging
 import os
@@ -36,6 +37,18 @@ mcp = MCPServer(
 AUTH_FAILED = "imap_mcp_auth_failed"
 
 
+def _reason(e: Exception) -> str:
+    """Причина ошибки протокола без данных ящика: imaplib дописывает к «unexpected
+    response» строку ответа сервера — она отрезается, как и всё после 200 символов."""
+    text = str(e)
+    for cut in ("unexpected response", "unexpected tagged response", "unexpected untagged response"):
+        i = text.find(cut)
+        if i >= 0:
+            text = text[: i + len(cut)]
+            break
+    return text[:200]
+
+
 def _token(headers) -> str:
     value = (headers or {}).get("authorization") or (headers or {}).get("Authorization") or ""
     scheme, _, token = value.partition(" ")
@@ -46,13 +59,22 @@ async def _run(ctx: Context, fn):
     """Входит в ящик с токеном запроса и выполняет fn(conn) в отдельном потоке."""
     token = _token(ctx.headers)
 
-    def work():
-        address = core.resolve_email(token)
+    def once(address):
         conn = core.connect(address, token)
         try:
             return fn(conn)
         finally:
             core.close(conn)
+
+    def work():
+        address = core.resolve_email(token)
+        try:
+            return once(address)
+        except (imaplib.IMAP4.abort, OSError) as e:
+            # сервер оборвал соединение (Яндекс так делает время от времени):
+            # всё только читается — повторяем один раз на новом соединении
+            log.warning("imap-mcp: %s: %s; retrying", type(e).__name__, _reason(e))
+            return once(address)
 
     try:
         result = await anyio.to_thread.run_sync(work)
@@ -66,9 +88,9 @@ async def _run(ctx: Context, fn):
         raise ToolError("The access to the mailbox was refused: connect the mail again in Connections.") from None
     except core.MailError as e:
         raise ToolError(str(e)) from None
-    except Exception as e:  # агенту — короткая причина; в журнал — только тип ошибки, не содержимое
-        log.warning("imap-mcp: %s", type(e).__name__)
-        raise ToolError(f"The mail server failed: {type(e).__name__}") from None
+    except Exception as e:  # агенту и в журнал — причина без содержимого ящика (_reason)
+        log.warning("imap-mcp: %s: %s", type(e).__name__, _reason(e))
+        raise ToolError(f"The mail server failed: {type(e).__name__}: {_reason(e)}") from None
     return json.dumps(result, ensure_ascii=False)
 
 

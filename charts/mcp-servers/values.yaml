@@ -32,7 +32,7 @@ search:
 yandexMail:
   enabled: false
   # Собственный сервер IMAP только для чтения (images/imap-mcp), тег — его VERSION.
-  image: ghcr.io/greenongrey/imap-mcp:0.2.0
+  image: ghcr.io/greenongrey/imap-mcp:0.2.1
   imapHost: imap.yandex.com
   # Ссылка на письмо: поиск по Message-ID в веб-интерфейсе ({msgid} — без угловых скобок).
   webLink: "https://mail.yandex.ru/#search?request={msgid}"
