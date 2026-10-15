@@ -134,11 +134,12 @@ async def read_message(ctx: Context, folder: str, uid: int, max_chars: int = 200
 
 
 @mcp.tool(annotations=READ)
-async def read_thread(ctx: Context, thread_id: str, max_chars: int = 40000) -> str:
+async def read_thread(ctx: Context, thread_id: str, max_chars: int = 40000, since: str = "") -> str:
     """Reads a whole thread from every folder of the mailbox, oldest first: headers and text of each
-    message. thread_id is the threadId of search_messages (the Message-ID of the first message).
-    The messages stay unread."""
-    return await _run(ctx, lambda conn: core.read_thread(conn, thread_id, max_chars))
+    message. thread_id is the threadId of search_messages (the Message-ID of the first message);
+    since (YYYY-MM-DD, optional) is a day not later than the first message — it speeds up servers
+    that cannot search by headers. The messages stay unread."""
+    return await _run(ctx, lambda conn: core.read_thread(conn, thread_id, max_chars, since))
 
 
 def _plain(status: int, body: bytes, content_type: bytes = b"application/json"):

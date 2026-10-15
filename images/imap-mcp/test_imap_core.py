@@ -178,6 +178,24 @@ class Threads(unittest.TestCase):
         ids = [m["messageId"] for m in t["messages"] if m["messageId"]]
         self.assertEqual(ids, ["<m1@example.ru>"])
 
+    def test_read_thread_without_header_search(self):
+        """Яндекс не ищет по заголовкам: письма с даты since, цепочка — по их заголовкам."""
+        class NoHeaderSearch(FakeIMAP):
+            def uid(self, cmd, *args):
+                if cmd == "SEARCH" and "HEADER" in args:
+                    self.cmds.append(("UID", cmd, args, None))
+                    return "NO", [b"[UNAVAILABLE] UID SEARCH Backend error. sc=x"]
+                return super().uid(cmd, *args)
+
+        conn = NoHeaderSearch()
+        t = core.read_thread(conn, "<root@example.ru>", since="2026-10-12")
+        searches = [c[2] for c in conn.cmds if c[0] == "UID" and c[1] == "SEARCH"]
+        self.assertIn(("SINCE", "12-Oct-2026"), searches)
+        # uid 3 — письмо другой цепочки — не вошло
+        self.assertEqual([(m["uid"], m["messageId"]) for m in t["messages"]], [(7, "<m1@example.ru>")])
+        with self.assertRaises(core.MailError):
+            core.read_thread(NoHeaderSearch(), "<root@example.ru>", since="12.10.2026")
+
     def test_read_thread_needs_message_id(self):
         with self.assertRaises(core.MailError):
             core.read_thread(FakeIMAP(), "subject words")

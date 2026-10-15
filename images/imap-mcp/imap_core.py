@@ -12,6 +12,7 @@ BODY.PEEK — флаги писем не меняются; область mail:i
 from __future__ import annotations
 
 import base64
+import datetime
 import email
 import email.header
 import email.policy
@@ -48,6 +49,11 @@ HEADER_FIELDS = "FROM TO CC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES LIST-
 WEB_LINK = os.environ.get("WEB_LINK", "https://mail.yandex.ru/#search?request={msgid}")
 # Папки, из которых не читаются ни поиск по ящику, ни цепочки.
 SKIP_ROLES = {"Trash", "Junk", "Spam", "Drafts"}
+# Цепочка на сервере без поиска по заголовкам: письма за THREAD_DAYS дней (без
+# since), не больше THREAD_SCAN новейших в папке, заголовки — по THREAD_CHUNK.
+THREAD_DAYS = int(os.environ.get("THREAD_DAYS", "90"))
+THREAD_SCAN = 3000
+THREAD_CHUNK = 200
 
 
 class AuthError(Exception):
@@ -430,18 +436,40 @@ def thread_folders(conn) -> list[str]:
     return every or [f["name"] for f in folders if f["special"] not in SKIP_ROLES]
 
 
-def read_thread(conn, thread: str, max_chars: int = 40000) -> dict:
-    """Письма цепочки из всех папок, по дате; письма остаются непрочитанными."""
+def _thread_items(conn, thread: str, since: str) -> list[dict]:
+    """Письма цепочки в открытой папке. Поиск по заголовкам есть не у всех
+    серверов (Яндекс отвечает «[UNAVAILABLE] Backend error»): тогда — письма
+    с даты since (по умолчанию THREAD_DAYS дней), их заголовки и то же
+    правило цепочки, по которому письма сгруппировал search_messages."""
+    typ, data = conn.uid("SEARCH", "OR", "HEADER", "Message-ID", quote(thread), "HEADER", "References", quote(thread))
+    if typ == "OK":
+        return fetch_headers(conn, (data[0] or b"").split())
+    if since:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", since):
+            raise MailError("since is a date YYYY-MM-DD")
+    else:
+        since = (datetime.date.today() - datetime.timedelta(days=THREAD_DAYS)).isoformat()
+    typ, data = conn.uid("SEARCH", "SINCE", _imap_date(since))
+    _ok(typ, data, "SEARCH")
+    uids = (data[0] or b"").split()
+    uids.sort(key=int, reverse=True)
+    out = []
+    for i in range(0, min(len(uids), THREAD_SCAN), THREAD_CHUNK):
+        out += [it for it in fetch_headers(conn, uids[i:i + THREAD_CHUNK]) if thread in (it["threadId"], it["messageId"])]
+    return out
+
+
+def read_thread(conn, thread: str, max_chars: int = 40000, since: str = "") -> dict:
+    """Письма цепочки из всех папок, по дате; письма остаются непрочитанными.
+    since (ГГГГ-ММ-ДД) — не раньше первого письма цепочки: сужает обход
+    серверов без поиска по заголовкам."""
     thread = thread.strip()
     if not _MSGID.fullmatch(thread):
         raise MailError("thread_id is the Message-ID of the first message of the thread, like <abc@example.com>")
     found: dict[str, tuple[str, int, dict]] = {}
     for folder in thread_folders(conn):
         _examine(conn, folder)
-        typ, data = conn.uid("SEARCH", "OR", "HEADER", "Message-ID", quote(thread), "HEADER", "References", quote(thread))
-        _ok(typ, data, "SEARCH")
-        uids = (data[0] or b"").split()
-        for item in fetch_headers(conn, uids):
+        for item in _thread_items(conn, thread, (since or "").strip()):
             key = item["messageId"] or f"{folder}:{item['uid']}"
             found.setdefault(key, (folder, item["uid"], item))
     if not found:
