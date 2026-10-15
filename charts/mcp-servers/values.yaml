@@ -27,7 +27,7 @@ search:
     image: searxng/searxng:2026.10.11-ad46ebd7d
     resources: { requests: { cpu: 50m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
   # Поисковые системы SearXNG (решение 3: без Google — он быстрее всех блокирует IP дата-центра).
-  engines: [duckduckgo, bing, brave, mojeek, wikipedia, github, stackoverflow, arxiv]
+  engines: [duckduckgo, bing, brave, wikipedia, github, stackoverflow, arxiv]
 
 yandexMail:
   enabled: false

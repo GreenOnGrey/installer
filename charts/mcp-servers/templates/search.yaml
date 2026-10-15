@@ -11,6 +11,12 @@ data:
     use_default_settings:
       engines:
         keep_only: {{ toJson .Values.search.engines }}
+    # keep_only не включает системы, выключенные по умолчанию (bing — disabled: true);
+    # каждая заданная система включается явно.
+    engines:
+      {{- range .Values.search.engines }}
+      - { name: {{ . | quote }}, disabled: false }
+      {{- end }}
     general:
       instance_name: "Hammurapi stand"
       enable_metrics: false
