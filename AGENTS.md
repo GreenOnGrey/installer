@@ -69,6 +69,9 @@ helm lint charts/landing --set image.tag=v1 --set publicBaseDomain=x.example
 - The chart of core gives the agent operator only its token (no storages, no other secrets) and
   network policies: to the operator only api, worker and runner pods; to a runner's workspace port
   only the operator.
+- **Images of `images/` are published once per version** (`images/publish.sh` skips a tag that exists): a change
+  of `images/imap-mcp` needs a new `IMAP_MCP_VERSION` (and the tag in `charts/mcp-servers/values.yaml`), or the stand
+  keeps running the old image.
 - `tests/unit/public.bats` runs the config step of `deploy-component.yml` from `hammurapi` `main`;
   keep it working with the workflow both before and after a change there.
 
