@@ -265,7 +265,9 @@ EOF
   fi
   cat <<EOF
       resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { cpu: 200m, memory: 128Mi } }
-      securityContext: { runAsNonRoot: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+      # у образа curl пользователь задан именем (curl_user): без числового UID kubelet
+      # не может проверить runAsNonRoot и не запускает контейнер
+      securityContext: { runAsNonRoot: true, runAsUser: 100, runAsGroup: 101, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
 EOF
 }
 

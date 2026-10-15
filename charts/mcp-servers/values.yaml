@@ -38,10 +38,13 @@ yandexMail:
   webLink: "https://mail.yandex.ru/#search?request={msgid}"
   resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
 
-# Кто вызывает серверы: api Nabu (прокси MCP) и проверки стенда.
+# Кто вызывает серверы: компоненты Nabu (app.kubernetes.io/name=nabu) и проверки стенда.
+# api — прокси MCP для агентов, worker — сборщик памяти коммуникаций, agent —
+# проверка подключения в каталоге.
 callers:
   namespace: nabu
-  podLabels: { app.kubernetes.io/name: nabu, app.kubernetes.io/component: api }
+  name: nabu
+  components: [api, worker, agent]
 # S3 стенда: копии файлов пространства для разбора документов (R14).
 s3:
   namespace: storages

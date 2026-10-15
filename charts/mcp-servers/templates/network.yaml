@@ -1,5 +1,5 @@
 # Сетевые политики (FTR.NAB.CMN-0006 R16, tech §2.5); их применяет kindnet стенда.
-# Вход — только api Nabu и проверки стенда; выход — интернет без частных сетей
+# Вход — только api, worker и agent Nabu и проверки стенда; выход — интернет без частных сетей
 # и метаданных облака, docling-serve — ещё S3 стенда.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -22,7 +22,9 @@ spec:
   ingress:
     - from:
         - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ .Values.callers.namespace }} } }
-          podSelector: { matchLabels: {{ toJson .Values.callers.podLabels }} }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: {{ .Values.callers.name }} }
+            matchExpressions: [{ key: app.kubernetes.io/component, operator: In, values: {{ toJson .Values.callers.components }} }]
         - podSelector: { matchLabels: { app.kubernetes.io/name: checks-probe } }
 ---
 apiVersion: networking.k8s.io/v1
