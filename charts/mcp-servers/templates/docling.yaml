@@ -72,6 +72,9 @@ spec:
     metadata:
       labels: {{- include "mcp.labels" . | nindent 8 }}
         app.kubernetes.io/name: docling-mcp
+      annotations:
+        # шаблон смонтирован через subPath: изменение конфигурации перезапускает под
+        checksum/auth: {{ .Files.Get "files/auth.conf.template" | sha256sum | trunc 16 }}
     spec:
       {{- include "mcp.podSecurity" . | nindent 6 }}
       {{- with .Values.imagePullSecrets }}
@@ -101,7 +104,8 @@ spec:
           resources: {{- toYaml .Values.docling.auth.resources | nindent 12 }}
           {{- include "mcp.containerSecurity" . | nindent 10 }}
           volumeMounts:
-            - { name: auth-template, mountPath: /etc/nginx/templates }
+            # subPath: в каталоге ConfigMap есть служебные ..data и ..<время>, envsubst образа обходил бы и их
+            - { name: auth-template, mountPath: /etc/nginx/templates/default.conf.template, subPath: default.conf.template }
             - { name: nginx-conf, mountPath: /etc/nginx/conf.d }
             - { name: tmp, mountPath: /tmp }
       volumes:
