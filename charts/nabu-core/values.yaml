@@ -102,7 +102,8 @@ whisper:
   model: small
   quantization: int8
   storage: 2Gi
-  resources: { requests: { cpu: 250m, memory: 1Gi }, limits: { cpu: "2", memory: 2Gi } }
+  # the recognizer idles between messages: a small request leaves room for the pods of agents
+  resources: { requests: { cpu: 50m, memory: 1Gi }, limits: { cpu: "2", memory: 2Gi } }
 
 replicas: { api: 1, worker: 1, agent: 1, relay: 1 }
 
