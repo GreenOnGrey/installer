@@ -1,0 +1,93 @@
+{{- if .Values.whisper.enabled }}
+# Распознаватель речи (FTR.NAB.CHAT-0001 R19–R21, arch §3.6): голос на сайте и
+# голосовые сообщения мессенджеров. Модель скачивается при первом старте в том
+# whisper-cache и остаётся там между перезапусками.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: whisper-cache
+  labels: {{- include "nabu.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: {{ .Values.whisper.storage }} } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whisper
+  labels: {{- include "nabu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: whisper
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "nabu.selector" (dict "root" . "component" "whisper") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "nabu.labels" . | nindent 8 }}
+        app.kubernetes.io/component: whisper
+    spec:
+      securityContext: { seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: whisper
+          image: {{ .Values.whisper.image | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: ASR_ENGINE, value: faster_whisper }
+            - { name: ASR_MODEL, value: {{ .Values.whisper.model | quote }} }
+            - { name: ASR_QUANTIZATION, value: {{ .Values.whisper.quantization | quote }} }
+            - { name: ASR_DEVICE, value: cpu }
+            - { name: ASR_MODEL_PATH, value: /data/whisper }
+            - { name: MODEL_IDLE_TIMEOUT, value: "0" }
+          ports: [{ name: http, containerPort: 9000 }]
+          readinessProbe:
+            httpGet: { path: /docs, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          startupProbe:
+            httpGet: { path: /docs, port: http }
+            periodSeconds: 10
+            failureThreshold: 60   # первый старт скачивает модель
+          resources: {{- toYaml .Values.whisper.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: cache, mountPath: /data/whisper }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: cache, persistentVolumeClaim: { claimName: whisper-cache } }
+        - { name: tmp, emptyDir: { sizeLimit: 1Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whisper
+  labels: {{- include "nabu.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "nabu.selector" (dict "root" . "component" "whisper") | nindent 4 }}
+  ports: [{ name: http, port: 9000, targetPort: http }]
+---
+# К распознавателю — только api и worker (VOC-03); наружу — DNS и HTTPS для
+# скачивания модели.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whisper
+  labels: {{- include "nabu.labels" . | nindent 4 }}
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/component: whisper, app.kubernetes.io/name: nabu } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/component: api, app.kubernetes.io/name: nabu } }
+        - podSelector: { matchLabels: { app.kubernetes.io/component: worker, app.kubernetes.io/name: nabu } }
+      ports: [{ port: 9000 }]
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    - to: [{ ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16] } }]
+      ports: [{ port: 443 }]
+{{- end }}

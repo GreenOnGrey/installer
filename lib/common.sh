@@ -181,6 +181,13 @@ validate_config() {
   [[ $MK_MEMORY =~ ^[0-9]+[gGmM]$ ]] || die "$E_USAGE" "MK_MEMORY: ожидается число с g или m, например 12g"
   validate_public_config
   validate_mcp_config
+  # FTR.NAB.CHAT-0001 R19: распознаватель речи Nabu
+  case ${NABU_WHISPER:-false} in
+    true | false) ;;
+    *) die "$E_USAGE" "NABU_WHISPER должен быть true или false, а не «$NABU_WHISPER»" ;;
+  esac
+  [[ ${NABU_WHISPER_MODEL:-small} =~ ^(tiny|base|small|medium|large-v3|large-v3-turbo|turbo)$ ]] ||
+    die "$E_USAGE" "NABU_WHISPER_MODEL: tiny, base, small, medium, large-v3 или large-v3-turbo"
 }
 
 # validate_public_config — параметры публичного доступа (FTR.HMR.INFRA-0002, R21).

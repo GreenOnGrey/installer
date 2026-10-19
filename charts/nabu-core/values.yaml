@@ -94,6 +94,16 @@ ingress:
 cleaner:
   schedule: "30 3 * * *"
 
+# Распознаватель речи (FTR.NAB.CHAT-0001 R19): опция стенда NABU_WHISPER.
+# small на процессоре с int8; large-v3-turbo точнее на русском, но тяжелее.
+whisper:
+  enabled: false
+  image: onerahmet/openai-whisper-asr-webservice:v1.10.0
+  model: small
+  quantization: int8
+  storage: 2Gi
+  resources: { requests: { cpu: 250m, memory: 1Gi }, limits: { cpu: "2", memory: 2Gi } }
+
 replicas: { api: 1, worker: 1, agent: 1, relay: 1 }
 
 resources:

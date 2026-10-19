@@ -86,6 +86,9 @@ env:
   - { name: SANDBOX_MEMORY, value: {{ .Values.sandboxes.memory | quote }} }
   - { name: SPACE_QUOTA, value: {{ .Values.sandboxes.spaceQuota | quote }} }
   - { name: PI_VERSION, value: {{ .Values.piVersion | default "" | quote }} }
+  {{- if .Values.whisper.enabled }}
+  - { name: WHISPER_URL, value: "http://whisper.{{ .Release.Namespace }}.svc:9000" }
+  {{- end }}
   - { name: POD_IP, valueFrom: { fieldRef: { fieldPath: status.podIP } } }
   - { name: DATABASE_URL, valueFrom: { secretKeyRef: { name: {{ .Values.existingSecrets.postgres }}, key: uri } } }
   - { name: KAFKA_BROKERS, valueFrom: { secretKeyRef: { name: {{ .Values.existingSecrets.kafka }}, key: bootstrap_servers } } }
