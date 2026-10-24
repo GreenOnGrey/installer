@@ -182,12 +182,15 @@ class Documents(unittest.TestCase):
         from docx import Document
         ref = os.path.join(self.ref, "reference.docx")
         brand = os.path.join(self.ref, "brand.docx")
+        # by the id: pandoc 3.1 names the style «Heading 1», later versions «heading 1»
+        def heading(doc):
+            return next(s for s in doc.styles if s.style_id == "Heading1")
         d = Document(ref)
-        d.styles["Heading 1"].font.name = "Brand Sans"
+        heading(d).font.name = "Brand Sans"
         d.save(brand)
         with tempfile.TemporaryDirectory() as w:
             out, _ = documents.render(w, "# Заголовок\n", "docx", brand)
-            self.assertEqual(Document(out).styles["Heading 1"].font.name, "Brand Sans")
+            self.assertEqual(heading(Document(out)).font.name, "Brand Sans")
 
 
 class Sheets(unittest.TestCase):
