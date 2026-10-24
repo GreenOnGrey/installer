@@ -87,6 +87,14 @@ kubectl --context hammurapi -n observability port-forward svc/grafana 3000:80
 публичного доступа восстанавливает свой юнит `hammurapi-ingress-forward`. Отключить автозапуск —
 `STAND_AUTOSTART=false` и `up`; `down` снимает юнит.
 
+**Старые образы.** minikube выключает сборку мусора образов в kubelet, и старые теги Nabu и
+Hammurapi копятся на диске ноды. `up` и юнит `hammurapi-stand` после каждого запуска кластера
+включают её в конфигурации kubelet: при заполнении диска образов выше `IMAGE_GC_HIGH` % (85)
+неиспользуемые образы удаляются до `IMAGE_GC_LOW` % (80), а неиспользуемый образ старше
+`IMAGE_GC_MAX_AGE` (`336h`, 14 дней) удаляется в любом случае. Образы работающих подов, в том
+числе предзагруженные DaemonSet'ами, не удаляются. Kubelet перезапускается, только если
+настройка изменилась; поды при этом продолжают работать.
+
 Журнал каждого `up` — `logs/<время>/run.log`; при ошибке рядом — `diagnostics/` (события,
 `describe` проблемных подов, `helm status` релизов).
 
@@ -159,6 +167,7 @@ TCP-подключение: токен получает само приложе�
 | `MCP_DOCLING=true` | Разбор документов: `docling-serve` (CPU, OCR `ru`, `en`) и `docling-mcp` | ~2,3 / 5 ГиБ | ~4,4 ГБ |
 | `MCP_SEARCH=true` | Веб-поиск: SearXNG и `mcp-searxng` | ~0,4 / 0,8 ГиБ | ~0,3 ГБ |
 | `MCP_YANDEX_MAIL=true` | Яндекс Почта только для чтения: собственный сервер `imap-mcp` | ~0,06 / 0,25 ГиБ | ~0,1 ГБ |
+| `MCP_DOCGEN=true` | Создание, правка и конвертация документов (`FTR.NAB.CHAT-0003`): собственный сервер `docgen-mcp` и `doc-convert` (Gotenberg — LibreOffice и Chromium без сети — и сайдкар `legacy`); заодно включает предпросмотр DOCX/XLSX/PPTX в Nabu | ~0,9 / 4 ГиБ | ~2,5 ГБ |
 
 Перед развёртыванием `up` проверяет бюджет памяти (две трети памяти ноды, как проверка `resources`) и,
 если серверы не помещаются, завершается с кодом 2 и пишет, какой `MK_MEMORY` нужен; профиль minikube с
@@ -167,8 +176,10 @@ TCP-подключение: токен получает само приложе�
 
 Другие параметры: `MCP_DOCLING_MAX_MB` — предельный размер документа для `docling-serve`;
 `MCP_SEARCH_ENGINES` — поисковые системы SearXNG. Ключи доступа генерируются при первом `up` и хранятся
-в секретах namespace `mcp`. Образы `docling-mcp` и `imap-mcp` берутся из `ghcr.io/greenongrey` с секретом
-`ghcr-pull`, который `up` копирует из namespace `nabu`.
+в секретах namespace `mcp`. Образы `docling-mcp`, `imap-mcp`, `docgen-mcp` и `doc-convert` берутся из
+`ghcr.io/greenongrey` с секретом `ghcr-pull`, который `up` копирует из namespace `nabu`. С `MCP_DOCGEN=true`
+`up` создаёт в namespace `nabu` секрет `nabu-docs-preview` (адреса и ключи `doc-convert` и `docgen`) и
+перезапускает `api` Nabu, если секрет изменился: без него предпросмотр офисных файлов выключен.
 
 **Внесение в каталог Nabu.** `./hammurapi-infra.sh creds` выводит адреса и ключи. В админке Nabu →
 «Каталог» → «MCP-сервер»:
@@ -179,6 +190,20 @@ TCP-подключение: токен получает само приложе�
   `search_for_text_in_document_anchors`, `get_text_of_document_item_at_anchor` и отметьте аргумент
   `source` конвертации как «Файл пространства». Остальные инструменты (список и изменение кэша,
   работа с диском сервера) не разрешайте.
+- **Документы: создание** — `http://docgen.mcp.svc:8000/mcp`, платформенный, `Authorization: Bearer <ключ>`.
+  После проверки разрешите все шесть инструментов и отметьте аргументы (`creds` выводит их готовым списком):
+
+  | Инструмент | Что делает | Файл пространства | Путь результата |
+  |---|---|---|---|
+  | `render_document` | Markdown → DOCX, PDF или PPTX; оформление по образцу DOCX | `reference`, `images` (список) | `dest` |
+  | `render_spreadsheet` | XLSX из описания листов: типы, формулы, закрепление, графики | `template` | `dest` |
+  | `fill_template` | Заполнение шаблона DOCX или XLSX данными (`{{ … }}`, циклы `{%tr … %}`) | `template` | `dest` |
+  | `edit_document` | Правка DOCX и PPTX (замена текста с сохранением оформления) и XLSX (ячейки, строки, листы) | `source` | `dest` |
+  | `convert` | DOCX/XLSX/PPTX → PDF, DOC/XLS/PPT → OOXML, HTML или `.zip` с `index.html` → PDF | `source` | `dest` |
+  | `pdf_tools` | PDF: склейка, разбиение на части (`.zip`), поворот и извлечение страниц | `sources` (список) | `dest` |
+
+  Лимит файла — 25 МБ, лимит результата — 50 МБ; все шесть инструментов отметьте «Пишет только в
+  пространство»: в почтовых темах они вызываются без подтверждения (перезапись файла — с подтверждением).
 - **Веб-поиск** — `http://search.mcp.svc:3000/mcp`, платформенный, `Authorization: Bearer <ключ>`.
 - **Яндекс Почта** — `http://yandex-mail.mcp.svc:8000/mcp`, персональный, OAuth: authorize
   `https://oauth.yandex.ru/authorize`, token `https://oauth.yandex.ru/token`, ClientID и Client secret
@@ -241,7 +266,7 @@ Redirect URI всегда `https://oauth.yandex.ru/verification_code` и не м
 | `PUBLIC_ACCESS`, `ACME_EMAIL` | переменные | публичный доступ | `true` и адрес для Let's Encrypt; `ACME_ISSUER`, `PUBLIC_BASE_DOMAIN`, `PUBLIC_IP` — по желанию ([docs/hammurapi.md](docs/hammurapi.md#13-конфигурация-стенда)) |
 | `GRAFANA_GITHUB_CLIENT_ID`, `GRAFANA_GITHUB_ORG` | переменные | вход в Grafana через GitHub | OAuth-приложение организации; организация по умолчанию — `GreenOnGrey` ([docs/hammurapi.md](docs/hammurapi.md#12-oauth-приложение-github-для-grafana)) |
 | `GRAFANA_GITHUB_CLIENT_SECRET` | секрет | вход в Grafana через GitHub | Client secret OAuth-приложения |
-| `MCP_DOCLING`, `MCP_SEARCH`, `MCP_YANDEX_MAIL` | переменные | MCP-серверы | `true` включает сервер (раздел «MCP-серверы»); незаданная переменная — значение из `local.env` |
+| `MCP_DOCLING`, `MCP_SEARCH`, `MCP_YANDEX_MAIL`, `MCP_DOCGEN` | переменные | MCP-серверы | `true` включает сервер (раздел «MCP-серверы»); незаданная переменная — значение из `local.env` |
 | `MCP_DOCLING_MAX_MB`, `MCP_SEARCH_ENGINES` | переменные | MCP-серверы | Параметры серверов |
 
 Подготовка машины прода — в [docs/gcp.md](docs/gcp.md#машина-прода).

@@ -27,6 +27,8 @@ mk_state() {
   called "minikube start -p hammurapi --interactive=false"
   called "kubectl --context hammurapi wait --for=condition=Ready node --all"
   called "kubectl --context hammurapi wait pods --all-namespaces --for=condition=Ready --selector=!job-name --field-selector=status.phase!=Succeeded,status.phase!=Failed"
+  called "minikube ssh -p hammurapi -- sudo sh -c"
+  called "kubelet-gc 85 80 336h"
   [[ $output == *"все поды готовы"* ]]
 }
 
@@ -99,6 +101,9 @@ mk_state() {
   grep -qx "ExecStop=$AUTOSTART_BIN stop" "$u"
   grep -qx 'WantedBy=multi-user.target' "$u"
   grep -qx "Environment=HOME=$HOME" "$u"
+  grep -qx "Environment=IMAGE_GC_HIGH=85" "$u"
+  grep -qx "Environment=IMAGE_GC_LOW=80" "$u"
+  grep -qx "Environment=IMAGE_GC_MAX_AGE=336h" "$u"
   grep -q "^Environment=PATH=$STUBS:" "$u"
   called "systemctl enable hammurapi-stand.service"
   called "systemctl start hammurapi-stand.service"
@@ -123,4 +128,48 @@ mk_state() {
   STAND_AUTOSTART=maybe run bash "$BATS_TEST_DIRNAME/../../hammurapi-infra.sh" up --no-color
   [ "$status" -eq 2 ]
   [[ $output == *"STAND_AUTOSTART"* ]]
+}
+
+@test "AUTO-10: kubelet-gc — правит конфигурацию kubelet в ноде, при изменении сообщает о перезапуске" {
+  stub minikube 'echo changed'
+  IMAGE_GC_MAX_AGE=168h run bash "$AUTOSTART" kubelet-gc
+  [ "$status" -eq 0 ]
+  called "minikube ssh -p hammurapi -- sudo sh -c"
+  called "kubelet-gc 85 80 168h"
+  [[ $output == *"kubelet перезапущен"* ]]
+  stub minikube 'echo unchanged'
+  run bash "$AUTOSTART" kubelet-gc
+  [ "$status" -eq 0 ]
+  [[ $output != *"перезапущен"* ]]
+}
+
+@test "AUTO-11: kubelet-gc не удался — код 1; при автозапуске юнит не проваливается" {
+  stub minikube 'case "$*" in ssh*) echo "ssh: connection refused"; exit 1 ;; esac'
+  run bash "$AUTOSTART" kubelet-gc
+  [ "$status" -eq 1 ]
+  [[ $output == *"не удалось"*"connection refused"* ]]
+  stub minikube 'case "$*" in status*) echo Stopped/Stopped ;; ssh*) exit 1 ;; esac'
+  run bash "$AUTOSTART" start
+  [ "$status" -eq 0 ]
+  [[ $output == *"все поды готовы"* ]]
+}
+
+@test "AUTO-12: скрипт kubelet-gc в ноде — выставляет ключи, второй запуск ничего не меняет" {
+  local node=$BATS_TEST_TMPDIR/node
+  mkdir -p "$node"
+  printf 'kind: KubeletConfiguration\nimageGCHighThresholdPercent: 100\nimageMaximumGCAge: 0s\n' >"$node/config.yaml"
+  # «Нода» — локальный sh: путь к файлу подменяется, systemctl — заглушка.
+  # minikube ssh -p P -- sudo sh -c <скрипт в %q> kubelet-gc <значения>: так его разберёт shell ноды.
+  stub minikube 'shift 7; script=$(eval "printf %s $1"); script=${script//\/var\/lib\/kubelet\/config.yaml/'"$node"'/config.yaml}; sh -c "$script" "${@:2}"'
+  run bash "$AUTOSTART" kubelet-gc
+  [ "$status" -eq 0 ]
+  grep -qx 'imageGCHighThresholdPercent: 85' "$node/config.yaml"
+  grep -qx 'imageGCLowThresholdPercent: 80' "$node/config.yaml"
+  grep -qx 'imageMaximumGCAge: 336h' "$node/config.yaml"
+  grep -qx 'kind: KubeletConfiguration' "$node/config.yaml"
+  called "^systemctl restart kubelet"
+  : >"$CALLS"
+  run bash "$AUTOSTART" kubelet-gc
+  [ "$status" -eq 0 ]
+  not_called "^systemctl"
 }

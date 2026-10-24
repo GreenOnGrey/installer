@@ -141,6 +141,12 @@ validate_config() {
     true | false) ;;
     *) die "$E_USAGE" "STAND_AUTOSTART должен быть true или false" ;;
   esac
+  if ! [[ ${IMAGE_GC_HIGH:-85} =~ ^[0-9]+$ && ${IMAGE_GC_LOW:-80} =~ ^[0-9]+$ ]] ||
+    ((${IMAGE_GC_LOW:-80} >= ${IMAGE_GC_HIGH:-85} || ${IMAGE_GC_HIGH:-85} > 100)); then
+    die "$E_USAGE" "IMAGE_GC_LOW и IMAGE_GC_HIGH — проценты, IMAGE_GC_LOW < IMAGE_GC_HIGH ≤ 100"
+  fi
+  [[ ${IMAGE_GC_MAX_AGE:-336h} =~ ^[0-9]+[hms]$ ]] ||
+    die "$E_USAGE" "IMAGE_GC_MAX_AGE — длительность вида 336h, а не «$IMAGE_GC_MAX_AGE»"
   for m in POSTGRES_MODE KAFKA_MODE S3_MODE; do
     case ${!m} in
       internal | external) ;;

@@ -280,6 +280,28 @@ nabu_charts() {
   else
     fail "R29: хосты Nabu «$hosts»"
   fi
+  # FTR.NAB.CMN-0008: профили песочниц по тегу nabu и предзагрузка их образов worker'ом.
+  local profiles verbs
+  profiles=$(docs_json "$dir/nabu-core.yaml" | jq -r 'select(.kind == "Deployment" and .metadata.name == "worker")
+    | .spec.template.spec.containers[0].env[] | select(.name == "SANDBOX_PROFILES") | .value')
+  verbs=$(docs_json "$dir/nabu-core.yaml" | jq -r 'select(.kind == "Role" and .metadata.name == "nabu-sandboxes")
+    | .rules[] | select(.resources == ["daemonsets"]) | .verbs | join(",")')
+  if [[ $profiles == *"documents=ghcr.io/greenongrey/nabu-sandbox-documents:v1.0.0"* && $verbs == "get,list,watch,create,update" ]]; then
+    pass "PRE-04: SANDBOX_PROFILES с тегом nabu, worker управляет DaemonSet в namespace песочниц"
+  else
+    fail "PRE-04: профили «$profiles», права на daemonsets «$verbs»"
+  fi
+  # Без профилей — один образ nabu-core, как до FTR.NAB.CMN-0008 (tech §9).
+  local legacy
+  legacy=$(helm template nabu-core "$ROOT/charts/nabu-core" -n nabu --kube-version "$KUBE_VERSION" --set image.tag=v1.0.0 \
+    --set publicBaseDomain=34-12-5-6.sslip.io --set sandboxes.profiles=null --set sandboxes.defaults=null 2>&1 |
+    docs_json | jq -r 'select(.kind == "Deployment" and .metadata.name == "worker") | .spec.template.spec.containers[0].env[]
+      | select(.name | IN("SANDBOX_PROFILES", "SANDBOX_DEFAULTS", "SANDBOX_IMAGE")) | "\(.name)=\(.value)"' | tr '\n' ' ')
+  if [[ $legacy == "SANDBOX_IMAGE=ghcr.io/greenongrey/nabu-core:v1.0.0 " ]]; then
+    pass "PRE-04: без профилей — один образ nabu-core"
+  else
+    fail "PRE-04 без профилей: «$legacy»"
+  fi
 }
 
 # landing_chart — сайт GreenOnGrey на том же стенде (FTR.LND.WEB-0001 arch §7).

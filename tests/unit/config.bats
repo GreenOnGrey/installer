@@ -133,3 +133,14 @@ setup() {
   keys=$(sed -n 's/^  \([a-z_]*\): .*/\1/p' "$BATS_TEST_TMPDIR/conn.yaml" | grep -v -e '^name$' -e '^namespace$' | sort | tr '\n' ' ')
   [ "$keys" = "access_key bootstrap_servers bucket endpoint password path_style region sasl_mechanism secret_key security_protocol username " ]
 }
+
+@test "конфигурация: сборка мусора образов — IMAGE_GC_LOW < IMAGE_GC_HIGH ≤ 100, возраст — длительность" {
+  IMAGE_GC_HIGH=80 IMAGE_GC_LOW=85
+  run validate_config
+  [ "$status" -eq 2 ]
+  [[ $output == *"IMAGE_GC_LOW < IMAGE_GC_HIGH"* ]]
+  IMAGE_GC_HIGH=85 IMAGE_GC_LOW=80 IMAGE_GC_MAX_AGE=14d
+  run validate_config
+  [ "$status" -eq 2 ]
+  [[ $output == *"IMAGE_GC_MAX_AGE"* ]]
+}

@@ -17,7 +17,7 @@ metadata:
   labels: {{- include "mcp.labels" . | nindent 4 }}
 spec:
   podSelector:
-    matchExpressions: [{ key: app.kubernetes.io/name, operator: In, values: [docling-mcp, search, yandex-mail] }]
+    matchExpressions: [{ key: app.kubernetes.io/name, operator: In, values: [docling-mcp, search, yandex-mail, docgen] }]
   policyTypes: [Ingress]
   ingress:
     - from:
@@ -47,7 +47,9 @@ metadata:
   name: egress-dns
   labels: {{- include "mcp.labels" . | nindent 4 }}
 spec:
-  podSelector: {}
+  # doc-convert не ходит никуда, даже в DNS: файлы приходят в теле запроса (FTR.NAB.CHAT-0003 R18)
+  podSelector:
+    matchExpressions: [{ key: app.kubernetes.io/name, operator: NotIn, values: [doc-convert] }]
   policyTypes: [Egress]
   egress:
     - to:
@@ -76,7 +78,8 @@ metadata:
   name: egress-s3
   labels: {{- include "mcp.labels" . | nindent 4 }}
 spec:
-  podSelector: { matchLabels: { app.kubernetes.io/name: docling-serve } }
+  podSelector:
+    matchExpressions: [{ key: app.kubernetes.io/name, operator: In, values: [docling-serve, docgen] }]
   policyTypes: [Egress]
   egress:
     - to:
@@ -98,6 +101,38 @@ spec:
     - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: docling-serve } } }]
       ports: [{ port: 5001 }]
 ---
+{{- if .Values.docgen.enabled }}
+# FTR.NAB.CHAT-0003 tech §9.3: в doc-convert — только docgen, api Nabu
+# (предпросмотр) и проверки; docgen ходит в doc-convert и S3.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: doc-convert-in
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: doc-convert } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: docgen } }
+        - podSelector: { matchLabels: { app.kubernetes.io/name: checks-probe } }
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ .Values.callers.namespace }} } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: {{ .Values.callers.name }}, app.kubernetes.io/component: api } }
+      ports: [{ port: 3000 }, { port: 3001 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-docgen
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: docgen } }
+  policyTypes: [Egress]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: doc-convert } } }]
+      ports: [{ port: 3000 }, { port: 3001 }]
+---
+{{- end }}
 # Пробный под проверок стенда ходит к серверам namespace.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

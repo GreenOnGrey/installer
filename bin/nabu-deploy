@@ -352,6 +352,12 @@ helm_deploy() {
     # FTR.NAB.CHAT-0001 R19: распознаватель речи по опции стенда
     args+=(--set "whisper.enabled=${NABU_WHISPER:-false}" --set-string "whisper.model=${NABU_WHISPER_MODEL:-small}")
     [[ -n ${WHISPER_ASR_IMAGE:-} ]] && args+=(--set-string "whisper.image=$WHISPER_ASR_IMAGE")
+    # FTR.NAB.CMN-0008 R21: собственные образы песочниц по опции стенда
+    args+=(--set "sandboxes.customImages.enabled=${NABU_SANDBOX_CUSTOM_IMAGES:-false}")
+    [[ -n ${NABU_SANDBOX_IMAGE_PREFIXES:-} ]] &&
+      args+=(--set "sandboxes.customImages.allowedPrefixes={${NABU_SANDBOX_IMAGE_PREFIXES}}")
+    [[ -n ${NABU_SANDBOX_PULL_SECRETS:-} ]] &&
+      args+=(--set "sandboxes.customImages.pullSecrets={${NABU_SANDBOX_PULL_SECRETS}}")
   fi
   log "helm upgrade --install $COMPONENT $TAG (чарт $CHART_VERSION)"
   if ! hm "${args[@]}" >&2; then

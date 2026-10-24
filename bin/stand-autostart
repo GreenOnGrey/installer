@@ -7,6 +7,7 @@
 #           поднимаются сами — их объекты и тома хранятся в профиле. Скрипт ждёт
 #           готовности ноды и подов, чтобы итог был виден в journalctl.
 #   stop  — minikube stop: хранилища останавливаются штатно, а не обрываются.
+#   kubelet-gc — сборка мусора образов в kubelet ноды (вызывает и up).
 # Если кластер уже запущен (юнит включает up), start сразу завершается; если
 # профиля нет (down), оба режима ничего не делают.
 set -euo pipefail
@@ -14,6 +15,9 @@ set -euo pipefail
 MK_PROFILE=${MK_PROFILE:-hammurapi}
 DOCKER_WAIT=${DOCKER_WAIT:-120}     # секунд: docker.service активен раньше, чем отвечает API
 PODS_TIMEOUT=${PODS_TIMEOUT:-15m}
+IMAGE_GC_HIGH=${IMAGE_GC_HIGH:-85}
+IMAGE_GC_LOW=${IMAGE_GC_LOW:-80}
+IMAGE_GC_MAX_AGE=${IMAGE_GC_MAX_AGE:-336h}
 
 log() { echo "stand-autostart: $*" >&2; }
 
@@ -46,6 +50,8 @@ start() {
   log "запуск кластера $MK_PROFILE"
   minikube start -p "$MK_PROFILE" --interactive=false
   kubectl --context "$MK_PROFILE" wait --for=condition=Ready node --all --timeout=5m >/dev/null
+  # Без сборки мусора стенд работает, пока хватает диска, — юнит из-за неё не проваливаем.
+  kubelet_gc || true
   log "нода готова, ожидание подов (до $PODS_TIMEOUT)"
   # Поды заданий (Job, CronJob) не ждём: упавший при старте под задания готовым не
   # станет никогда, а задание повторит его само. Вытесненные (Failed) — тоже.
@@ -62,6 +68,33 @@ start() {
   fi
 }
 
+# kubelet_gc — minikube пишет в конфигурацию kubelet imageGCHighThresholdPercent: 100,
+# то есть выключает сборку мусора образов, и старые теги Nabu и Hammurapi копятся на
+# диске ноды (FTR.NAB.CMN-0008). Включаем её: по заполнению диска и по возрасту
+# неиспользуемого образа. minikube start переписывает файл, поэтому правка — после
+# каждого запуска; kubelet перезапускается, только если файл изменился (поды при этом
+# работают дальше).
+# shellcheck disable=SC2016 # скрипт выполняет shell ноды: $f и $1…$3 — его переменные
+kubelet_gc() {
+  local script
+  script='f=/var/lib/kubelet/config.yaml; cp "$f" "$f.orig";'
+  script+=' set_key() { if grep -q "^$1:" "$f"; then sed -i "s|^$1:.*|$1: $2|" "$f"; else echo "$1: $2" >>"$f"; fi; };'
+  script+=' set_key imageGCHighThresholdPercent "$1"; set_key imageGCLowThresholdPercent "$2"; set_key imageMaximumGCAge "$3";'
+  script+=' if cmp -s "$f" "$f.orig"; then echo unchanged; else systemctl restart kubelet && echo changed; fi; rm -f "$f.orig"'
+  local out
+  out=$(minikube ssh -p "$MK_PROFILE" -- sudo sh -c "$(printf %q "$script")" kubelet-gc \
+    "$IMAGE_GC_HIGH" "$IMAGE_GC_LOW" "$IMAGE_GC_MAX_AGE" 2>&1) || true
+  case $out in
+    *unchanged*) ;;
+    *changed*)
+      log "сборка мусора образов: диск $IMAGE_GC_HIGH→$IMAGE_GC_LOW %, неиспользуемые старше $IMAGE_GC_MAX_AGE; kubelet перезапущен" ;;
+    *)
+      log "сборку мусора образов настроить не удалось: $out"
+      return 1
+      ;;
+  esac
+}
+
 stop() {
   profile_exists || return 0
   running || { log "кластер $MK_PROFILE не запущен"; return 0; }
@@ -72,8 +105,9 @@ stop() {
 case ${1:-} in
   start) start ;;
   stop) stop ;;
+  kubelet-gc) kubelet_gc ;;
   *)
-    echo "использование: stand-autostart start | stop" >&2
+    echo "использование: stand-autostart start | stop | kubelet-gc" >&2
     exit 2
     ;;
 esac

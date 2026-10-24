@@ -12,7 +12,8 @@ JSON дашбордов хранится здесь и загружается в
 | `kafka.json` | Strimzi Kafka | чарт `strimzi-kafka-operator`, `files/grafana-dashboards/strimzi-kafka.json` | 1.2.0 | 2026-09-29 |
 | `postgres.json` | CloudNativePG | [cloudnative-pg/grafana-dashboards](https://github.com/cloudnative-pg/grafana-dashboards), `charts/cluster/grafana-dashboard.json` | cluster-v0.0.5 | 2026-09-29 |
 | `s3.json` | SeaweedFS | чарт `seaweedfs`, `dashboards/seaweedfs-grafana-dashboard.json` | 4.48.0 | 2026-09-29 |
-| `mcp.json` | MCP-серверы | собственный (FTR.NAB.CMN-0006 R18): поды namespace `mcp`, метрики прокси `nabu_mcp_proxy_*` | — | 2026-10-14 |
+| `mcp.json` | MCP-серверы | собственный (FTR.NAB.CMN-0006 R18): поды namespace `mcp`, метрики прокси `nabu_mcp_proxy_*`; раздел «Документы» (FTR.NAB.CHAT-0003 R24) | — | 2026-10-24 |
+| `nabu-sandboxes.json` | Песочницы Nabu | собственный (FTR.NAB.CMN-0008 R20): старт и сбои по профилям, загрузка образов на узлы, проверки собственных образов, сигналы недостающих библиотек. Алерт `NabuSandboxCustomStartFailing` — в `values/grafana.yaml` | — | 2026-10-24 |
 
 Объектное хранилище стенда — SeaweedFS, а не MinIO: образы MinIO community больше не
 публикуются (Docker Hub `minio/minio` удалён, quay.io требует авторизации). Поэтому вместо

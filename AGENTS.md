@@ -29,18 +29,22 @@ bin/hammurapi-deploy     deploys hammurapi-core/web on the stand; reads one JSON
 bin/nabu-deploy          deploys nabu-core/web (namespaces nabu, nabu-sandboxes; its DB, bucket, hosts)
 bin/landing-deploy       deploys the site of GreenOnGrey (namespace landing, host web.<domain>; no storages;
                          an optional domain of its own with a certificate and a redirect from www.)
-bin/stand-autostart      systemd unit hammurapi-stand: the stand starts after a VM reboot
+bin/stand-autostart      systemd unit hammurapi-stand: the stand starts after a VM reboot; kubelet-gc mode
+                         turns on kubelet image garbage collection (IMAGE_GC_* options)
 charts/hammurapi-core    api, worker, agent operator, migrate, cleaner, network policies
 charts/hammurapi-web     the SPA
-charts/nabu-core         Nabu: api, worker, agent, relay, migrate, cleaner, RBAC for sandboxes
+charts/nabu-core         Nabu: api, worker, agent, relay, migrate, cleaner, RBAC for sandboxes and the
+                         DaemonSet of preloaded sandbox images; sandboxes.profiles — images of sandbox profiles
 charts/nabu-web          the SPA of Nabu
 charts/landing           the site of GreenOnGrey: nginx with static pages
-charts/mcp-servers       optional MCP servers of the stand (FTR.NAB.CMN-0006): docling, search, yandex-mail;
-                         lib/mcp.sh deploys them by MCP_* options, images/ builds docling-mcp and
-                         imap-mcp (our own read-only IMAP server: python -m unittest in images/imap-mcp)
+charts/mcp-servers       optional MCP servers of the stand (FTR.NAB.CMN-0006): docling, search, yandex-mail,
+                         docgen (FTR.NAB.CHAT-0003: docgen-mcp and doc-convert — Gotenberg with a legacy
+                         sidecar); lib/mcp.sh deploys them by MCP_* options, images/ builds docling-mcp,
+                         imap-mcp (our own read-only IMAP server), docgen-mcp and doc-convert; each has
+                         python -m unittest and/or images/*/test.sh
 config/                  defaults.env, versions.env (chart and tool versions)
 values/                  Helm values of the stand's components
-dashboards/              Grafana dashboards
+dashboards/              Grafana dashboards; alert rules are in values/grafana.yaml (alerting)
 tests/unit/*.bats        unit tests (Linux); tests/manifests.sh — rendered manifests; tests/e2e
 ```
 
@@ -70,7 +74,8 @@ helm lint charts/landing --set image.tag=v1 --set publicBaseDomain=x.example
   network policies: to the operator only api, worker and runner pods; to a runner's workspace port
   only the operator.
 - **Images of `images/` are published once per version** (`images/publish.sh` skips a tag that exists): a change
-  of `images/imap-mcp` needs a new `IMAP_MCP_VERSION` (and the tag in `charts/mcp-servers/values.yaml`), or the stand
+  of `images/imap-mcp` needs a new `IMAP_MCP_VERSION` (`DOCGEN_MCP_VERSION`, `DOC_CONVERT_VERSION` for the others; and
+  the tag in `charts/mcp-servers/values.yaml`), or the stand
   keeps running the old image.
 - `tests/unit/public.bats` runs the config step of `deploy-component.yml` from `hammurapi` `main`;
   keep it working with the workflow both before and after a change there.

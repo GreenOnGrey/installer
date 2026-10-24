@@ -48,12 +48,28 @@ cluster_up() {
   fi
   kc wait --for=condition=Ready node --all --timeout=5m >/dev/null ||
     die "$E_CLUSTER" "нода кластера не готова"
+  kubelet_gc
   ensure_namespace "$NS_STORAGES"
   ensure_namespace "$NS_OBSERVABILITY"
   if [[ ${STAND_AUTOSTART:-true} == true ]]; then
     install_autostart
   else
     remove_autostart
+  fi
+}
+
+# kubelet_gc — сборка мусора образов в kubelet ноды (bin/stand-autostart kubelet-gc):
+# minikube её выключает, и старые образы копятся на диске (FTR.NAB.CMN-0008).
+# Не настроилась — предупреждение: стенд работает, пока хватает диска.
+kubelet_gc() {
+  local cmd
+  printf -v cmd '%q ' env MK_PROFILE="$MK_PROFILE" IMAGE_GC_HIGH="$IMAGE_GC_HIGH" \
+    IMAGE_GC_LOW="$IMAGE_GC_LOW" IMAGE_GC_MAX_AGE="$IMAGE_GC_MAX_AGE" \
+    "$ROOT/bin/stand-autostart" kubelet-gc
+  if { if docker_ok; then eval "$cmd"; else sg docker -c "$cmd"; fi; } 2>"$RUN_DIR/kubelet-gc.log"; then
+    ok "сборка мусора образов: диск ${IMAGE_GC_HIGH} %, неиспользуемые старше $IMAGE_GC_MAX_AGE"
+  else
+    warn "сборка мусора образов не настроена, см. $RUN_DIR/kubelet-gc.log"
   fi
 }
 
@@ -87,6 +103,9 @@ Group=$group
 Environment=HOME=$HOME
 Environment=PATH=$path
 Environment=MK_PROFILE=$MK_PROFILE
+Environment=IMAGE_GC_HIGH=$IMAGE_GC_HIGH
+Environment=IMAGE_GC_LOW=$IMAGE_GC_LOW
+Environment=IMAGE_GC_MAX_AGE=$IMAGE_GC_MAX_AGE
 ${MINIKUBE_HOME:+Environment=MINIKUBE_HOME=$MINIKUBE_HOME}
 ExecStart=$AUTOSTART_BIN start
 ExecStop=$AUTOSTART_BIN stop

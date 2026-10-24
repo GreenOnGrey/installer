@@ -9,23 +9,27 @@ MCP_RELEASE=mcp-servers
 
 # --- Свойства серверов: одна таблица вместо ветвлений по серверу ---
 
-MCP_SERVERS=(docling search yandex-mail)
+MCP_SERVERS=(docling search yandex-mail docgen)
 # сервис и порт MCP; Deployment'ы сервера (готовность в status)
-declare -gA MCP_SERVICE=([docling]=docling-mcp:8080 [search]=search:3000 [yandex-mail]=yandex-mail:8000)
-declare -gA MCP_DEPLOYMENTS=([docling]="docling-mcp docling-serve" [search]=search [yandex-mail]=yandex-mail)
+declare -gA MCP_SERVICE=([docling]=docling-mcp:8080 [search]=search:3000 [yandex-mail]=yandex-mail:8000 [docgen]=docgen:8000)
+declare -gA MCP_DEPLOYMENTS=([docling]="docling-mcp docling-serve" [search]=search [yandex-mail]=yandex-mail [docgen]="docgen doc-convert")
 # секреты, которые `up` создаёт для сервера
-declare -gA MCP_SECRETS=([docling]="mcp-docling-serve-key mcp-docling-key" [search]="mcp-search-key mcp-searxng-secret")
+declare -gA MCP_SECRETS=([docling]="mcp-docling-serve-key mcp-docling-key" [search]="mcp-search-key mcp-searxng-secret"
+  [docgen]="mcp-docgen-key mcp-doc-convert-auth")
 # платформенный ключ доступа (секрет) — только у платформенных серверов
-declare -gA MCP_KEY_SECRET=([docling]=mcp-docling-key [search]=mcp-search-key)
+declare -gA MCP_KEY_SECRET=([docling]=mcp-docling-key [search]=mcp-search-key [docgen]=mcp-docgen-key)
 # инструменты, которые проверка стенда ждёт в tools/list
 declare -gA MCP_WANT_TOOLS=([docling]="convert_document_into_docling_document export_docling_document_to_markdown"
-  [search]="searxng_web_search web_url_read")
+  [search]="searxng_web_search web_url_read"
+  [docgen]="render_document render_spreadsheet fill_template edit_document convert pdf_tools")
 # OAuth персональных серверов для каталога Nabu (creds)
 declare -gA MCP_OAUTH=(
   [yandex-mail]='{"authorizeUrl":"https://oauth.yandex.ru/authorize","tokenUrl":"https://oauth.yandex.ru/token","scopes":["mail:imap_ro","login:email"]}')
 # подсказки позиции каталога: разрешённые инструменты и файловые аргументы (README, «Внесение в каталог»)
 declare -gA MCP_CATALOG_HINT=(
-  [docling]='{"allowedTools":["convert_document_into_docling_document","export_docling_document_to_markdown","get_overview_of_document_anchors","search_for_text_in_document_anchors","get_text_of_document_item_at_anchor"],"fileArgs":[{"tool":"convert_document_into_docling_document","arg":"source"}]}')
+  [docling]='{"allowedTools":["convert_document_into_docling_document","export_docling_document_to_markdown","get_overview_of_document_anchors","search_for_text_in_document_anchors","get_text_of_document_item_at_anchor"],"fileArgs":[{"tool":"convert_document_into_docling_document","arg":"source"}]}'
+  # FTR.NAB.CHAT-0003 tech §5.4: файлы, пути результата и запись только в пространство
+  [docgen]='{"allowedTools":["render_document","render_spreadsheet","fill_template","edit_document","convert","pdf_tools"],"fileArgs":[{"tool":"render_document","arg":"reference"},{"tool":"render_document","arg":"images"},{"tool":"render_spreadsheet","arg":"template"},{"tool":"fill_template","arg":"template"},{"tool":"edit_document","arg":"source"},{"tool":"convert","arg":"source"},{"tool":"pdf_tools","arg":"sources"}],"fileMaxBytes":26214400,"resultArgs":[{"tool":"render_document","arg":"dest"},{"tool":"render_spreadsheet","arg":"dest"},{"tool":"fill_template","arg":"dest"},{"tool":"edit_document","arg":"dest"},{"tool":"convert","arg":"dest"},{"tool":"pdf_tools","arg":"dest"}],"resultMaxBytes":52428800,"spaceOnlyTools":["render_document","render_spreadsheet","fill_template","edit_document","convert","pdf_tools"]}')
 # число инструментов по результатам проверок (status)
 declare -gA MCP_TOOL_COUNT=()
 
@@ -73,13 +77,16 @@ mcp_helm_args() {
   local engines
   engines=$(tr ',' '\n' <<<"$MCP_SEARCH_ENGINES" | jq -Rnc '[inputs | select(length > 0)]' 2>/dev/null ||
     printf '[]')
-  local docling search yandex
+  local docling search yandex docgen
   docling=$(mcp_on docling && echo true || echo false)
   search=$(mcp_on search && echo true || echo false)
   yandex=$(mcp_on yandex-mail && echo true || echo false)
+  docgen=$(mcp_on docgen && echo true || echo false)
   printf '%s\n' \
     --set "docling.enabled=$docling" --set "search.enabled=$search" \
-    --set "yandexMail.enabled=$yandex" \
+    --set "yandexMail.enabled=$yandex" --set "docgen.enabled=$docgen" \
+    --set-string "docgen.image=$MCP_IMAGE_REGISTRY/docgen-mcp:$DOCGEN_MCP_VERSION" \
+    --set-string "docConvert.image=$MCP_IMAGE_REGISTRY/doc-convert:$DOC_CONVERT_VERSION" \
     --set-string "docling.serve.image=$DOCLING_SERVE_IMAGE" \
     --set-string "docling.mcp.image=$MCP_IMAGE_REGISTRY/docling-mcp:$DOCLING_MCP_VERSION" \
     --set-string "docling.auth.image=$MCP_PROXY_IMAGE" \
@@ -98,9 +105,43 @@ ensure_mcp_secrets() {
   local srv name
   while read -r srv; do
     for name in ${MCP_SECRETS[$srv]:-}; do
-      ensure_secret "$NS_MCP" "$name" Opaque key "$(gen_key)"
+      if [[ $name == mcp-doc-convert-auth ]]; then
+        # базовая аутентификация Gotenberg и legacy (FTR.NAB.CHAT-0003 tech §9.2)
+        ensure_secret "$NS_MCP" "$name" Opaque username docconvert password "$(gen_key)"
+      else
+        ensure_secret "$NS_MCP" "$name" Opaque key "$(gen_key)"
+      fi
     done
   done < <(mcp_enabled_list)
+}
+
+# sync_preview_secret — секрет nabu-docs-preview для api Nabu (FTR.NAB.CHAT-0003
+# tech §9.2): адреса и учётные данные doc-convert и docgen, пока включён
+# сервис документов; без него предпросмотр офисных файлов выключен. api
+# перезапускается, только если секрет изменился.
+sync_preview_secret() {
+  local ns=${NABU_NAMESPACE:-nabu} before after
+  kc get ns "$ns" >/dev/null 2>&1 || return 0
+  before=$(kc -n "$ns" get secret nabu-docs-preview -o jsonpath='{.data}' 2>/dev/null || true)
+  if ! mcp_on docgen; then
+    [[ -z $before ]] && return 0
+    kc -n "$ns" delete secret nabu-docs-preview --ignore-not-found >/dev/null
+  else
+    # секреты идут в jq через окружение, не через argv
+    PREVIEW_USER=$(secret_key "$NS_MCP" mcp-doc-convert-auth username) \
+    PREVIEW_PASS=$(secret_key "$NS_MCP" mcp-doc-convert-auth password) \
+    PREVIEW_KEY=$(secret_key "$NS_MCP" mcp-docgen-key key) \
+    jq -cn --arg ns "$ns" --arg mcp "$NS_MCP" \
+      '$ENV.PREVIEW_USER as $user | $ENV.PREVIEW_PASS as $pass | $ENV.PREVIEW_KEY as $key | {apiVersion: "v1", kind: "Secret", type: "Opaque",
+        metadata: {name: "nabu-docs-preview", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-infra"}},
+        stringData: {PREVIEW_CONVERT_URL: "http://doc-convert.\($mcp).svc:3000", PREVIEW_CONVERT_USER: $user, PREVIEW_CONVERT_PASSWORD: $pass,
+          PREVIEW_LEGACY_URL: "http://doc-convert.\($mcp).svc:3001", PREVIEW_DOCGEN_URL: "http://docgen.\($mcp).svc:8000", PREVIEW_DOCGEN_KEY: $key}}' |
+      apply_stdin
+  fi
+  after=$(kc -n "$ns" get secret nabu-docs-preview -o jsonpath='{.data}' 2>/dev/null || true)
+  if [[ $before != "$after" ]] && kc -n "$ns" get deploy api >/dev/null 2>&1; then
+    kc -n "$ns" rollout restart deploy/api >/dev/null && log "api Nabu перезапущен: изменились настройки предпросмотра"
+  fi
 }
 
 # drop_disabled_secrets — ключи выключенных серверов (STD-03); только после
@@ -188,6 +229,7 @@ deploy_mcp() {
         die "$E_DEPLOY" "не удалось удалить релиз $MCP_RELEASE"
     fi
     kc delete ns "$NS_MCP" --ignore-not-found --wait=false >/dev/null
+    sync_preview_secret
     return
   fi
   kc create ns "$NS_MCP" --dry-run=client -o json |
@@ -197,6 +239,7 @@ deploy_mcp() {
   local args=()
   mapfile -t args < <(mcp_helm_args)
   release_local "$MCP_RELEASE" "$NS_MCP" "$ROOT/charts/mcp-servers" "${args[@]}"
+  sync_preview_secret
   drop_disabled_secrets
   ok "MCP-серверы: $(mcp_enabled_list | paste -sd, -)"
 }
@@ -209,8 +252,8 @@ mcp_creds_json() {
   while read -r srv; do
     entry=$(jq -cn --arg u "$(mcp_url "$srv")" --arg m "$(mcp_mode "$srv")" '{url: $u, mode: $m}')
     if [[ -n ${MCP_KEY_SECRET[$srv]:-} ]]; then
-      entry=$(jq -c --arg k "$(secret_key "$NS_MCP" "${MCP_KEY_SECRET[$srv]}" key)" \
-        '. + {header: "Authorization", value: "Bearer \($k)"}' <<<"$entry")
+      entry=$(MCP_KEY=$(secret_key "$NS_MCP" "${MCP_KEY_SECRET[$srv]}" key) \
+        jq -c '. + {header: "Authorization", value: "Bearer \($ENV.MCP_KEY)"}' <<<"$entry")
     fi
     if [[ -n ${MCP_OAUTH[$srv]:-} ]]; then
       entry=$(jq -c --argjson o "${MCP_OAUTH[$srv]}" '. + {oauth: $o}' <<<"$entry")
@@ -230,7 +273,8 @@ mcp_creds_text() {
     "  \($s | .[0:11] | . + (" " * (12 - length)))\(.url)   \(if .mode == "platform" then "платформенный" else "персональный" end)",
     (if .value then "              Authorization: \(.value)" else empty end),
     (if .oauth then "              OAuth: authorize \(.oauth.authorizeUrl), token \(.oauth.tokenUrl), scope \(.oauth.scopes | join(" "))\(if .oauth.clientId then ", client_id \(.oauth.clientId)" else "" end)" else empty end),
-    (if .fileArgs then "              файловые аргументы: \(.fileArgs | map("\(.tool).\(.arg)") | join(", "))" else empty end)' \
+    (if .fileArgs then "              файловые аргументы: \(.fileArgs | map("\(.tool).\(.arg)") | join(", "))" else empty end),
+    (if .resultArgs then "              пути результата: \(.resultArgs | map("\(.tool).\(.arg)") | join(", ")); пишет только в пространство: \(.spaceOnlyTools // [] | join(", "))" else empty end)' \
     <<<"$(mcp_creds_json)"
 }
 
@@ -262,6 +306,10 @@ EOF
   done < <(mcp_enabled_list)
   if mcp_on docling; then
     printf '        - { name: DOCLING_SERVE_KEY, valueFrom: { secretKeyRef: { name: mcp-docling-serve-key, key: key } } }\n'
+  fi
+  if mcp_on docgen; then
+    printf '        - { name: DOC_CONVERT_USER, valueFrom: { secretKeyRef: { name: mcp-doc-convert-auth, key: username } } }\n'
+    printf '        - { name: DOC_CONVERT_PASSWORD, valueFrom: { secretKeyRef: { name: mcp-doc-convert-auth, key: password } } }\n'
   fi
   cat <<EOF
       resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { cpu: 200m, memory: 128Mi } }
@@ -335,6 +383,7 @@ check_mcp_server() {
   case $srv in
     search) check_mcp_search_query "$url" "$key" ;;
     docling) check_mcp_docling_serve ;;
+    docgen) check_mcp_docgen ;;
   esac
 }
 
@@ -364,6 +413,33 @@ check_mcp_docling_serve() {
     record mcp-docling-convert ok "эталонный документ разобран в Markdown"
   else
     record mcp-docling-convert fail "эталонный документ не разобран: ${out:0:160}"
+  fi
+}
+
+# check_mcp_docgen — doc-convert без учётных данных отвечает 401, эталонные
+# HTML (с графиком на JavaScript) и HTML со ссылкой на адрес кластера
+# превращаются в PDF, а ссылка не загружается (FTR.NAB.CHAT-0003 R22, tech §9.5).
+# Пробный под шлёт файлы прямо в Gotenberg: ссылки S3 проверке не нужны.
+check_mcp_docgen() {
+  local code out
+  code=$(mcp_probe 'curl -sS -m 10 -o /dev/null -w "%{http_code}" -X POST http://doc-convert:3000/forms/chromium/convert/html')
+  if [[ $code == 401 ]]; then record mcp-docgen-convert-auth ok "doc-convert без учётных данных — 401"; else
+    record mcp-docgen-convert-auth fail "doc-convert без учётных данных ожидался 401, ответ: $code"
+  fi
+  out=$(mcp_probe 'printf "%s" "<html><body><h1>Hammurapi infra probe</h1><canvas id=c width=200 height=100></canvas><script>var x=document.getElementById(\"c\").getContext(\"2d\");x.fillRect(10,10,80,50);window.status=\"ready\"</script></body></html>" > /tmp/index.html &&
+    printf "user = \"%s:%s\"\n" "$DOC_CONVERT_USER" "$DOC_CONVERT_PASSWORD" | curl -K - -sS -m 120 -o /tmp/out.pdf -w "%{http_code}" \
+      http://doc-convert:3000/forms/chromium/convert/html -F "files=@/tmp/index.html" -F "waitForExpression=window.status === '"'"'ready'"'"'" &&
+    head -c 5 /tmp/out.pdf')
+  if [[ $out == "200%PDF-" ]]; then record mcp-docgen-html ok "HTML с JavaScript → PDF"; else
+    record mcp-docgen-html fail "HTML → PDF не получился: ${out:0:120}"
+  fi
+  out=$(mcp_probe 'printf "%s" "<html><body><img src=\"http://docgen.'"$NS_MCP"'.svc:8000/healthz\"><iframe src=\"https://kubernetes.default.svc/api\"></iframe></body></html>" > /tmp/index.html &&
+    printf "user = \"%s:%s\"\n" "$DOC_CONVERT_USER" "$DOC_CONVERT_PASSWORD" | curl -K - -sS -m 120 -o /tmp/out.pdf -w "%{http_code}" \
+      http://doc-convert:3000/forms/chromium/convert/html -F "files=@/tmp/index.html"')
+  # что запросов не было, доказывает тест образа (sink); здесь — что ссылки на
+  # кластер и метаданные облака не вешают конвертацию
+  if [[ $out == 200 ]]; then record mcp-docgen-ssrf ok "HTML со ссылками на сервисы кластера → PDF без ожидания сети"; else
+    record mcp-docgen-ssrf fail "HTML со ссылками на кластер: ответ ${out:0:120}"
   fi
 }
 

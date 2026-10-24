@@ -1,5 +1,5 @@
 # MCP-серверы стенда (FTR.NAB.CMN-0006, tech §2.5). Включение — опциями
-# MCP_DOCLING, MCP_SEARCH, MCP_YANDEX_MAIL; образы и версии — config/versions.env.
+# MCP_DOCLING, MCP_SEARCH, MCP_YANDEX_MAIL, MCP_DOCGEN; образы и версии — config/versions.env.
 # Ключи доступа приходят из секретов namespace (их создаёт hammurapi-infra.sh).
 
 docling:
@@ -37,6 +37,21 @@ yandexMail:
   # Ссылка на письмо: поиск по Message-ID в веб-интерфейсе ({msgid} — без угловых скобок).
   webLink: "https://mail.yandex.ru/#search?request={msgid}"
   resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
+
+# Документы (FTR.NAB.CHAT-0003 tech §2, §3): docgen — MCP-сервер, doc-convert —
+# Gotenberg (LibreOffice и Chromium без сети) и сайдкар legacy.
+docgen:
+  enabled: false
+  image: ghcr.io/greenongrey/docgen-mcp:0.1.0
+  resources: { requests: { cpu: 50m, memory: 256Mi }, limits: { cpu: "1", memory: 1Gi } }
+  limits: { inlineMB: 4, sourceMB: 25, resultMB: 50, timeoutSeconds: 120, maxPages: 500 }
+docConvert:
+  image: ghcr.io/greenongrey/doc-convert:0.1.0
+  resources: { requests: { cpu: 100m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
+  legacy:
+    resources: { requests: { cpu: 10m, memory: 128Mi }, limits: { cpu: "1", memory: 1Gi } }
+  # Очереди конвертаций; сверх них — 503 «сервис занят».
+  queue: 10
 
 # Кто вызывает серверы: компоненты Nabu (app.kubernetes.io/name=nabu) и проверки стенда.
 # api — прокси MCP для агентов, worker — сборщик памяти коммуникаций, agent —

@@ -35,6 +35,10 @@ app.kubernetes.io/component: {{ .component }}
 envFrom:
   - configMapRef: { name: {{ .Values.existingSecrets.configMap }} }
   - secretRef: { name: {{ .Values.existingSecrets.config }} }
+  # FTR.NAB.CHAT-0003 tech §9.4: адреса конвертеров предпросмотра; секрет создаёт
+  # стенд при MCP_DOCGEN, без него предпросмотр офисных файлов выключен.
+  # В doc-convert сетевая политика пускает только api.
+  - secretRef: { name: nabu-docs-preview, optional: true }
 env:
   - { name: PUBLIC_WEB_URL, value: "https://{{ include "nabu.web" . }}" }
   - { name: PUBLIC_API_URL, value: "https://{{ include "nabu.api" . }}" }
@@ -85,6 +89,25 @@ env:
   - { name: SANDBOX_CPU, value: {{ .Values.sandboxes.cpu | quote }} }
   - { name: SANDBOX_MEMORY, value: {{ .Values.sandboxes.memory | quote }} }
   - { name: SPACE_QUOTA, value: {{ .Values.sandboxes.spaceQuota | quote }} }
+  {{- with .Values.sandboxes.profiles }}
+  {{- $tag := required "image.tag обязателен (задаёт выкатка)" $.Values.image.tag }}
+  {{- $pairs := list }}
+  {{- range $name, $repo := . }}{{ $pairs = append $pairs (printf "%s=%s:%s" $name $repo $tag) }}{{ end }}
+  - { name: SANDBOX_PROFILES, value: {{ join "," $pairs | quote }} }
+  {{- end }}
+  {{- with .Values.sandboxes.defaults }}
+  {{- $pairs := list }}
+  {{- range $t, $p := . }}{{ $pairs = append $pairs (printf "%s=%s" $t $p) }}{{ end }}
+  - { name: SANDBOX_DEFAULTS, value: {{ join "," $pairs | quote }} }
+  {{- end }}
+  - { name: SANDBOX_INIT_IMAGE, value: {{ include "nabu.image" . | quote }} }
+  - { name: SANDBOX_CUSTOM_IMAGES, value: {{ .Values.sandboxes.customImages.enabled | quote }} }
+  - { name: SANDBOX_IMAGE_PREFIXES, value: {{ join "," .Values.sandboxes.customImages.allowedPrefixes | quote }} }
+  {{- $secrets := list }}
+  {{- range .Values.imagePullSecrets }}{{ $secrets = append $secrets .name }}{{ end }}
+  {{- range .Values.sandboxes.customImages.pullSecrets }}{{ $secrets = append $secrets . }}{{ end }}
+  - { name: SANDBOX_PULL_SECRETS, value: {{ join "," $secrets | quote }} }
+  - { name: SANDBOX_PROBE_TIMEOUT, value: {{ .Values.sandboxes.probeTimeout | quote }} }
   - { name: PI_VERSION, value: {{ .Values.piVersion | default "" | quote }} }
   {{- if .Values.whisper.enabled }}
   - { name: WHISPER_URL, value: "http://whisper.{{ .Release.Namespace }}.svc:9000" }

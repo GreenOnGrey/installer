@@ -83,6 +83,21 @@ sandboxes:
   spaceQuota: 5GB
   # CIDR, куда песочницам разрешены исходящие соединения (реестры пакетов и т. п.).
   egressAllow: []
+  # Встроенные профили образов песочниц (FTR.NAB.CMN-0008): репозиторий, тег —
+  # версия nabu (image.tag). Пусто — один образ nabu-core, как до профилей.
+  profiles:
+    base: ghcr.io/greenongrey/nabu-sandbox-base
+    documents: ghcr.io/greenongrey/nabu-sandbox-documents
+  # Профили по умолчанию; персональным и групповым администратор меняет их в панели.
+  defaults: { personal: documents, group: documents, service: base }
+  # Собственные образы команды инсталляции: только из allowedPrefixes (каждый
+  # оканчивается на /), секреты доступа к реестрам — в namespace песочниц.
+  customImages:
+    enabled: false
+    allowedPrefixes: []
+    pullSecrets: []
+  # Сколько может длиться проверка собственного образа вместе с загрузкой.
+  probeTimeout: 5m
 
 ingress:
   className: traefik

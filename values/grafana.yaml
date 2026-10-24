@@ -28,6 +28,38 @@ datasources:
         access: proxy
         url: http://victoria-logs-victoria-logs-single-server:9428
         editable: false
+# Правила алертинга Grafana (unified alerting; правила в панелях Grafana 11+
+# не поддерживает). Состояние видно в Alerting → Alert rules; каналов
+# уведомлений стенд не заводит.
+alerting:
+  rules.yaml:
+    apiVersion: 1
+    groups:
+      - orgId: 1
+        name: nabu-sandboxes
+        folder: Nabu
+        interval: 1m
+        rules:
+          # FTR.NAB.CMN-0008 tech §7.10: больше трёх сбоев старта собственного профиля за 10 минут
+          - uid: nabu-sandbox-custom-start-failing
+            title: NabuSandboxCustomStartFailing
+            condition: C
+            data:
+              - refId: A
+                relativeTimeRange: { from: 600, to: 0 }
+                datasourceUid: victoriametrics
+                model: { refId: A, instant: true, expr: 'sum(increase(nabu_sandbox_start_failures_total{profile_kind="custom"}[10m]))' }
+              - refId: C
+                datasourceUid: __expr__
+                model: { refId: C, type: threshold, expression: A, conditions: [{ evaluator: { type: gt, params: [3] } }] }
+            for: 0s
+            noDataState: OK
+            execErrState: Error
+            labels: { severity: warning }
+            annotations:
+              summary: Песочницы собственного профиля не стартуют
+              # чарт пропускает alerting через tpl: шаблон Grafana экранирован от Helm
+              description: 'Сбои старта профиля kind=custom за 10 минут: {{ "{{" }} $values.A {{ "}}" }}. Дашборд «Песочницы Nabu», раздел «Образы песочниц» в админке.'
 sidecar:
   dashboards:
     enabled: true

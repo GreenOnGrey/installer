@@ -21,16 +21,22 @@ if ((!test_only)); then
 fi
 
 # imap-mcp — собственный сервер: собирается из исходников каталога, версия — IMAP_MCP_VERSION.
-declare -A VERSIONS=([docling-mcp]=$DOCLING_MCP_VERSION [imap-mcp]=$IMAP_MCP_VERSION)
-for name in docling-mcp imap-mcp; do
+# doc-convert собирается до docgen-mcp: тест docgen-mcp идёт вместе с ним (FTR.NAB.CHAT-0003).
+declare -A VERSIONS=([docling-mcp]=$DOCLING_MCP_VERSION [imap-mcp]=$IMAP_MCP_VERSION [doc-convert]=$DOC_CONVERT_VERSION
+  [docgen-mcp]=$DOCGEN_MCP_VERSION)
+for name in docling-mcp imap-mcp doc-convert docgen-mcp; do
   version=${VERSIONS[$name]}
   image=$registry/$name:$version
   if ((!test_only)) && docker manifest inspect "$image" >/dev/null 2>&1; then
     echo "- $image — уже опубликован" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
     continue
   fi
-  docker build --pull -t "$image" --build-arg "VERSION=$version" "$ROOT/images/$name"
-  bash "$ROOT/images/$name/test.sh" "$image"
+  docker build --pull -t "$image" --build-arg "VERSION=$version" --build-arg "GOTENBERG_IMAGE=$GOTENBERG_IMAGE" "$ROOT/images/$name"
+  if [[ $name == docgen-mcp ]]; then
+    bash "$ROOT/images/$name/test.sh" "$image" "$registry/doc-convert:$DOC_CONVERT_VERSION"
+  else
+    bash "$ROOT/images/$name/test.sh" "$image"
+  fi
   # исправимые HIGH/CRITICAL блокируют выпуск, как у образов Nabu
   docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" image --quiet \
     --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$image"
