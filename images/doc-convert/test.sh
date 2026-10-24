@@ -34,11 +34,19 @@ def post(u, data, headers):
         return e
 assert post(GB + "/forms/libreoffice/convert", b"", {}).code == 401, "SEC-12 gotenberg"
 assert post(LG + "/convert?to=docx&name=a.odt", b"x", {}).code == 401, "SEC-12 legacy"
-# a flat ODT (FODT) is enough for LibreOffice
-fodt = b"""<?xml version="1.0"?><office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
- xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.text">
- <office:body><office:text><text:p>Привет</text:p></office:text></office:body></office:document>"""
-r = post(LG + "/convert?to=docx&name=a.odt", fodt, {**auth, "Content-Type": "application/octet-stream"})
+# the smallest ODT: mimetype first and stored, the text and the manifest
+content = """<?xml version="1.0" encoding="UTF-8"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.3">
+ <office:body><office:text><text:p>Привет</text:p></office:text></office:body></office:document-content>"""
+manifest = """<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3">
+ <manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/>
+ <manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/></manifest:manifest>"""
+buf = io.BytesIO()
+with zipfile.ZipFile(buf, "w") as z:
+    z.writestr(zipfile.ZipInfo("mimetype"), "application/vnd.oasis.opendocument.text", compress_type=zipfile.ZIP_STORED)
+    z.writestr("content.xml", content.encode(), compress_type=zipfile.ZIP_DEFLATED)
+    z.writestr("META-INF/manifest.xml", manifest.encode(), compress_type=zipfile.ZIP_DEFLATED)
+r = post(LG + "/convert?to=docx&name=a.odt", buf.getvalue(), {**auth, "Content-Type": "application/octet-stream"})
 assert r.status == 200, r
 assert "Привет" in zipfile.ZipFile(io.BytesIO(r.read())).read("word/document.xml").decode(), "CNV-02"
 print("doc-convert: ok")

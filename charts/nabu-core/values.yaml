@@ -65,7 +65,9 @@ memory:
     enabled: true
     replicas: 1
     maxRuns: 40           # запусков на под; держите replicas × maxRuns не меньше collectConcurrency
-    resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { cpu: "2", memory: 3Gi } }
+    # Замер на проде за 7 дней (2026-10-24): CPU p95 1m, пик 10m; память пик 95 МиБ.
+    # Первый сбор и всплески — в пределах лимита.
+    resources: { requests: { cpu: 50m, memory: 192Mi }, limits: { cpu: "2", memory: 3Gi } }
     # Модель сбора у внешнего поставщика: пулу открыт интернет на 443 (кроме
     # частных диапазонов). false — модель внутри сети компании, интернет закрыт
     # целиком, а её адреса перечислены в egressAllow.

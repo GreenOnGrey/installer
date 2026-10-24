@@ -7,7 +7,9 @@ docling:
   serve:
     image: quay.io/docling-project/docling-serve-cpu:v1.37.0
     # Разбор документа на CPU: модели раскладки, таблиц и OCR в памяти процесса.
-    resources: { requests: { cpu: 500m, memory: 2Gi }, limits: { cpu: "2", memory: 4Gi } }
+    # Замер на проде за 7 дней (2026-10-24): CPU p95 2m, пик 12m; память p95 1085 МиБ,
+    # пик 1143 МиБ. Запрос — по памяти с запасом; разбор идёт в лимите 2 CPU / 4 ГиБ.
+    resources: { requests: { cpu: 100m, memory: 1280Mi }, limits: { cpu: "2", memory: 4Gi } }
     maxFileMB: 25
   mcp:
     image: ghcr.io/greenongrey/docling-mcp:3.3.0

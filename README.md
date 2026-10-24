@@ -164,7 +164,7 @@ TCP-подключение: токен получает само приложе�
 
 | Опция | Сервер | Память (запрос / лимит) | Образ, диск |
 |---|---|---|---|
-| `MCP_DOCLING=true` | Разбор документов: `docling-serve` (CPU, OCR `ru`, `en`) и `docling-mcp` | ~2,3 / 5 ГиБ | ~4,4 ГБ |
+| `MCP_DOCLING=true` | Разбор документов: `docling-serve` (CPU, OCR `ru`, `en`) и `docling-mcp` | ~1,5 / 5 ГиБ | ~4,4 ГБ |
 | `MCP_SEARCH=true` | Веб-поиск: SearXNG и `mcp-searxng` | ~0,4 / 0,8 ГиБ | ~0,3 ГБ |
 | `MCP_YANDEX_MAIL=true` | Яндекс Почта только для чтения: собственный сервер `imap-mcp` | ~0,06 / 0,25 ГиБ | ~0,1 ГБ |
 | `MCP_DOCGEN=true` | Создание, правка и конвертация документов (`FTR.NAB.CHAT-0003`): собственный сервер `docgen-mcp` и `doc-convert` (Gotenberg — LibreOffice и Chromium без сети — и сайдкар `legacy`); заодно включает предпросмотр DOCX/XLSX/PPTX в Nabu | ~0,9 / 4 ГиБ | ~2,5 ГБ |
