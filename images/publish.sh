@@ -37,9 +37,14 @@ for name in docling-mcp imap-mcp doc-convert docgen-mcp; do
   else
     bash "$ROOT/images/$name/test.sh" "$image"
   fi
-  # исправимые HIGH/CRITICAL блокируют выпуск, как у образов Nabu
-  docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" image --quiet \
-    --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$image"
+  # исправимые HIGH/CRITICAL блокируют выпуск, как у образов Nabu; принятые
+  # находки — в images/<образ>/.trivyignore.yaml, каждая с причиной и сроком
+  ignore=()
+  if [[ -f $ROOT/images/$name/.trivyignore.yaml ]]; then
+    ignore=(-v "$ROOT/images/$name/.trivyignore.yaml:/trivyignore.yaml:ro")
+  fi
+  docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "${ignore[@]}" "$TRIVY_IMAGE" image --quiet \
+    --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 ${ignore:+--ignorefile /trivyignore.yaml} "$image"
   if ((!test_only)); then
     docker push "$image"
     echo "- $image" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"

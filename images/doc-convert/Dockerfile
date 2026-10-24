@@ -2,7 +2,7 @@
 # официальный Gotenberg и сайдкар legacy (DOC/XLS/PPT/ODF → OOXML на том же
 # LibreOffice). Тег образа — DOC_CONVERT_VERSION, версия Gotenberg —
 # GOTENBERG_IMAGE из config/versions.env.
-ARG GOTENBERG_IMAGE=gotenberg/gotenberg:8.37.0
+ARG GOTENBERG_IMAGE=gotenberg/gotenberg:8.38.1
 FROM ${GOTENBERG_IMAGE}
 ARG VERSION
 USER root
