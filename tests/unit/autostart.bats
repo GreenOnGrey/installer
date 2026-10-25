@@ -173,3 +173,17 @@ mk_state() {
   [ "$status" -eq 0 ]
   not_called "^systemctl"
 }
+
+@test "AUTO-13: up настраивает сборку мусора и без бита исполнения у bin/stand-autostart, как в релизе" {
+  load_script
+  local release=$BATS_TEST_TMPDIR/release
+  mkdir -p "$release/bin"
+  install -m 644 "$ROOT/bin/stand-autostart" "$release/bin/stand-autostart"
+  ROOT=$release
+  MK_PROFILE=hammurapi
+  stub minikube 'case "$*" in ssh*) echo changed ;; esac'
+  run kubelet_gc
+  [ "$status" -eq 0 ]
+  called "minikube ssh -p hammurapi -- sudo sh -c"
+  [[ $output == *"сборка мусора образов: диск 85"* ]]
+}

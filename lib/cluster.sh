@@ -63,9 +63,11 @@ cluster_up() {
 # Не настроилась — предупреждение: стенд работает, пока хватает диска.
 kubelet_gc() {
   local cmd
+  # через bash: в релизе у bin/stand-autostart нет бита исполнения, в систему
+  # его ставит install -m 755 (install_autostart)
   printf -v cmd '%q ' env MK_PROFILE="$MK_PROFILE" IMAGE_GC_HIGH="$IMAGE_GC_HIGH" \
     IMAGE_GC_LOW="$IMAGE_GC_LOW" IMAGE_GC_MAX_AGE="$IMAGE_GC_MAX_AGE" \
-    "$ROOT/bin/stand-autostart" kubelet-gc
+    bash "$ROOT/bin/stand-autostart" kubelet-gc
   if { if docker_ok; then eval "$cmd"; else sg docker -c "$cmd"; fi; } 2>"$RUN_DIR/kubelet-gc.log"; then
     ok "сборка мусора образов: диск ${IMAGE_GC_HIGH} %, неиспользуемые старше $IMAGE_GC_MAX_AGE"
   else
