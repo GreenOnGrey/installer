@@ -208,8 +208,10 @@ mcp_chart() {
     if [[ -z $bad ]]; then pass "SEC-06 $combo: не root, без токена ServiceAccount"; else fail "SEC-06 $combo: $(echo "$bad" | tr '\n' ' ')"; fi
     local pols
     pols=$(docs_json "$f" | jq -r 'select(.kind == "NetworkPolicy") | .metadata.name' | sort | tr '\n' ' ')
-    if [[ $pols == *default-deny* && $pols == *from-nabu* && $pols == *egress-internet* && $pols == *docling-serve-in* &&
-      $pols == *doc-convert-in* && $pols == *egress-docgen* ]]; then
+    # политики сервиса документов — только вместе с ним
+    local docs_pols=true
+    if [[ $combo == docgen || $combo == all ]] && [[ $pols != *doc-convert-in* || $pols != *egress-docgen* ]]; then docs_pols=false; fi
+    if [[ $pols == *default-deny* && $pols == *from-nabu* && $pols == *egress-internet* && $pols == *docling-serve-in* ]] && $docs_pols; then
       pass "SEC-05 $combo: сетевые политики на месте"
     else
       fail "SEC-05 $combo: политики «$pols»"
