@@ -112,8 +112,9 @@ check_storage_services() {
 check_scrape_jobs() {
   local jobs expected
   jobs=$(yq -r '.config.scrape_configs[].job_name' "$1/vmagent-scrape.yaml" | sort | tr '\n' ' ')
-  # hammurapi — всегда в конфигурации, но не обязателен в проверках стенда.
-  expected=$({ expected_jobs; echo hammurapi; } | sort | tr '\n' ' ')
+  # hammurapi и mcp (values/scrape/hammurapi.yaml) — всегда в конфигурации, но не обязательны в
+  # проверках стенда: целей у них нет, пока не развёрнуты Hammurapi, Nabu и MCP-серверы.
+  expected=$({ expected_jobs; echo hammurapi; echo mcp; } | sort | tr '\n' ' ')
   if [[ $jobs == "$expected" ]]; then pass "MET-02 $2: задания сбора $jobs"; else fail "MET-02 $2: задания «$jobs», ожидались «$expected»"; fi
 }
 
