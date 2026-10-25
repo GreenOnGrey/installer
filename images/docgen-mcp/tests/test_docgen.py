@@ -390,9 +390,14 @@ class Html(unittest.TestCase):
         self.assertFalse(any(u.startswith("data:") for u in found))
 
     def test_chromium_options(self):
-        o = converting.chromium({})
+        # CNV-05: window.status is awaited only when the page sets it — Gotenberg would wait until its timeout
+        o = converting.chromium({}, b"<script>draw(); window.status = 'ready'</script>")
         self.assertTrue(o["preferCssPageSize"])
         self.assertEqual(o["waitForExpression"], "window.status === 'ready'")
+        o = converting.chromium({}, b"<h1>Strategy</h1>")
+        self.assertNotIn("waitForExpression", o)
+        self.assertEqual(o["waitDelay"], "1s")
+        self.assertIn("waitForExpression", converting.chromium({"waitForReady": True}, b"<h1>x</h1>"))
         o = converting.chromium({"paper": "A4", "landscape": True, "margins": {"top": 25.4}})
         self.assertEqual((o["landscape"], o["marginTop"]), (True, 1.0))
         self.assertNotIn("preferCssPageSize", o)

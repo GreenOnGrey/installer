@@ -9,3 +9,15 @@
         - { source_labels: [__meta_kubernetes_pod_name], target_label: pod }
         - { source_labels: [__meta_kubernetes_pod_container_name], target_label: container }
         - { source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component], target_label: component }
+    # --- MCP-серверы стенда (FTR.NAB.CMN-0006, FTR.NAB.CHAT-0003): docgen, Gotenberg (путь из аннотации) ---
+    - job_name: mcp
+      kubernetes_sd_configs: [{ role: pod, namespaces: { names: [mcp] } }]
+      relabel_configs:
+        - { source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape], regex: "true", action: keep }
+        - { source_labels: [__meta_kubernetes_pod_phase], regex: Running, action: keep }
+        - { source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port, __meta_kubernetes_pod_container_port_number], action: keep_if_equal }
+        - { source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path], regex: (.+), target_label: __metrics_path__ }
+        - { source_labels: [__meta_kubernetes_namespace], target_label: namespace }
+        - { source_labels: [__meta_kubernetes_pod_name], target_label: pod }
+        - { source_labels: [__meta_kubernetes_pod_container_name], target_label: container }
+        - { source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name], target_label: app }

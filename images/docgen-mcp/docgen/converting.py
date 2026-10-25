@@ -32,20 +32,26 @@ def convert(source: str, to: str, options: dict, workdir: str) -> tuple[bytes, l
     if to == "pdf" and ext in ("html", "htm"):
         with open(source, "rb") as f:
             index = f.read()
-        return gotenberg.html_to_pdf(index, [], chromium(options)), htmlscan.external(index)
+        return gotenberg.html_to_pdf(index, [], chromium(options, index)), htmlscan.external(index)
     if to == "pdf" and ext == "zip":
         index, assets = unpack(source, os.path.join(workdir, "site"))
-        return gotenberg.html_to_pdf(index, assets, chromium(options)), htmlscan.external(index)
+        return gotenberg.html_to_pdf(index, assets, chromium(options, index + b"".join(d for n, d in assets if ext_of(n) in ("js", "mjs")))), \
+            htmlscan.external(index)
     raise DocError(f"A .{ext or '?'} file cannot be converted to {to}.")
 
 
-def chromium(options: dict) -> dict:
-    """Параметры Chromium: формат из CSS @page, если агент не задал своего;
-    ожидание готовности страницы — window.status = 'ready', до 10 с."""
+def chromium(options: dict, page: bytes = b"") -> dict:
+    """Параметры Chromium: формат из CSS @page, если агент не задал своего.
+
+    Gotenberg ждёт waitForExpression без запасного выхода — до своего таймаута.
+    Поэтому window.status = 'ready' ждём, только если страница (или её скрипты)
+    его выставляет; иначе — короткая пауза на отрисовку скриптов.
+    """
     out = {"printBackground": bool(options.get("printBackground", True)), "skipNetworkIdleEvent": True}
-    if options.get("waitForReady", True):
+    if options.get("waitForReady", b"window.status" in page):
         out["waitForExpression"] = "window.status === 'ready'"
-        out["waitDelay"] = "10s"
+    else:
+        out["waitDelay"] = "1s"
     if options.get("paper") or "landscape" in options:
         w, h = PAPER.get(str(options.get("paper", "A4")).upper(), PAPER["A4"])
         out.update({"paperWidth": w, "paperHeight": h, "landscape": bool(options.get("landscape", False))})

@@ -17,6 +17,10 @@ spec:
     metadata:
       labels: {{- include "mcp.labels" . | nindent 8 }}
         app.kubernetes.io/name: docgen
+      # метрики docgen_* (дашборд «MCP-серверы», раздел «Документы»)
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
     spec:
       {{- include "mcp.podSecurity" . | nindent 6 }}
       {{- with .Values.imagePullSecrets }}

@@ -18,8 +18,8 @@ load helpers
   done
 }
 
-@test "R7: восемь дашбордов (шесть стенда, MCP-серверы FTR.NAB.CMN-0006, песочницы Nabu FTR.NAB.CMN-0008)" {
-  [ "$(find "$ROOT/dashboards" -name '*.json' | wc -l)" -eq 8 ]
+@test "R7: девять дашбордов (шесть стенда, MCP-серверы FTR.NAB.CMN-0006, песочницы и агенты Nabu)" {
+  [ "$(find "$ROOT/dashboards" -name '*.json' | wc -l)" -eq 9 ]
 }
 
 @test "PORT-01: вызовов API облака нет вне docs/, tests/e2e и .github" {
