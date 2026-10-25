@@ -153,6 +153,7 @@ jobs:
           MCP_DOCLING: ${{ vars.MCP_DOCLING }}
           MCP_SEARCH: ${{ vars.MCP_SEARCH }}
           MCP_YANDEX_MAIL: ${{ vars.MCP_YANDEX_MAIL }}
+          MCP_DOCGEN: ${{ vars.MCP_DOCGEN }}
           MCP_DOCLING_MAX_MB: ${{ vars.MCP_DOCLING_MAX_MB }}
           MCP_SEARCH_ENGINES: ${{ vars.MCP_SEARCH_ENGINES }}
         # Машине прода не нужен доступ к GitHub (deploy keys запрещены политикой
@@ -168,7 +169,7 @@ jobs:
           # Заданные параметры — в stdin выкатки (секрет не попадает в argv и на диск).
           for k in PUBLIC_ACCESS ACME_EMAIL ACME_ISSUER PUBLIC_BASE_DOMAIN PUBLIC_IP \
             GRAFANA_GITHUB_CLIENT_ID GRAFANA_GITHUB_ORG GRAFANA_GITHUB_CLIENT_SECRET \
-            MCP_DOCLING MCP_SEARCH MCP_YANDEX_MAIL MCP_DOCLING_MAX_MB MCP_SEARCH_ENGINES; do
+            MCP_DOCLING MCP_SEARCH MCP_YANDEX_MAIL MCP_DOCGEN MCP_DOCLING_MAX_MB MCP_SEARCH_ENGINES; do
             if [[ -n ${!k} ]]; then printf '%s=%s\n' "$k" "$(printf '%s' "${!k}" | tr -d '\r\n')"; fi
           done | remote "bash $PROD_DIR/deploy-remote.sh up $PROD_DIR $TAG $SHA $ACTOR"
 

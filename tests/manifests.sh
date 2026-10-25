@@ -168,13 +168,14 @@ crd_schemas() {
 mcp_chart() {
   printf '\nMCP-серверы\n'
   local combo dir f args=()
-  for combo in docling search yandex-mail all; do
-    MCP_DOCLING=false MCP_SEARCH=false MCP_YANDEX_MAIL=false
+  for combo in docling search yandex-mail docgen all; do
+    MCP_DOCLING=false MCP_SEARCH=false MCP_YANDEX_MAIL=false MCP_DOCGEN=false
     case $combo in
       docling) MCP_DOCLING=true ;;
       search) MCP_SEARCH=true ;;
       yandex-mail) MCP_YANDEX_MAIL=true ;;
-      all) MCP_DOCLING=true MCP_SEARCH=true MCP_YANDEX_MAIL=true ;;
+      docgen) MCP_DOCGEN=true ;;
+      all) MCP_DOCLING=true MCP_SEARCH=true MCP_YANDEX_MAIL=true MCP_DOCGEN=true ;;
     esac
     dir=$OUT/mcp-$combo
     mkdir -p "$dir"
@@ -196,7 +197,8 @@ mcp_chart() {
       docling) want="docling-mcp docling-serve " ;;
       search) want="search " ;;
       yandex-mail) want="yandex-mail " ;;
-      all) want="docling-mcp docling-serve search yandex-mail " ;;
+      docgen) want="doc-convert docgen " ;;
+      all) want="doc-convert docgen docling-mcp docling-serve search yandex-mail " ;;
     esac
     if [[ $deps == "$want" ]]; then pass "STD-02 $combo: только $want"; else fail "STD-02 $combo: Deployment'ы «$deps», ожидались «$want»"; fi
     local bad
@@ -206,7 +208,8 @@ mcp_chart() {
     if [[ -z $bad ]]; then pass "SEC-06 $combo: не root, без токена ServiceAccount"; else fail "SEC-06 $combo: $(echo "$bad" | tr '\n' ' ')"; fi
     local pols
     pols=$(docs_json "$f" | jq -r 'select(.kind == "NetworkPolicy") | .metadata.name' | sort | tr '\n' ' ')
-    if [[ $pols == *default-deny* && $pols == *from-nabu* && $pols == *egress-internet* && $pols == *docling-serve-in* ]]; then
+    if [[ $pols == *default-deny* && $pols == *from-nabu* && $pols == *egress-internet* && $pols == *docling-serve-in* &&
+      $pols == *doc-convert-in* && $pols == *egress-docgen* ]]; then
       pass "SEC-05 $combo: сетевые политики на месте"
     else
       fail "SEC-05 $combo: политики «$pols»"
