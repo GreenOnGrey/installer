@@ -611,47 +611,6 @@
     },
     {
       "type": "timeseries",
-      "title": "Очередь doc-convert",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "victoriametrics"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 48
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "victoriametrics"
-          },
-          "expr": "sum by (__name__) ({__name__=~\"gotenberg_(chromium|libreoffice)_requests_queue_size\"})",
-          "legendFormat": "{{__name__}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
       "title": "Длительность конвертации, p95",
       "description": "Инструмент convert: DOC/XLS/PPT → OOXML и HTML → PDF через doc-convert",
       "datasource": {

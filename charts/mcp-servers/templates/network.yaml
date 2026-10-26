@@ -132,20 +132,19 @@ spec:
     - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: doc-convert } } }]
       ports: [{ port: 3000 }, { port: 3001 }]
 ---
-# Метрики docgen и Gotenberg забирает vmagent из observability — только порты метрик.
+# Метрики docgen забирает vmagent из observability — только порт docgen.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: metrics-in
   labels: {{- include "mcp.labels" . | nindent 4 }}
 spec:
-  podSelector:
-    matchExpressions: [{ key: app.kubernetes.io/name, operator: In, values: [docgen, doc-convert] }]
+  podSelector: { matchLabels: { app.kubernetes.io/name: docgen } }
   policyTypes: [Ingress]
   ingress:
     - from:
         - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: observability } }
-      ports: [{ port: 8000 }, { port: 3000 }]
+      ports: [{ port: 8000 }]
 ---
 {{- end }}
 # Пробный под проверок стенда ходит к серверам namespace.

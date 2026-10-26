@@ -72,10 +72,8 @@ spec:
     metadata:
       labels: {{- include "mcp.labels" . | nindent 8 }}
         app.kubernetes.io/name: doc-convert
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "3000"
-        prometheus.io/path: /prometheus/metrics
+      # Метрики Gotenberg не собираются: базовая аутентификация закрывает и
+      # /prometheus/metrics, без пароля открыт только /health (FTR.NAB.CHAT-0003, решение 30).
     spec:
       {{- include "mcp.podSecurity" . | nindent 6 }}
       {{- with .Values.imagePullSecrets }}
