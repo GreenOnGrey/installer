@@ -99,10 +99,29 @@ class Options(unittest.TestCase):
             documents.split_options("---\ncolor: red\n---\nx")
         self.assertIn("color", str(e.exception))
 
+    def test_markdown_argument(self):
+        # GEN-16: the text of the document, not a shell expression; a file of the space is read as UTF-8
+        self.assertEqual(documents.inline("# Заголовок\n"), "# Заголовок\n")
+        for text in ("`npm i` ставит пакеты", "$x$ — переменная", "```sh\ncat a.md\n```", "$5 за штуку"):
+            self.assertEqual(documents.inline(text), text)
+        for expr in ("$(cat report.md)", "`cat report.md`", "${DOC}", "$DOC"):
+            with self.assertRaises(DocError) as e:
+                documents.inline(expr)
+            self.assertIn("source", str(e.exception))
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "a.md")
+            with open(p, "wb") as f:
+                f.write("\ufeff# Отчёт\n".encode())
+            self.assertEqual(documents.read_source(p), "# Отчёт\n")
+            with open(p, "wb") as f:
+                f.write(b"\xff\xfe\x00")
+            with self.assertRaises(DocError):
+                documents.read_source(p)
+
     def test_inline_limit(self):
         # SEC-09, R12: Markdown, the JSON of a table and the data of a template — up to 4 MB
         with self.assertRaises(DocError):
-            documents.split_options("x" * (5 << 20))
+            documents.inline("x" * (5 << 20))
         big = {"sheets": [{"name": "S", "rows": [["x" * 1024] for _ in range(5 << 10)]}]}
         with self.assertRaises(DocError) as e:
             sheets.render(big, "/tmp/never.xlsx")

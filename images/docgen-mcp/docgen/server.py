@@ -108,16 +108,35 @@ def _get(url: str, workdir: str) -> str:
     return fetch.download(url, workdir)
 
 
+def _markdown(source: str, markdown: str, workdir: str) -> str:
+    """Текст документа: файл пространства (source) или сам текст (markdown) — ровно одно из двух
+    (FTR.NAB.CHAT-0003 tech, решение 31)."""
+    if not source and not markdown.strip():
+        raise DocError("Give the Markdown in source (a .md file of the space) or in markdown (the text).")
+    if source and markdown.strip():
+        raise DocError("Give the Markdown in source or in markdown, not both.")
+    if source:
+        if "://" not in source:
+            # путь не превращён в ссылку: в позиции каталога нет файлового аргумента render_document.source
+            raise DocError("source is not enabled for this server in the catalog of Nabu: pass the text in markdown, "
+                           "or ask the administrator to add render_document.source to the file arguments.")
+        return documents.read_source(_get(source, workdir))
+    return documents.inline(markdown)
+
+
 # ─── Инструменты ───────────────────────────────────────────────────
 # Docstring инструмента — его описание в tools/list для агента, поэтому по-английски,
 # как и тексты ошибок (tech §2.2); комментарии кода — по-русски.
 
 @mcp.tool(annotations=WRITE)
-async def render_document(markdown: str, format: str, dest: str, reference: str = "", images: list[str] = [],  # noqa: B006 — the schema of a list of files (R11)
+async def render_document(format: str, dest: str, source: str = "", markdown: str = "", reference: str = "",
+                          images: list[str] = [],  # noqa: B006 — the schema of a list of files (R11)
                           overwrite: bool = False) -> str:
     """Creates a DOCX, PDF or PPTX document from Markdown.
 
-    markdown may start with an options block (--- yaml ---): title, author, lang, page (size A4/A5/Letter,
+    source: a .md file of the space — use it for any document saved in the space; markdown: the text itself,
+    for a short document written right in the call (never a shell expression like $(cat file)). Give one of them.
+    The Markdown may start with an options block (--- yaml ---): title, author, lang, page (size A4/A5/Letter,
     orientation, margins in mm), header and footer ({page}, {pages}), toc. Tables, footnotes, images (paths of
     the space listed in images), <!-- pagebreak -->. In PPTX each ## heading starts a slide, ::: notes are
     speaker notes. reference: a .docx or .pptx of the space whose styles to use. dest: where to save the file.
@@ -126,7 +145,7 @@ async def render_document(markdown: str, format: str, dest: str, reference: str 
         for u in images or []:
             _get(u, workdir)
         ref = _get(reference, workdir) if reference else None
-        path, warnings = documents.render(workdir, markdown, format, ref)
+        path, warnings = documents.render(workdir, _markdown(source, markdown, workdir), format, ref)
         return _finish(path, dest, format, warnings)
 
     return await _run("render_document", format, work)

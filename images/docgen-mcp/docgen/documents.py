@@ -26,9 +26,34 @@ SIZES = {"A4": (210, 297), "A5": (148, 210), "LETTER": (215.9, 279.4)}
 FROM = "markdown+pipe_tables+footnotes+fenced_divs+raw_html+raw_attribute+implicit_figures"
 
 
+# Подстановка оболочки вместо текста: агент написал $(cat file.md) в аргумент
+# инструмента, а не в команду bash, — документ вышел бы из одной этой строки
+# (FTR.NAB.CHAT-0003 tech, решение 31). Весь текст — одно выражение: Markdown,
+# который лишь начинается с `кода` или $формулы$, проходит.
+SHELL_EXPR = re.compile(r"\$\([^\n]*\)|`[^`\n]+`|\$\{?[A-Za-z_]\w*\}?")
+
+
+def inline(markdown: str) -> str:
+    """Markdown из аргумента: не больше MAX_INLINE (R12) и не выражение оболочки."""
+    limits.check_inline("markdown", markdown)
+    if SHELL_EXPR.fullmatch(markdown.strip()):
+        raise DocError("markdown is a shell expression, not the text: the tool does not run the shell. "
+                       "Pass the path of the file in source instead.")
+    return markdown
+
+
+def read_source(path: str) -> str:
+    """Markdown из файла пространства; размер уже проверил fetch (MAX_SOURCE)."""
+    with open(path, "rb") as f:
+        data = f.read()
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise DocError("The source file is not UTF-8 text.") from None
+
+
 def split_options(markdown: str) -> tuple[dict, str]:
     """Блок параметров YAML в начале Markdown (--- … ---) и текст после него."""
-    limits.check_inline("markdown", markdown)
     m = re.match(r"\A---\s*\n(.*?)\n---\s*\n", markdown, re.S)
     if not m:
         return {}, markdown
