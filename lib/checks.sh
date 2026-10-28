@@ -16,6 +16,13 @@ record() { CHECK_RESULTS+=("$1|$2|$3"); }
 
 probe_id() { openssl rand -hex 6; }
 
+# Суффикс пробных подов и заданий этого запуска: два развёртывания стенда,
+# идущие одновременно, не удаляют пробы друг друга. Брошенные пробы
+# завершаются сами (activeDeadlineSeconds, ttlSecondsAfterFinished).
+PROBE_RUN=${PROBE_RUN:-$(probe_id)}
+CHECKS_PROBE="checks-probe-$PROBE_RUN"
+LOG_PROBE="log-probe-$PROBE_RUN"
+
 # expected_jobs — задания сбора метрик текущей конфигурации (R8).
 expected_jobs() {
   local jobs=(kubelet cadvisor apiserver node-exporter kube-state-metrics stack)
@@ -37,11 +44,12 @@ checks_probe_manifest() {
 apiVersion: v1
 kind: Pod
 metadata:
-  name: checks-probe
+  name: $CHECKS_PROBE
   namespace: $NS_OBSERVABILITY
   labels: { app.kubernetes.io/name: checks-probe, app.kubernetes.io/managed-by: hammurapi-infra }
 spec:
   restartPolicy: Never
+  activeDeadlineSeconds: 900
   terminationGracePeriodSeconds: 1
   containers:
     - name: curl
@@ -59,11 +67,12 @@ log_probe_manifest() {
 apiVersion: v1
 kind: Pod
 metadata:
-  name: log-probe
+  name: $LOG_PROBE
   namespace: $NS_STORAGES
   labels: { app.kubernetes.io/name: log-probe, app.kubernetes.io/managed-by: hammurapi-infra }
 spec:
   restartPolicy: Never
+  activeDeadlineSeconds: 900
   terminationGracePeriodSeconds: 1
   containers:
     - name: probe
@@ -147,7 +156,7 @@ probe_job_manifest() {
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: $name
+  name: $name-$PROBE_RUN
   namespace: $NS_STORAGES
   labels: { app.kubernetes.io/name: $name, app.kubernetes.io/managed-by: hammurapi-infra }
 spec:
@@ -205,8 +214,7 @@ EOF
 # run_probe_job <имя> <таймаут, с> <манифест из stdin> — печатает сообщения
 # контейнеров; код 0, если все контейнеры завершились успешно.
 run_probe_job() {
-  local name=$1 timeout=$2 deadline status rc=0 c msg
-  kc -n "$NS_STORAGES" delete job "$name" --ignore-not-found --wait=true >/dev/null 2>&1 || true
+  local name=$1-$PROBE_RUN timeout=$2 deadline status rc=0 c msg
   kc create -f - >/dev/null || return 1
   deadline=$((SECONDS + timeout))
   while ((SECONDS < deadline)); do
@@ -254,12 +262,12 @@ check_pods() {
 }
 
 start_probe_pods() {
-  kc -n "$NS_OBSERVABILITY" delete pod checks-probe --ignore-not-found --wait=true >/dev/null 2>&1 || true
+  kc -n "$NS_OBSERVABILITY" delete pod "$CHECKS_PROBE" --ignore-not-found --wait=true >/dev/null 2>&1 || true
   checks_probe_manifest | kc create -f - >/dev/null
-  kc -n "$NS_OBSERVABILITY" wait --for=condition=Ready pod/checks-probe --timeout=120s >/dev/null
+  kc -n "$NS_OBSERVABILITY" wait --for=condition=Ready "pod/$CHECKS_PROBE" --timeout=120s >/dev/null
 }
 
-probe_curl() { kc -n "$NS_OBSERVABILITY" exec checks-probe -c curl -- curl -sS -m 15 "$@"; }
+probe_curl() { kc -n "$NS_OBSERVABILITY" exec "$CHECKS_PROBE" -c curl -- curl -sS -m 15 "$@"; }
 
 vm_query() { probe_curl "$VM_URL/api/v1/query" --data-urlencode "query=$1"; }
 
@@ -289,9 +297,9 @@ check_metrics() {
 check_logs() {
   local id deadline found=""
   id=$(probe_id)
-  kc -n "$NS_STORAGES" delete pod log-probe --ignore-not-found --wait=true >/dev/null 2>&1 || true
+  kc -n "$NS_STORAGES" delete pod "$LOG_PROBE" --ignore-not-found --wait=true >/dev/null 2>&1 || true
   log_probe_manifest "$id" | kc create -f - >/dev/null
-  kc -n "$NS_STORAGES" wait --for=condition=Ready pod/log-probe --timeout=120s >/dev/null 2>&1 || true
+  kc -n "$NS_STORAGES" wait --for=condition=Ready "pod/$LOG_PROBE" --timeout=120s >/dev/null 2>&1 || true
   # Запас на поиск нового файла Vector-ом и на сброс записи в VictoriaLogs.
   deadline=$((SECONDS + 120))
   while ((SECONDS < deadline)); do
@@ -300,7 +308,7 @@ check_logs() {
     [[ -n $found ]] && break
     sleep 5
   done
-  kc -n "$NS_STORAGES" delete pod log-probe --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kc -n "$NS_STORAGES" delete pod "$LOG_PROBE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   if [[ -z $found ]]; then
     record logs fail "логи не поступают в VictoriaLogs"
   elif [[ $(jq -r '[.namespace, .pod, .container, .node] | map(. != null and . != "") | all' <<<"$found" 2>/dev/null) != true ||
@@ -320,7 +328,7 @@ check_grafana() {
   fi
   for uid in victoriametrics victorialogs; do
     # Учётные данные подставляет оболочка пробного пода из его окружения.
-    if ! kc -n "$NS_OBSERVABILITY" exec checks-probe -c curl -- sh -c \
+    if ! kc -n "$NS_OBSERVABILITY" exec "$CHECKS_PROBE" -c curl -- sh -c \
       "curl -sS -m 15 -u \"\$GF_USER:\$GF_PASS\" $GRAFANA_URL/api/datasources/uid/$uid/health" 2>/dev/null |
       jq -e '.status == "OK"' >/dev/null 2>&1; then
       failed+="$uid "
@@ -385,9 +393,9 @@ check_resources() {
 gib() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1073741824 }' | tr . ,; }
 
 cleanup_probes() {
-  kc -n "$NS_OBSERVABILITY" delete pod checks-probe --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  kc -n "$NS_STORAGES" delete pod log-probe --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  kc -n "$NS_STORAGES" delete job storage-probe --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kc -n "$NS_OBSERVABILITY" delete pod "$CHECKS_PROBE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kc -n "$NS_STORAGES" delete pod "$LOG_PROBE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kc -n "$NS_STORAGES" delete job "storage-probe-$PROBE_RUN" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
 
 # run_checks — все проверки; код 0, если все прошли.

@@ -285,7 +285,7 @@ mcp_probe_manifest() {
 apiVersion: v1
 kind: Pod
 metadata:
-  name: mcp-probe
+  name: mcp-probe-$PROBE_RUN
   namespace: $NS_MCP
   labels: { app.kubernetes.io/name: checks-probe, app.kubernetes.io/managed-by: hammurapi-infra }
 spec:
@@ -322,7 +322,7 @@ EOF
 # mcp_key_var <сервер> — переменная окружения пробного пода с ключом: search → SEARCH_KEY.
 mcp_key_var() { local s=${1^^}; echo "${s//-/_}_KEY"; }
 
-mcp_probe() { kc -n "$NS_MCP" exec mcp-probe -c curl -- sh -c "$1" 2>&1; }
+mcp_probe() { kc -n "$NS_MCP" exec "mcp-probe-$PROBE_RUN" -c curl -- sh -c "$1" 2>&1; }
 
 # mcp_rpc_script <url> <переменная с ключом в пробе или -> <метод> <params JSON> —
 # ответ JSON-RPC после initialize и notifications/initialized; события SSE
@@ -451,14 +451,14 @@ check_mcp() {
     record mcp fail "не все поды $NS_MCP готовы: $(echo "$out" | grep -v 'condition met' | head -2 | tr '\n' ' ')"
     return
   fi
-  kc -n "$NS_MCP" delete pod mcp-probe --ignore-not-found --wait=true >/dev/null 2>&1 || true
-  if ! mcp_probe_manifest | kc create -f - >/dev/null || ! kc -n "$NS_MCP" wait --for=condition=Ready pod/mcp-probe --timeout=120s >/dev/null; then
+  kc -n "$NS_MCP" delete pod "mcp-probe-$PROBE_RUN" --ignore-not-found --wait=true >/dev/null 2>&1 || true
+  if ! mcp_probe_manifest | kc create -f - >/dev/null || ! kc -n "$NS_MCP" wait --for=condition=Ready "pod/mcp-probe-$PROBE_RUN" --timeout=120s >/dev/null; then
     record mcp fail "не запустился пробный под mcp-probe"
     return
   fi
   local srv
   while read -r srv; do check_mcp_server "$srv"; done < <(mcp_enabled_list)
-  kc -n "$NS_MCP" delete pod mcp-probe --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kc -n "$NS_MCP" delete pod "mcp-probe-$PROBE_RUN" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
 
 # mcp_status_json [deployments JSON] — раздел mcp вывода status --json (R5):
