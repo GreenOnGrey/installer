@@ -19,6 +19,15 @@ vulnerabilities:
     paths: [usr/bin/gotenberg]
     statement: Gotenberg не обслуживает WebSocket
     expired_at: 2027-01-31
+  # те же находки под номерами CVE: Trivy сопоставляет по id, а не по алиасам
+  - id: CVE-2026-118264
+    paths: [usr/bin/gotenberg]
+    statement: GHSA-cxf3-9h37-7rr8; Gotenberg не обслуживает WebSocket; вход только от docgen и api с базовой аутентификацией
+    expired_at: 2027-01-31
+  - id: CVE-2026-118262
+    paths: [usr/bin/gotenberg]
+    statement: GHSA-9969-6676-49h5; Gotenberg не обслуживает WebSocket
+    expired_at: 2027-01-31
   # go-jose/v4 4.1.5 → 4.1.6: отказ в обслуживании при разборе JWK с ключами RSA
   - id: CVE-2026-116587
     paths: [usr/bin/gotenberg]
