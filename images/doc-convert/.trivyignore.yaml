@@ -19,6 +19,11 @@ vulnerabilities:
     paths: [usr/bin/gotenberg]
     statement: Gotenberg не обслуживает WebSocket
     expired_at: 2027-01-31
+  # go-jose/v4 4.1.5 → 4.1.6: отказ в обслуживании при разборе JWK с ключами RSA
+  - id: CVE-2026-116587
+    paths: [usr/bin/gotenberg]
+    statement: Вход только с базовой аутентификацией, JWT и JWK doc-convert не разбирает
+    expired_at: 2027-01-31
   # стандартная библиотека Go 1.27.1 → 1.27.3 и golang.org/x/net 0.59 → 0.60
   - id: CVE-2026-78669
     paths: [usr/bin/gotenberg, usr/bin/pdfcpu]
