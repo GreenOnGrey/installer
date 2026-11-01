@@ -59,6 +59,18 @@ helm lint charts/hammurapi-core --set image.tag=v1 --set publicBaseDomain=x.exam
 helm lint charts/landing --set image.tag=v1 --set publicBaseDomain=x.example
 ```
 
+## Checks before a commit
+
+A change is ready when every job of `.github/workflows/checks.yml` passes locally at the versions the workflow pins, plus the
+matching lines below. Read the workflow for the exact commands. Install a missing tool outside the repository
+at the pinned version. Name any job you could not run in your report, with the reason.
+
+- Always: `shellcheck` on the file list of `checks.yml`, `actionlint`, `bats tests/unit` with `../hammurapi` checked out beside this repository (its `deploy-component.yml` is under test).
+- `charts/**`: `bash tests/manifests.sh`.
+- `images/**`: `images/publish.sh --test-only`.
+- A chart change also has to survive an upgrade of the live release, which `helm template` cannot show. A dropped field can come back through its deprecated twin (`serviceAccountName`/`serviceAccount`), so set the new value explicitly; a dropped object is deleted after the new pods start. Compare with `kubectl patch --dry-run=server` on the live resource.
+- A changed public route: update the post-deploy checks of `deploy-component.yml` in `nabu` and `hammurapi`, and tag them before the release of the component.
+
 ## Rules
 
 - **Shell, YAML and Helm templates are edited by hand.** A formatter once replaced `lib/*.sh` with

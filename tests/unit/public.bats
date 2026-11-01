@@ -201,9 +201,7 @@ config_step() {
   export HAMMURAPI_GITHUB_APP_ID=1 HAMMURAPI_GITHUB_CLIENT_ID=c HAMMURAPI_SPEC_REPO=o/r HAMMURAPI_BOOTSTRAP_ADMINS=a
   export HAS_HAMMURAPI_GITHUB_APP_PRIVATE_KEY=true HAS_HAMMURAPI_GITHUB_CLIENT_SECRET=true HAS_HAMMURAPI_WEBHOOK_SECRET=true
   export HAS_HAMMURAPI_TOKEN_ENCRYPTION_KEY=true
-  # Required only by deploy-component.yml before FTR.HMR.CMN-0004 (ACP agent): the
-  # workflow comes from hammurapi main, which may lag behind this repository.
-  export HAMMURAPI_AGENT_COMMAND=x HAS_HAMMURAPI_AGENT_ENV=true
+  export HAMMURAPI_NABU_URL=https://nabu-api.x HAMMURAPI_NABU_CLIENT_ID=hmr HAS_HAMMURAPI_NABU_CLIENT_SECRET=true
   mkdir -p "$BATS_TEST_TMPDIR/w/deploy"
   echo CHART_VERSION=0.4.0 >"$BATS_TEST_TMPDIR/w/deploy/versions.env"
 }
@@ -215,6 +213,15 @@ config_step() {
   run bash -e "$BATS_TEST_TMPDIR/config.sh"
   [ "$status" -eq 1 ]
   [[ $output == *"HAMMURAPI_WEBHOOK_SECRET (секрет)"* && $output == *"PROD_KNOWN_HOSTS (секрет)"* ]]
+}
+
+@test "FTR.HMR.CMN-0007 R1: core без Nabu — ошибка до подключения с именами настроек" {
+  config_step
+  unset HAMMURAPI_NABU_URL HAMMURAPI_NABU_CLIENT_ID HAS_HAMMURAPI_NABU_CLIENT_SECRET
+  cd "$BATS_TEST_TMPDIR/w"
+  run bash -e "$BATS_TEST_TMPDIR/config.sh"
+  [ "$status" -eq 1 ]
+  [[ $output == *"HAMMURAPI_NABU_URL (переменная)"* && $output == *"HAMMURAPI_NABU_CLIENT_ID (переменная)"* && $output == *"HAMMURAPI_NABU_CLIENT_SECRET (секрет)"* ]]
 }
 
 @test "INS-05: полная конфигурация core — версия чарта из deploy/versions.env" {
