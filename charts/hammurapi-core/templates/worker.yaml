@@ -20,6 +20,9 @@ spec:
       annotations:
         {{- toYaml .Values.podAnnotations | nindent 8 }}
     spec:
+      # Явно: без этого поля устаревший двойник serviceAccount в живом Deployment
+      # вернёт удалённый ServiceAccount worker, и новые поды не создадутся.
+      serviceAccountName: default
       automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}

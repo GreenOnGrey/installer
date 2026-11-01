@@ -424,6 +424,14 @@ hammurapi_charts() {
   else
     fail "HN-08: в hammurapi-core остались агент, runner или их права"
   fi
+  # Удалённый ServiceAccount worker не должен вернуться через устаревшее поле
+  # serviceAccount живого Deployment: имя задано явно.
+  if docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Deployment" and .metadata.name == "worker")
+      | .spec.template.spec.serviceAccountName == "default"' >/dev/null; then
+    pass "HN-08: worker явно работает под ServiceAccount default"
+  else
+    fail "HN-08: у worker не задан serviceAccountName: default"
+  fi
   # Web получает адрес API на своём домене.
   if docs_json "$dir/hammurapi-web.yaml" | jq -e 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[]
       | select(.name == "API_BASE_URL" and .value == "https://hammurapi-api.34-12-5-6.sslip.io")' >/dev/null; then
