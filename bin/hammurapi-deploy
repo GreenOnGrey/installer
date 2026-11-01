@@ -331,8 +331,6 @@ helm_deploy() {
     --set-string "hosts.web=${HAMMURAPI_WEB_HOST:-hammurapi}" --set-string "hosts.api=${HAMMURAPI_API_HOST:-hammurapi-api}"
     --atomic --wait --timeout "${HELM_TIMEOUT:-10m}")
   [[ -n $image ]] && args+=(--set-string "image.repository=$image")
-  # После переноса настроек агента в Nabu оператор агента не нужен (FTR.HMR.CMN-0006 R10).
-  [[ $COMPONENT == hammurapi-core && $(printf '%s' "$PAYLOAD" | jq -r '.agentOperator') == false ]] && args+=(--set "agent.enabled=false")
   log "helm upgrade --install $COMPONENT $TAG (чарт $CHART_VERSION)"
   if ! hm "${args[@]}" >&2; then
     diagnostics
