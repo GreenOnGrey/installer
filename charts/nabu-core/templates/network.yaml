@@ -46,4 +46,22 @@ spec:
     {{- range .Values.sandboxes.egressAllow }}
     - to: [{ ipBlock: { cidr: {{ . | quote }} } }]
     {{- end }}
+{{- if .Values.egress.enabled }}
+---
+# Песочницы с выданными прокси (метка nabu.io/egress) ходят к шлюзу egress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandboxes-egress
+  namespace: {{ .Values.sandboxes.namespace }}
+  labels: {{- include "nabu.labels" . | nindent 4 }}
+spec:
+  podSelector: { matchLabels: { nabu.io/egress: "true" } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ .Release.Namespace }} } }
+          podSelector: { matchLabels: { app.kubernetes.io/component: egress, app.kubernetes.io/name: nabu } }
+      ports: [{ port: 3128 }]
+{{- end }}
 {{- end }}

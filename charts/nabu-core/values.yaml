@@ -90,6 +90,8 @@ sandboxes:
   profiles:
     base: ghcr.io/greenongrey/nabu-sandbox-base
     documents: ghcr.io/greenongrey/nabu-sandbox-documents
+    # FTR.HMR.CMN-0007 R25: Go, Python и JavaScript для агентов кода.
+    code: ghcr.io/greenongrey/nabu-sandbox-code
   # Профили по умолчанию; персональным и групповым администратор меняет их в панели.
   defaults: { personal: documents, group: documents, service: base }
   # Собственные образы команды инсталляции: только из allowedPrefixes (каждый
@@ -105,8 +107,9 @@ ingress:
   className: traefik
   # Публичные префиксы API; служебный :9100 и внутренний :8081 не маршрутизируются.
   paths: [/api/, /admin/api/, /client/v1/, /hooks/, /auth/, /oauth/, /.well-known/]
-  # Канал рабочих пространств (wss) — в relay.
-  relayPaths: [/v1/workspaces/]
+  # Канал рабочих пространств (wss) снаружи не открывается: пространства
+  # вызывающих сервисов удалены (FTR.HMR.CMN-0007 R12), песочницы ходят в relay внутри кластера.
+  relayPaths: []
 
 cleaner:
   schedule: "30 3 * * *"
@@ -122,13 +125,19 @@ whisper:
   # the recognizer idles between messages: a small request leaves room for the pods of agents
   resources: { requests: { cpu: 50m, memory: 1Gi }, limits: { cpu: "2", memory: 2Gi } }
 
-replicas: { api: 1, worker: 1, agent: 1, relay: 1 }
+# Шлюз исходящего трафика песочниц (FTR.HMR.CMN-0007 tech §3.5): песочницы с
+# выданными прокси ходят наружу только через него; адреса прокси — в админке Nabu.
+egress:
+  enabled: true
+
+replicas: { api: 1, worker: 1, agent: 1, relay: 1, egress: 2 }
 
 resources:
   api:     { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
   worker:  { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 768Mi } }
   agent:   { requests: { cpu: 200m, memory: 512Mi }, limits: { cpu: "2", memory: 3Gi } }
   relay:   { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
+  egress:  { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: "1", memory: 256Mi } }
   migrate: { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
   cleaner: { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
 

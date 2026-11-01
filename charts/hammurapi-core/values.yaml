@@ -19,25 +19,15 @@ existingSecrets:
 # Дополнительные несекретные переменные окружения.
 config: {}
 
-runners:
-  namespace: hammurapi-runners
+# Задачи кода в песочнице Nabu (FTR.HMR.CMN-0007): сколько выполняется одновременно.
+code:
   maxParallel: 2
-  # Порт сервера рабочей копии задачи: к нему ходит только оператор агента (FTR.HMR.CMN-0004).
-  workspacePort: 8095
 
-# Оператор агента (режим agent, FTR.HMR.CMN-0004): процессы Pi по сессиям чата и задач.
-# После переноса настроек агента в Nabu (FTR.HMR.CMN-0006 R10) — enabled: false.
-agent:
-  enabled: true
-  maxSessions: 20         # всего процессов Pi
-  maxTaskSessions: 4      # из них — сессий задач runner
-  idleTimeout: 15m        # простой сессии до закрытия
-  workSizeLimit: 2Gi      # каталоги сессий (/work)
-
-# Nabu (FTR.HMR.CMN-0006): служебные агенты Nabu вызывают MCP воркера
-# (worker-mcp:8083) и внутренний /mcp api (api-internal:8081) из своего namespace.
+# Nabu (FTR.HMR.CMN-0006, FTR.HMR.CMN-0007): служебные агенты Nabu вызывают MCP
+# воркера (worker-mcp:8083) из своего namespace; webUrl — сайт Nabu для ссылок на запуски.
 nabu:
   namespace: nabu
+  webUrl: ""
 
 ingress:
   className: traefik
@@ -51,9 +41,7 @@ cleaner:
 resources:
   api:       { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
   worker:    { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
-  agent:     { requests: { cpu: 200m, memory: 512Mi }, limits: { cpu: "2", memory: 3Gi } }
   migrate:   { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
   cleaner:   { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
-  runnerJob: { requests: { cpu: 500m, memory: 1Gi }, limits: { cpu: "2", memory: 4Gi } }
 
 podAnnotations: { prometheus.io/scrape: "true", prometheus.io/port: "9100" }

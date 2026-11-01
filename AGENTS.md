@@ -5,7 +5,7 @@ Guide for coding agents and developers working in this repository.
 ## Workspace
 
 Hammurapi is five repositories checked out side by side: `hammurapi-core` (Go backend),
-`hammurapi-web` (SPA), `hammurapi` (public docs, demo stack, reusable deploy workflow),
+`hammurapi-web` (SPA), `hammurapi` (public docs, Helm chart, reusable deploy workflow),
 `hammurapi-infra` (this one, private: the stand, the charts of Hammurapi, of Nabu and of the site) and
 `hammurapi-specs`. Nabu (`nabu-core`, `nabu-web`, `nabu` — FTR.NAB.CMN-0001) runs on the same stand;
 its charts and `bin/nabu-deploy` live here too, exactly like those of Hammurapi. The site of GreenOnGrey
@@ -31,9 +31,9 @@ bin/landing-deploy       deploys the site of GreenOnGrey (namespace landing, hos
                          an optional domain of its own with a certificate and a redirect from www.)
 bin/stand-autostart      systemd unit hammurapi-stand: the stand starts after a VM reboot; kubelet-gc mode
                          turns on kubelet image garbage collection (IMAGE_GC_* options)
-charts/hammurapi-core    api, worker, agent operator, migrate, cleaner, network policies
+charts/hammurapi-core    api, worker, migrate, cleaner, network policies; no agent or runner — code tasks run in Nabu
 charts/hammurapi-web     the SPA
-charts/nabu-core         Nabu: api, worker, agent, relay, migrate, cleaner, RBAC for sandboxes and the
+charts/nabu-core         Nabu: api, worker, agent, relay, egress, migrate, cleaner, RBAC for sandboxes and the
                          DaemonSet of preloaded sandbox images; sandboxes.profiles — images of sandbox profiles
 charts/nabu-web          the SPA of Nabu
 charts/landing           the site of GreenOnGrey: nginx with static pages
@@ -68,11 +68,9 @@ helm lint charts/landing --set image.tag=v1 --set publicBaseDomain=x.example
   with `# shellcheck source=…`.
 - **Secrets** come through stdin (`hammurapi-deploy`, `deploy-remote.sh up`) or the environment —
   never argv, logs or files; tests check this. Never disable SSH host key checking.
-- `hammurapi-deploy` keeps its exit codes and the last line of JSON output (the deploy contract);
-  `AGENT_SERVICE_TOKEN` is created once and kept in `hammurapi-secrets`.
-- The chart of core gives the agent operator only its token (no storages, no other secrets) and
-  network policies: to the operator only api, worker and runner pods; to a runner's workspace port
-  only the operator.
+- `hammurapi-deploy` keeps its exit codes and the last line of JSON output (the deploy contract).
+- The chart of core has no agent and no runner (FTR.HMR.CMN-0007): code tasks run in the sandboxes of
+  Nabu; the MCP of the worker (`worker-mcp:8083`) is open only to the namespace of Nabu.
 - **Images of `images/` are published once per version** (`images/publish.sh` skips a tag that exists): a change
   of `images/imap-mcp` needs a new `IMAP_MCP_VERSION` (`DOCGEN_MCP_VERSION`, `DOC_CONVERT_VERSION` for the others; and
   the tag in `charts/mcp-servers/values.yaml`), or the stand

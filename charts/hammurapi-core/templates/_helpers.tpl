@@ -44,24 +44,13 @@ env:
   - { name: COOKIE_DOMAIN, value: {{ $d | quote }} }
   - { name: HTTP_ADDR, value: ":8080" }
   - { name: SERVICE_ADDR, value: ":9100" }
-  - { name: INTERNAL_ADDR, value: ":8081" }
-  - { name: INTERNAL_URL, value: "http://api-internal.{{ .Release.Namespace }}.svc:8081" }
-  - { name: RUNNER_EXECUTOR, value: k8s }
-  - { name: RUNNER_NAMESPACE, value: {{ .Values.runners.namespace | quote }} }
-  - { name: RUNNER_IMAGE, value: {{ include "core.image" . | quote }} }
-  - { name: RUNNER_MAX_PARALLEL, value: {{ .Values.runners.maxParallel | quote }} }
-  - { name: RUNNER_WORKSPACE_PORT, value: {{ .Values.runners.workspacePort | quote }} }
-  {{- if not .Values.agent.enabled }}
-  # Без оператора агента (FTR.HMR.CMN-0006 R10): встроенный агент выключен.
-  - { name: AGENT_SERVICE_TOKEN, value: "" }
-  {{- end }}
-  - { name: AGENT_ADDR, value: "http://agent.{{ .Release.Namespace }}.svc:8090" }
-  - { name: AGENT_RUNNER_URL, value: "http://agent.{{ .Release.Namespace }}.svc:8090" }
-  - { name: AGENT_IDLE_TIMEOUT, value: {{ .Values.agent.idleTimeout | quote }} }
+  # Задачи кода выполняются в песочнице Nabu (FTR.HMR.CMN-0007): агента и runner здесь нет.
+  - { name: CODE_MAX_PARALLEL, value: {{ .Values.code.maxParallel | quote }} }
   - { name: WORKER_MCP_ADDR, value: ":8083" }
   - { name: WORKER_MCP_URL, value: "http://worker-mcp.{{ .Release.Namespace }}.svc:8083" }
-  - { name: RUNNER_CPU, value: {{ .Values.resources.runnerJob.limits.cpu | quote }} }
-  - { name: RUNNER_MEMORY, value: {{ .Values.resources.runnerJob.limits.memory | quote }} }
+  {{- with .Values.nabu.webUrl }}
+  - { name: NABU_WEB_URL, value: {{ . | quote }} }
+  {{- end }}
   - { name: DATABASE_URL, valueFrom: { secretKeyRef: { name: {{ .Values.existingSecrets.postgres }}, key: uri } } }
   - { name: KAFKA_BROKERS, valueFrom: { secretKeyRef: { name: {{ .Values.existingSecrets.kafka }}, key: bootstrap_servers } } }
   - { name: S3_ENDPOINT, valueFrom: { secretKeyRef: { name: {{ .Values.existingSecrets.s3 }}, key: endpoint_host } } }

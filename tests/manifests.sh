@@ -297,6 +297,20 @@ nabu_charts() {
   else
     fail "PRE-04: профили «$profiles», права на daemonsets «$verbs»"
   fi
+  # FTR.HMR.CMN-0007 PF-03, PX-13: профиль code и шлюз egress; песочницы с прокси
+  # ходят только к шлюзу, снаружи канал рабочих пространств закрыт.
+  if [[ $profiles == *"code=ghcr.io/greenongrey/nabu-sandbox-code:v1.0.0"* ]] &&
+    docs_json "$dir/nabu-core.yaml" | jq -e 'select(.kind == "Deployment" and .metadata.name == "egress")
+      | .spec.template.spec.containers[0].args == ["egress"]' >/dev/null &&
+    docs_json "$dir/nabu-core.yaml" | jq -e 'select(.kind == "NetworkPolicy" and .metadata.name == "sandboxes-egress")
+      | .spec.egress[0].ports == [{"port": 3128}]' >/dev/null &&
+    docs_json "$dir/nabu-core.yaml" | jq -e 'select(.kind == "Deployment" and .metadata.name == "worker")
+      | .spec.template.spec.containers[0].env[] | select(.name == "EGRESS_URL")' >/dev/null &&
+    ! docs_json "$dir/nabu-core.yaml" | jq -e 'select(.kind == "Ingress") | .spec.rules[].http.paths[] | select(.backend.service.name == "relay")' >/dev/null; then
+    pass "PF-03, PX-13: профиль code, шлюз egress и его сетевые политики"
+  else
+    fail "PF-03, PX-13: профиль code или шлюз egress"
+  fi
   # Без профилей — один образ nabu-core, как до FTR.NAB.CMN-0008 (tech §9).
   local legacy
   legacy=$(helm template nabu-core "$ROOT/charts/nabu-core" -n nabu --kube-version "$KUBE_VERSION" --set image.tag=v1.0.0 \
@@ -400,27 +414,15 @@ hammurapi_charts() {
   else
     fail "CH-07: пути «$paths», порты «$ports»"
   fi
-  # R15: права worker на Job — только в hammurapi-runners.
-  if docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Role" and .metadata.namespace == "hammurapi-runners")
-      | .rules[] | select(.apiGroups == ["batch"]) | .resources == ["jobs"] and (.verbs | index("create"))' >/dev/null &&
-    ! docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "ClusterRole" or .kind == "ClusterRoleBinding")' >/dev/null; then
-    pass "CH-03: worker создаёт Job только в hammurapi-runners"
-  else
-    fail "CH-03: права worker на Job"
-  fi
-  # FTR.HMR.CMN-0004: оператор агента получает только свой токен; к нему — api, worker
-  # и задачи runner; к серверу рабочей копии задачи — только оператор.
-  if docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Deployment" and .metadata.name == "agent")
-      | .spec.template.spec.containers[0] | (.args == ["agent"]) and (.envFrom == null)
-        and ([.env[] | select(.valueFrom) | .valueFrom.secretKeyRef.key] == ["AGENT_SERVICE_TOKEN"])' >/dev/null &&
-    docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "NetworkPolicy" and .metadata.name == "agent")
-      | .spec.ingress[0].ports == [{"port": 8090}]' >/dev/null &&
-    docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "NetworkPolicy" and .metadata.name == "runner-workspace"
-      and .metadata.namespace == "hammurapi-runners") | .spec.ingress[0].ports == [{"port": 8095}]' >/dev/null &&
+  # FTR.HMR.CMN-0007 HN-08: агента и runner в Hammurapi нет — ни оператора, ни ролей
+  # на Job, ни внутреннего API; служебные агенты Nabu ходят в worker-mcp.
+  if ! docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Role" or .kind == "RoleBinding" or .kind == "ClusterRole" or .kind == "ClusterRoleBinding")' >/dev/null &&
+    ! docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Deployment" and .metadata.name == "agent")' >/dev/null &&
+    ! docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Service" and .metadata.name == "api-internal")' >/dev/null &&
     docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Service" and .metadata.name == "worker-mcp")' >/dev/null; then
-    pass "FTR.HMR.CMN-0004: оператор агента, worker-mcp и сетевые политики"
+    pass "HN-08: без оператора агента, runner и прав в Kubernetes; worker-mcp на месте"
   else
-    fail "FTR.HMR.CMN-0004: оператор агента и сетевые политики"
+    fail "HN-08: в hammurapi-core остались агент, runner или их права"
   fi
   # Web получает адрес API на своём домене.
   if docs_json "$dir/hammurapi-web.yaml" | jq -e 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[]

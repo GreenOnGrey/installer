@@ -1,0 +1,38 @@
+{{- if .Values.egress.enabled }}
+{{ include "nabu.deployment" (dict "root" . "name" "egress" "ports" (list (dict "name" "egress" "port" 3128)) "grace" 30) }}
+---
+# Шлюз исходящего трафика песочниц (FTR.HMR.CMN-0007 tech §3.5): HTTP CONNECT
+# с токеном песочницы, только к адресам выданных ей прокси.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nabu-egress
+  labels:
+    {{- include "nabu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: egress
+spec:
+  type: ClusterIP
+  selector: {{- include "nabu.selector" (dict "root" . "component" "egress") | nindent 4 }}
+  ports:
+    - { name: egress, port: 3128, targetPort: egress }
+---
+# Входящие к шлюзу — из песочниц и от api (проверка прокси); исходящие — любые:
+# адреса ограничивает сам шлюз.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress
+  labels: {{- include "nabu.labels" . | nindent 4 }}
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/component: egress, app.kubernetes.io/name: nabu } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ .Values.sandboxes.namespace }} } }
+          podSelector: { matchLabels: { nabu.io/egress: "true" } }
+        - podSelector: { matchLabels: { app.kubernetes.io/component: api, app.kubernetes.io/name: nabu } }
+      ports: [{ port: 3128 }]
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: observability } }
+      ports: [{ port: 9100 }]
+{{- end }}

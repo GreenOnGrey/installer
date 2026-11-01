@@ -51,7 +51,10 @@ env:
   - { name: INTERNAL_URL, value: "http://api-internal.{{ .Release.Namespace }}.svc:8081" }
   - { name: RELAY_INTERNAL_URL, value: "http://relay.{{ .Release.Namespace }}.svc:8085" }
   - { name: RELAY_SANDBOX_WS_URL, value: "ws://relay.{{ .Release.Namespace }}.svc:8085/v1/workspaces/connect" }
-  - { name: RELAY_PUBLIC_WS_URL, value: "wss://{{ include "nabu.api" . }}/v1/workspaces/connect" }
+  {{- if .Values.egress.enabled }}
+  # FTR.HMR.CMN-0007 tech §3.5: шлюз, через который выходят песочницы с прокси.
+  - { name: EGRESS_URL, value: "http://nabu-egress.{{ .Release.Namespace }}.svc:3128" }
+  {{- end }}
   - { name: AGENT_ADDR, value: "http://agent.{{ .Release.Namespace }}.svc:8090" }
   - { name: AGENT_IDLE_TIMEOUT, value: {{ .Values.agent.idleTimeout | quote }} }
   {{- if .Values.memory.pool.enabled }}

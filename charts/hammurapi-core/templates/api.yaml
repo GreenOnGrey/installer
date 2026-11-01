@@ -29,7 +29,6 @@ spec:
           args: ["api"]
           ports:
             - { name: http, containerPort: 8080 }
-            - { name: internal, containerPort: 8081 }
             - { name: service, containerPort: 9100 }
           {{- include "core.env" . | nindent 10 }}
           readinessProbe: { httpGet: { path: /readyz, port: service }, periodSeconds: 5 }
@@ -51,21 +50,6 @@ spec:
   selector: {{- include "core.selector" (dict "root" . "component" "api") | nindent 4 }}
   ports:
     - { name: http, port: 8080, targetPort: http }
-    - { name: internal, port: 8081, targetPort: internal }
----
-# Внутренний API (:8081) для задач runner в hammurapi-runners.
-apiVersion: v1
-kind: Service
-metadata:
-  name: api-internal
-  labels:
-    {{- include "core.labels" . | nindent 4 }}
-    app.kubernetes.io/component: api
-spec:
-  type: ClusterIP
-  selector: {{- include "core.selector" (dict "root" . "component" "api") | nindent 4 }}
-  ports:
-    - { name: internal, port: 8081, targetPort: internal }
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress

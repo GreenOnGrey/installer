@@ -35,14 +35,13 @@ case "$*" in
   *) exit 0 ;;
 esac'
   # kubectl: манифесты из stdin сохраняются для проверок; FINGERPRINT — сохранённый хеш ключа.
-  export FINGERPRINT="" AGENT_TOKEN=""
+  export FINGERPRINT=""
   stub kubectl '
 case "$*" in
   *"apply -f -"*) cat >>"$APPLIED/manifests" ; echo >>"$APPLIED/manifests" ;;
   *"--dry-run=client -o yaml"*) echo "kind: Dummy" ;;
   *"get configmap hammurapi-key-fingerprint"*) printf "%s" "$FINGERPRINT" ;;
   *"get configmap hammurapi-deploy-state"*) exit 1 ;;
-  *"get secret hammurapi-secrets"*) [[ -n $AGENT_TOKEN ]] && printf "%s" "$AGENT_TOKEN" | base64 ;;
   *"get secret postgres-conn -o json"*|*"get secret kafka-conn -o json"*) echo "{\"metadata\":{\"name\":\"x\"},\"data\":{\"uri\":\"cA==\"}}" ;;
   *"get secret s3-conn -o json"*) echo "{\"metadata\":{\"name\":\"s3-conn\"},\"data\":{\"endpoint\":\"$(printf http://s3.storages.svc:9000 | base64)\"}}" ;;
   *) exit 0 ;;
@@ -121,11 +120,10 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
 
 @test "INS-12, R14: секреты не попадают в аргументы команд и во временные файлы" {
   need_linux
-  AGENT_TOKEN=agent-token-KEEP
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 0 ]
   local s
-  for s in client-secret-XYZ webhook-secret-XYZ token-key-XYZ sk-deepseek-SECRET agent-token-KEEP ghp_pulltokenXYZ "BEGIN PRIVATE KEY"; do
+  for s in client-secret-XYZ webhook-secret-XYZ token-key-XYZ sk-deepseek-SECRET ghp_pulltokenXYZ "BEGIN PRIVATE KEY"; do
     not_called "$s"
     [[ $output != *"$s"* ]] || { echo "в журнале: $s"; return 1; }
   done
@@ -143,21 +141,14 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   [ "$(jq -r '.metadata.namespace' <<<"$s3")" = "hammurapi" ]
 }
 
-@test "FTR.HMR.CMN-0004: токен оператора агента создаётся один раз, ключ LLM первого запуска — в hammurapi-secrets" {
+@test "FTR.HMR.CMN-0007 HN-08: токена оператора агента нет, ключ LLM первого запуска — в hammurapi-secrets" {
   need_linux
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 0 ]
   local sec
   sec=$(grep '"name":"hammurapi-secrets"' "$APPLIED/manifests" | head -1)
-  jq -e '(.stringData.AGENT_SERVICE_TOKEN | test("^[0-9a-f]{64}$")) and .stringData.BOOTSTRAP_DEEPSEEK_API_KEY == "sk-deepseek-SECRET"
+  jq -e '(.stringData | has("AGENT_SERVICE_TOKEN") | not) and .stringData.BOOTSTRAP_DEEPSEEK_API_KEY == "sk-deepseek-SECRET"
     and (.stringData | has("ACP_AGENT_ENV") | not)' <<<"$sec"
-  # Повторная выкатка сохраняет токен.
-  : >"$APPLIED/manifests"
-  AGENT_TOKEN=agent-token-KEEP
-  run deploy hammurapi-core v1.8.0 0.4.0
-  [ "$status" -eq 0 ]
-  sec=$(grep '"name":"hammurapi-secrets"' "$APPLIED/manifests" | head -1)
-  [ "$(jq -r '.stringData.AGENT_SERVICE_TOKEN' <<<"$sec")" = "agent-token-KEEP" ]
 }
 
 @test "INS-06: изменён ключ шифрования — код 24, релиз не обновлялся" {

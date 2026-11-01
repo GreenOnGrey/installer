@@ -217,20 +217,13 @@ sync_core_config() {
      data: ({GIT_PROVIDER: "github", HAMMURAPI_BOT_LOGIN: $bot} + (.config // {} | with_entries(.value |= tostring)))}' |
     apply_json || fail "$E_SECRETS" "не удалось записать hammurapi-config"
 
-  # Токен между api/worker и оператором агента (FTR.HMR.CMN-0004): создаётся при
-  # первой выкатке и дальше сохраняется; в jq передаётся через /dev/fd, не аргументом.
-  local agent_token
-  agent_token=$(kc -n "$NS" get secret hammurapi-secrets -o jsonpath='{.data.AGENT_SERVICE_TOKEN}' 2>/dev/null | base64 -d 2>/dev/null || true)
-  [[ -n $agent_token ]] || agent_token=$(openssl rand -hex 32) || fail "$E_SECRETS" "не удалось создать токен оператора агента"
-
-  # Секреты → Secret hammurapi-secrets. Ключ LLM первого запуска
-  # (BOOTSTRAP_DEEPSEEK_API_KEY) core переносит в подключение к LLM.
-  printf '%s' "$PAYLOAD" | jq -c --arg ns "$NS" --rawfile token <(printf '%s' "$agent_token") '
+  # Секреты → Secret hammurapi-secrets. Токена оператора агента больше нет:
+  # агент Hammurapi — Nabu (FTR.HMR.CMN-0007 R3).
+  printf '%s' "$PAYLOAD" | jq -c --arg ns "$NS" '
     (.secrets // {}) as $s
     | {apiVersion: "v1", kind: "Secret", type: "Opaque",
        metadata: {name: "hammurapi-secrets", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
        stringData: ($s | del(.DEPLOY_CALLBACK_SECRET, .ACP_AGENT_ENV)
-         | .AGENT_SERVICE_TOKEN = $token
          | .GITHUB_APP_PRIVATE_KEY = (.GITHUB_APP_PRIVATE_KEY | gsub("\\\\n"; "\n")))}' |
     apply_json || fail "$E_SECRETS" "не удалось записать hammurapi-secrets"
 
