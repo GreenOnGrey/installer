@@ -165,7 +165,8 @@ spec:
   ttlSecondsAfterFinished: 600
   template:
     metadata:
-      labels: { app.kubernetes.io/name: $name }
+      # Метка на самом поде: check_pods другого запуска пропускает пробы по ней.
+      labels: { app.kubernetes.io/name: $name, app.kubernetes.io/managed-by: hammurapi-infra }
     spec:
       restartPolicy: Never
       containers:

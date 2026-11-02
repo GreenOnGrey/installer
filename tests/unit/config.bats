@@ -144,3 +144,9 @@ setup() {
   [ "$status" -eq 2 ]
   [[ $output == *"IMAGE_GC_MAX_AGE"* ]]
 }
+
+@test "пробы: метка на Job и на поде, check_pods других запусков их пропускает" {
+  run bash -c 'source "$1"; probe_job_manifest storage-probe check - - -' _ "$ROOT/lib/checks.sh"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'app.kubernetes.io/managed-by: hammurapi-infra' <<<"$output")" -eq 2 ]
+}
