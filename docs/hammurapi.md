@@ -153,8 +153,7 @@ Repository access: selected). В git она не хранится.
 выкатки: разрешённые теги `v*.*.*`, при желании ревьюеры. Своих значений в нём нет.
 
 Переиспользуемый workflow `deploy-component.yml` лежит в публичном репозитории `hammurapi`:
-workflow приватного `installer` нельзя вызвать из публичных `hammurapi-core` и
-`hammurapi-web`. Настраивать доступ к нему не нужно.
+его вызывают `hammurapi-core` и `hammurapi-web`. Настраивать доступ к нему не нужно.
 
 ## 4. Релизы и выкатка
 
