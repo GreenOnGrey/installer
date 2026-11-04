@@ -176,7 +176,7 @@ TCP-подключение: токен получает само приложе�
 
 Другие параметры: `MCP_DOCLING_MAX_MB` — предельный размер документа для `docling-serve`;
 `MCP_SEARCH_ENGINES` — поисковые системы SearXNG. Ключи доступа генерируются при первом `up` и хранятся
-в секретах namespace `mcp`. Образы `docling-mcp`, `imap-mcp`, `docgen-mcp` и `doc-convert` берутся из
+в секретах namespace `mcp`. Чарт, образы и описания серверов выпускает репозиторий [mcps](https://github.com/GreenOnGrey/mcps); версию закрепляет `MCP_CHART_VERSION` в `config/versions.env`. Образы `docling-mcp`, `imap-mcp`, `docgen-mcp` и `doc-convert` берутся из
 `ghcr.io/greenongrey` с секретом `ghcr-pull`, который `up` копирует из namespace `nabu`. С `MCP_DOCGEN=true`
 `up` создаёт в namespace `nabu` секрет `nabu-docs-preview` (адреса и ключи `doc-convert` и `docgen`) и
 перезапускает `api` Nabu, если секрет изменился: без него предпросмотр офисных файлов выключен.

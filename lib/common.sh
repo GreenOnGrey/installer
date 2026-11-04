@@ -105,6 +105,14 @@ load_config() {
     printf -v "$key" '%s' "${from_env[$key]}"
     export "${key?}"
   done
+  # Опции MCP-серверов — ключи MCP_*=true|false файлов конфигурации: в окружении бывают
+  # чужие MCP_*, а в конфигурации — параметры с другими значениями.
+  MCP_OPTIONS=()
+  for f in "${files[@]}"; do
+    while read -r key; do
+      MCP_OPTIONS+=("$key")
+    done < <(sed -n 's/^\(MCP_[A-Z0-9_]*\)=\(true\|false\)$/\1/p' "$f")
+  done
 }
 
 # secret_value <ключ> — значение из переменной окружения или файла <ключ>_FILE.

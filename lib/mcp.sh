@@ -2,69 +2,130 @@
 # SC2016: скрипты проб намеренно в одинарных кавычках — они выполняются в контейнерах.
 # MCP-серверы стенда (FTR.NAB.CMN-0006, tech §2): разбор документов, веб-поиск,
 # Яндекс Почта только для чтения. Каждый включается своей опцией; namespace $NS_MCP,
-# один релиз mcp-servers. Ключи генерируются при первом `up` и хранятся только
+# один релиз mcp-servers: чарт и описания серверов — из релиза репозитория mcps. Ключи генерируются при первом `up` и хранятся только
 # в секретах namespace.
 
 MCP_RELEASE=mcp-servers
 
-# --- Свойства серверов: одна таблица вместо ветвлений по серверу ---
+# --- Свойства серверов: описания из чарта mcp-servers репозитория mcps ---
 
-MCP_SERVERS=(docling search yandex-mail docgen)
-# сервис и порт MCP; Deployment'ы сервера (готовность в status)
-declare -gA MCP_SERVICE=([docling]=docling-mcp:8080 [search]=search:3000 [yandex-mail]=yandex-mail:8000 [docgen]=docgen:8000)
-declare -gA MCP_DEPLOYMENTS=([docling]="docling-mcp docling-serve" [search]=search [yandex-mail]=yandex-mail [docgen]="docgen doc-convert")
-# секреты, которые `up` создаёт для сервера
-declare -gA MCP_SECRETS=([docling]="mcp-docling-serve-key mcp-docling-key" [search]="mcp-search-key mcp-searxng-secret"
-  [docgen]="mcp-docgen-key mcp-doc-convert-auth")
-# платформенный ключ доступа (секрет) — только у платформенных серверов
-declare -gA MCP_KEY_SECRET=([docling]=mcp-docling-key [search]=mcp-search-key [docgen]=mcp-docgen-key)
+MCP_SERVERS=()
+# значение чарта, включающее сервер; сервис и порт MCP; Deployment'ы (готовность в status)
+declare -gA MCP_VALUES_KEY=() MCP_SERVICE=() MCP_DEPLOYMENTS=()
+# секреты, которые `up` создаёт для сервера; платформенный ключ доступа — только у платформенных
+declare -gA MCP_SECRETS=() MCP_KEY_SECRET=()
 # инструменты, которые проверка стенда ждёт в tools/list
-declare -gA MCP_WANT_TOOLS=([docling]="convert_document_into_docling_document export_docling_document_to_markdown"
-  [search]="searxng_web_search web_url_read"
-  [docgen]="render_document render_spreadsheet fill_template edit_document convert pdf_tools")
-# OAuth персональных серверов для каталога Nabu (creds)
-declare -gA MCP_OAUTH=(
-  [yandex-mail]='{"authorizeUrl":"https://oauth.yandex.ru/authorize","tokenUrl":"https://oauth.yandex.ru/token","scopes":["mail:imap_ro","login:email"]}')
-# подсказки позиции каталога: разрешённые инструменты и файловые аргументы (README, «Внесение в каталог»)
-declare -gA MCP_CATALOG_HINT=(
-  [docling]='{"allowedTools":["convert_document_into_docling_document","export_docling_document_to_markdown","get_overview_of_document_anchors","search_for_text_in_document_anchors","get_text_of_document_item_at_anchor"],"fileArgs":[{"tool":"convert_document_into_docling_document","arg":"source"}]}'
-  # FTR.NAB.CHAT-0003 tech §5.4: файлы, пути результата и запись только в пространство
-  [docgen]='{"allowedTools":["render_document","render_spreadsheet","fill_template","edit_document","convert","pdf_tools"],"fileArgs":[{"tool":"render_document","arg":"source"},{"tool":"render_document","arg":"reference"},{"tool":"render_document","arg":"images"},{"tool":"render_spreadsheet","arg":"template"},{"tool":"fill_template","arg":"template"},{"tool":"edit_document","arg":"source"},{"tool":"convert","arg":"source"},{"tool":"pdf_tools","arg":"sources"}],"fileMaxBytes":26214400,"resultArgs":[{"tool":"render_document","arg":"dest"},{"tool":"render_spreadsheet","arg":"dest"},{"tool":"fill_template","arg":"dest"},{"tool":"edit_document","arg":"dest"},{"tool":"convert","arg":"dest"},{"tool":"pdf_tools","arg":"dest"}],"resultMaxBytes":52428800,"spaceOnlyTools":["render_document","render_spreadsheet","fill_template","edit_document","convert","pdf_tools"]}')
+declare -gA MCP_WANT_TOOLS=()
+# OAuth персональных серверов и подсказки позиции каталога Nabu (creds)
+declare -gA MCP_OAUTH=() MCP_CATALOG_HINT=()
 # число инструментов по результатам проверок (status)
 declare -gA MCP_TOOL_COUNT=()
+MCP_LOADED=0
 
 # mcp_opt <сервер> — имя опции: yandex-mail → MCP_YANDEX_MAIL.
 mcp_opt() { local s=${1^^}; echo "MCP_${s//-/_}"; }
 
 # mcp_on <сервер> — сервер включён.
-mcp_on() { local o; o=$(mcp_opt "$1"); [[ ${!o:-false} == true ]]; }
+mcp_on() {
+  local o
+  o=$(mcp_opt "$1")
+  [[ " ${MCP_OPTIONS[*]} " == *" $o "* && ${!o:-false} == true ]]
+}
+
+# mcp_option_names — опции включения (load_config). Список серверов здесь не нужен:
+# конфигурацию проверяем раньше, чем появляется Helm. Опция нового сервера задаётся в файле конфигурации.
+mcp_option_names() { printf '%s\n' "${MCP_OPTIONS[@]}"; }
 
 mcp_enabled() {
-  local s
-  for s in "${MCP_SERVERS[@]}"; do mcp_on "$s" && return 0; done
+  local o
+  while read -r o; do
+    [[ ${!o:-false} == true ]] && return 0
+  done < <(mcp_option_names)
   return 1
 }
+
+# mcp_fetch_chart — каталог чарта закреплённой версии: MCP_CHART_DIR или кэш выгрузки.
+# Загрузка анонимная: пакет публичный, а вход в реестр мог устареть. status и creds идут
+# без блокировки up, поэтому у каждого запуска свой временный каталог. При сбое — код 1,
+# причина в MCP_FETCH_ERROR.
+mcp_fetch_chart() {
+  [[ -n ${MCP_CHART_DIR:-} ]] && return 0
+  local cache=$ROOT/.cache/mcp-servers-$MCP_CHART_VERSION tmp
+  if [[ ! -f $cache/Chart.yaml ]]; then
+    mkdir -p "$ROOT/.cache"
+    tmp=$(mktemp -d "$ROOT/.cache/pull.XXXXXX")
+    if ! MCP_FETCH_ERROR=$(retry 3 10 helm pull "$MCP_CHART_REPO" --version "$MCP_CHART_VERSION" --untar --untardir "$tmp" \
+      --registry-config "$tmp/registry.json" 2>&1); then
+      rm -rf "$tmp"
+      MCP_FETCH_ERROR="не удалось загрузить чарт $MCP_CHART_REPO $MCP_CHART_VERSION: $(tail -1 <<<"$MCP_FETCH_ERROR")"
+      return 1
+    fi
+    # Параллельный запуск мог успеть раньше: его каталог уже готов.
+    mv -T "$tmp/mcp-servers" "$cache" 2>/dev/null || true
+    rm -rf "$tmp"
+  fi
+  MCP_CHART_DIR=$cache
+}
+
+# mcp_try_load — описания серверов из чарта; код 1, если чарт недоступен. Пока ни один
+# сервер не включён, чарт не нужен.
+mcp_try_load() {
+  ((MCP_LOADED)) && return 0
+  mcp_enabled || return 0
+  mcp_fetch_chart || return 1
+  local f srv o known=" "
+  MCP_SERVERS=()
+  for f in "$MCP_CHART_DIR"/files/servers/*.json; do
+    if [[ ! -f $f ]]; then
+      MCP_FETCH_ERROR="в чарте $MCP_CHART_DIR нет описаний серверов"
+      return 1
+    fi
+    srv=$(basename "$f" .json)
+    MCP_SERVERS+=("$srv")
+    known+="$(mcp_opt "$srv") "
+    MCP_VALUES_KEY[$srv]=$(jq -r .valuesKey "$f")
+    MCP_SERVICE[$srv]=$(jq -r .service "$f")
+    MCP_DEPLOYMENTS[$srv]=$(jq -r '.deployments | join(" ")' "$f")
+    MCP_SECRETS[$srv]=$(jq -r '.secrets | join(" ")' "$f")
+    MCP_KEY_SECRET[$srv]=$(jq -r '.keySecret // empty' "$f")
+    MCP_WANT_TOOLS[$srv]=$(jq -r '.wantTools | join(" ")' "$f")
+    MCP_OAUTH[$srv]=$(jq -c '.oauth // empty' "$f")
+    MCP_CATALOG_HINT[$srv]=$(jq -c '.catalogHint // empty' "$f")
+  done
+  # Включённая опция без сервера — опечатка или сервер убран из чарта.
+  while read -r o; do
+    if [[ ${!o:-false} == true && $known != *" $o "* ]]; then
+      MCP_FETCH_ERROR="$o: в чарте mcp-servers $MCP_CHART_VERSION нет такого сервера"
+      MCP_FETCH_CODE=$E_USAGE
+      return 1
+    fi
+  done < <(mcp_option_names)
+  MCP_LOADED=1
+}
+
+# mcp_load — то же, но без чарта установка продолжаться не может.
+mcp_load() { mcp_try_load || die "${MCP_FETCH_CODE:-$E_DEPLOY}" "$MCP_FETCH_ERROR"; }
 
 # mcp_enabled_list — включённые серверы по одному в строке.
 mcp_enabled_list() {
   local s
+  mcp_load
   for s in "${MCP_SERVERS[@]}"; do if mcp_on "$s"; then echo "$s"; fi; done
 }
 
-mcp_url() { echo "http://${MCP_SERVICE[$1]%%:*}.$NS_MCP.svc:${MCP_SERVICE[$1]##*:}/mcp"; }
+mcp_url() { mcp_load; echo "http://${MCP_SERVICE[$1]%%:*}.$NS_MCP.svc:${MCP_SERVICE[$1]##*:}/mcp"; }
 
-mcp_mode() { if [[ -n ${MCP_KEY_SECRET[$1]:-} ]]; then echo platform; else echo personal; fi; }
+mcp_mode() { mcp_load; if [[ -n ${MCP_KEY_SECRET[$1]:-} ]]; then echo platform; else echo personal; fi; }
 
 # validate_mcp_config — опции и параметры серверов (R1).
 validate_mcp_config() {
-  local s o
-  for s in "${MCP_SERVERS[@]}"; do
-    o=$(mcp_opt "$s")
+  local o
+  while read -r o; do
     case ${!o:-false} in
       true | false) ;;
       *) die "$E_USAGE" "$o должен быть true или false, а не «${!o}»" ;;
     esac
-  done
+  done < <(mcp_option_names)
   if ! [[ $MCP_DOCLING_MAX_MB =~ ^[0-9]+$ ]] || ((MCP_DOCLING_MAX_MB < 1 || MCP_DOCLING_MAX_MB > 200)); then
     die "$E_USAGE" "MCP_DOCLING_MAX_MB: целое число мегабайт от 1 до 200"
   fi
@@ -72,29 +133,19 @@ validate_mcp_config() {
     die "$E_USAGE" "MCP_SEARCH_ENGINES: имена систем SearXNG через запятую, например duckduckgo,bing"
 }
 
-# mcp_helm_args — значения чарта из конфигурации и config/versions.env.
+# mcp_helm_args — включение серверов и параметры конфигурации. Образы и их версии —
+# в значениях чарта, закреплённого MCP_CHART_VERSION.
 mcp_helm_args() {
-  local engines
+  local engines srv
+  mcp_load
   engines=$(tr ',' '\n' <<<"$MCP_SEARCH_ENGINES" | jq -Rnc '[inputs | select(length > 0)]' 2>/dev/null ||
     printf '[]')
-  local docling search yandex docgen
-  docling=$(mcp_on docling && echo true || echo false)
-  search=$(mcp_on search && echo true || echo false)
-  yandex=$(mcp_on yandex-mail && echo true || echo false)
-  docgen=$(mcp_on docgen && echo true || echo false)
+  for srv in "${MCP_SERVERS[@]}"; do
+    printf '%s\n' --set "${MCP_VALUES_KEY[$srv]}.enabled=$(mcp_on "$srv" && echo true || echo false)"
+  done
   printf '%s\n' \
-    --set "docling.enabled=$docling" --set "search.enabled=$search" \
-    --set "yandexMail.enabled=$yandex" --set "docgen.enabled=$docgen" \
-    --set-string "docgen.image=$MCP_IMAGE_REGISTRY/docgen-mcp:$DOCGEN_MCP_VERSION" \
-    --set-string "docConvert.image=$MCP_IMAGE_REGISTRY/doc-convert:$DOC_CONVERT_VERSION" \
-    --set-string "docling.serve.image=$DOCLING_SERVE_IMAGE" \
-    --set-string "docling.mcp.image=$MCP_IMAGE_REGISTRY/docling-mcp:$DOCLING_MCP_VERSION" \
-    --set-string "docling.auth.image=$MCP_PROXY_IMAGE" \
     --set "docling.serve.maxFileMB=$MCP_DOCLING_MAX_MB" \
-    --set-string "search.mcp.image=$MCP_SEARXNG_IMAGE" \
-    --set-string "search.searxng.image=$SEARXNG_IMAGE" \
     --set-json "search.engines=$engines" \
-    --set-string "yandexMail.image=$MCP_IMAGE_REGISTRY/imap-mcp:$IMAP_MCP_VERSION" \
     --set-string "s3.namespace=$NS_STORAGES"
 }
 
@@ -103,6 +154,7 @@ gen_key() { openssl rand -hex 32; }
 # ensure_mcp_secrets — ключи включённых серверов; существующие не меняются (STD-12).
 ensure_mcp_secrets() {
   local srv name
+  mcp_load
   while read -r srv; do
     for name in ${MCP_SECRETS[$srv]:-}; do
       if [[ $name == mcp-doc-convert-auth ]]; then
@@ -148,6 +200,7 @@ sync_preview_secret() {
 # релиза, который на них уже не ссылается.
 drop_disabled_secrets() {
   local srv name
+  mcp_load
   for srv in "${MCP_SERVERS[@]}"; do
     mcp_on "$srv" && continue
     for name in ${MCP_SECRETS[$srv]:-}; do
@@ -157,11 +210,11 @@ drop_disabled_secrets() {
 }
 
 # copy_pull_secret — ghcr-pull из namespace Nabu: собранные образы лежат в
-# $MCP_IMAGE_REGISTRY, как образы Nabu.
+# ghcr.io/greenongrey, как образы Nabu.
 copy_pull_secret() {
   local src
   src=$(kc -n nabu get secret ghcr-pull -o json 2>/dev/null) || {
-    warn "нет секрета nabu/ghcr-pull: образы $MCP_IMAGE_REGISTRY должны быть доступны без него"
+    warn "нет секрета nabu/ghcr-pull: образы загружаются без него"
     return 0
   }
   jq -c --arg ns "$NS_MCP" '{apiVersion: "v1", kind: "Secret", type: .type, data: .data,
@@ -175,7 +228,7 @@ copy_pull_secret() {
 mcp_rendered_memory() {
   local args=() rendered
   mapfile -t args < <(mcp_helm_args)
-  rendered=$(hm template "$MCP_RELEASE" "$ROOT/charts/mcp-servers" -n "$NS_MCP" "${args[@]}") ||
+  rendered=$(hm template "$MCP_RELEASE" "$MCP_CHART_DIR" -n "$NS_MCP" "${args[@]}") ||
     die "$E_DEPLOY" "чарт mcp-servers не рендерится"
   kc create --dry-run=client -o json -f - <<<"$rendered" |
     jq -r '(if .kind == "List" then .items[] else . end) | select(.kind == "Deployment")
@@ -205,6 +258,7 @@ mcp_budget() {
 # серверы; при первом `up` подов ещё нет — считаются только серверы.
 mcp_preflight() {
   mcp_enabled || return 0
+  mcp_load
   local others=0 q servers alloc capacity verdict
   while read -r q; do
     [[ -n $q ]] && others=$((others + $(to_bytes "$q")))
@@ -232,13 +286,15 @@ deploy_mcp() {
     sync_preview_secret
     return
   fi
+  mcp_load
   kc create ns "$NS_MCP" --dry-run=client -o json |
     jq '.metadata.labels["app.kubernetes.io/part-of"] = "hammurapi-stand"' | apply_stdin
   ensure_mcp_secrets
   copy_pull_secret
   local args=()
   mapfile -t args < <(mcp_helm_args)
-  release_local "$MCP_RELEASE" "$NS_MCP" "$ROOT/charts/mcp-servers" "${args[@]}"
+  release_local "$MCP_RELEASE" "$NS_MCP" "$MCP_CHART_DIR" "${args[@]}"
+  RELEASES[-1]="$MCP_RELEASE $MCP_CHART_VERSION"
   sync_preview_secret
   drop_disabled_secrets
   ok "MCP-серверы: $(mcp_enabled_list | paste -sd, -)"
@@ -249,6 +305,7 @@ deploy_mcp() {
 # mcp_creds_json — раздел mcp вывода creds --json: только включённые серверы.
 mcp_creds_json() {
   local out='{}' srv entry
+  mcp_load
   while read -r srv; do
     entry=$(jq -cn --arg u "$(mcp_url "$srv")" --arg m "$(mcp_mode "$srv")" '{url: $u, mode: $m}')
     if [[ -n ${MCP_KEY_SECRET[$srv]:-} ]]; then
@@ -268,6 +325,7 @@ mcp_creds_json() {
 
 mcp_creds_text() {
   mcp_enabled || return 0
+  mcp_load
   printf '\nMCP-серверы (namespace %s) — вносятся в каталог Nabu\n' "$NS_MCP"
   jq -r 'to_entries[] | .key as $s | .value |
     "  \($s | .[0:11] | . + (" " * (12 - length)))\(.url)   \(if .mode == "platform" then "платформенный" else "персональный" end)",
@@ -359,6 +417,7 @@ mcp_tools() { jq -r '.result.tools[]?.name' 2>/dev/null <<<"$1" | sort | tr '\n'
 # mcp-<сервер>-tools, -auth; mcp-search-query; mcp-docling-serve-auth, mcp-docling-convert.
 check_mcp_server() {
   local srv=$1 url out names
+  mcp_load
   url=$(mcp_url "$srv")
   # R6, R21: без ключа или токена — 401
   out=$(mcp_rpc "$url" - tools/list '{}')
@@ -446,6 +505,10 @@ check_mcp_docgen() {
 # check_mcp — готовность подов и проверки включённых серверов.
 check_mcp() {
   mcp_enabled || return 0
+  if ! mcp_try_load; then
+    record mcp fail "$MCP_FETCH_ERROR"
+    return
+  fi
   local out
   if ! out=$(kc -n "$NS_MCP" wait --for=condition=Ready pod -l 'app.kubernetes.io/part-of=mcp-servers' --timeout="$CHECK_TIMEOUT" 2>&1); then
     record mcp fail "не все поды $NS_MCP готовы: $(echo "$out" | grep -v 'condition met' | head -2 | tr '\n' ' ')"
@@ -466,6 +529,10 @@ check_mcp() {
 # результатам проверок этого запуска.
 mcp_status_json() {
   local deploys=${1:-}
+  if ! mcp_try_load; then
+    jq -cn --arg e "$MCP_FETCH_ERROR" '{error: $e}'
+    return
+  fi
   if [[ -z $deploys ]] && mcp_enabled; then
     deploys=$(kc -n "$NS_MCP" get deploy -o json 2>/dev/null || echo '{"items":[]}')
   fi

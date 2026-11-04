@@ -22,8 +22,7 @@ jobs:
           curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VERSION/shellcheck-$SHELLCHECK_VERSION.linux.x86_64.tar.xz" | tar -xJ
           sc=./shellcheck-$SHELLCHECK_VERSION/shellcheck
           $sc -x installer
-          $sc -x tests/manifests.sh tests/e2e/*.sh dashboards/normalize.sh .github/scripts/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/landing-deploy bin/ingress-forward bin/stand-autostart \
-            images/publish.sh images/*/test.sh
+          $sc -x tests/manifests.sh tests/e2e/*.sh dashboards/normalize.sh .github/scripts/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/landing-deploy bin/ingress-forward bin/stand-autostart
           $sc -s bash tests/unit/*.bats tests/unit/helpers.bash
 
   actionlint:
@@ -51,14 +50,6 @@ jobs:
         run: |
           git clone --quiet --depth 1 --branch "$BATS_VERSION" https://github.com/bats-core/bats-core.git /tmp/bats
           /tmp/bats/bin/bats tests/unit
-
-  # Образы MCP-серверов (FTR.NAB.CMN-0006 tech §2.7): сборка, тест образа, Trivy — без публикации.
-  images:
-    runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: build, test, scan
-        run: images/publish.sh --test-only
 
   manifests:
     runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26

@@ -46,6 +46,8 @@ load_script() {
   COLOR=0
   setup_color
   load_config "$ROOT" /dev/null
+  # Описания серверов — как в чарте mcp-servers; чарт в тестах не скачивается.
+  MCP_CHART_DIR=$ROOT/tests/fixtures/mcp/chart
   WORK_DIR=$BATS_TEST_TMPDIR/work
   RUN_DIR=$BATS_TEST_TMPDIR/run
   mkdir -p "$WORK_DIR" "$RUN_DIR"
