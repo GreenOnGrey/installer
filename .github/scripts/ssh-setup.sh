@@ -7,7 +7,7 @@ dir=${SSH_DIR:-$HOME/.ssh}
 
 # Все пропущенные настройки сразу, с подсказкой, где их задать.
 missing=()
-[[ -n ${PROD_HOST:-} ]] || missing+=("PROD_HOST (переменная)")
+[[ -n ${PROD_HOST:-} ]] || missing+=("PROD_HOST (секрет)")
 [[ -n ${PROD_USER:-} ]] || missing+=("PROD_USER (переменная)")
 [[ -n ${PROD_SSH_KEY:-} ]] || missing+=("PROD_SSH_KEY (секрет)")
 [[ -n ${PROD_KNOWN_HOSTS:-} ]] || missing+=("PROD_KNOWN_HOSTS (секрет; без отпечатка хоста подключение запрещено)")

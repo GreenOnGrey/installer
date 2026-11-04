@@ -251,19 +251,21 @@ Redirect URI всегда `https://oauth.yandex.ru/verification_code` и не м
 - выкатки идут по одной (`concurrency`), параллельный `up` на машине блокирует
   `/var/lock/hammurapi-infra.lock` (код 17);
 - итог — сводка `status` в отчёте запуска; развёрнутый тег виден в `status`
-  (ConfigMap `hammurapi-infra-version`); при провале журнал прикладывается артефактом `deploy-logs`.
+  (ConfigMap `hammurapi-infra-version`); журнал каждого запуска — на машине, в `/opt/hammurapi-infra/logs`: репозиторий публичный, поэтому артефактами он не загружается;
 
 Настройки окружения GitHub `production`:
 
 | Имя | Тип | Когда | Назначение |
 |---|---|---|---|
 | `DEPLOY_TRANSPORT` | переменная | всегда | `ssh` (по умолчанию) или `gcp-iap` |
-| `PROD_HOST`, `PROD_USER` | переменные | `ssh` | Адрес и пользователь машины |
+| `PROD_HOST` | секрет | `ssh` | Адрес машины (секрет — чтобы не попадал в публичные журналы) |
+| `PROD_USER` | переменная | `ssh` | Пользователь машины |
 | `PROD_SSH_KEY` | секрет | `ssh` | Закрытый ключ пользователя выкатки |
 | `PROD_KNOWN_HOSTS` | секрет | `ssh` | Отпечаток хоста (`ssh-keyscan -t ed25519 <адрес>`); проверка хоста не отключается |
 | `GCP_PROJECT`, `GCP_ZONE`, `GCP_INSTANCE` | переменные | `gcp-iap` | Машина прода |
 | `GCP_WIF_PROVIDER`, `GCP_SERVICE_ACCOUNT` | переменные | `gcp-iap` | Workload Identity Federation |
-| `PUBLIC_ACCESS`, `ACME_EMAIL` | переменные | публичный доступ | `true` и адрес для Let's Encrypt; `ACME_ISSUER`, `PUBLIC_BASE_DOMAIN`, `PUBLIC_IP` — по желанию ([docs/hammurapi.md](docs/hammurapi.md#13-конфигурация-стенда)) |
+| `PUBLIC_ACCESS` | переменная | публичный доступ | `true` |
+| `ACME_EMAIL` | секрет | публичный доступ | Адрес для Let's Encrypt |
 | `GRAFANA_GITHUB_CLIENT_ID`, `GRAFANA_GITHUB_ORG` | переменные | вход в Grafana через GitHub | OAuth-приложение организации; организация по умолчанию — `GreenOnGrey` ([docs/hammurapi.md](docs/hammurapi.md#12-oauth-приложение-github-для-grafana)) |
 | `GRAFANA_GITHUB_CLIENT_SECRET` | секрет | вход в Grafana через GitHub | Client secret OAuth-приложения |
 | `MCP_DOCLING`, `MCP_SEARCH`, `MCP_YANDEX_MAIL`, `MCP_DOCGEN` | переменные | MCP-серверы | `true` включает сервер (раздел «MCP-серверы»); незаданная переменная — значение из `local.env` |
