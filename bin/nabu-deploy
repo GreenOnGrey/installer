@@ -29,7 +29,7 @@ AGENTS_NS=${NABU_AGENTS_NAMESPACE:-nabu-agents}
 CHART_REPO=${CHART_REPO:-oci://ghcr.io/greenongrey/charts}
 REGISTRY=${REGISTRY:-ghcr.io}
 DEPLOY_LOCK_DIR=${DEPLOY_LOCK_DIR:-/var/lock}
-STATUS_CMD=${STATUS_CMD:-"$ROOT/hammurapi-infra.sh"}
+STATUS_CMD=${STATUS_CMD:-"$ROOT/installer"}
 NS_INGRESS=${NS_INGRESS:-ingress}
 CERT_NAME=${CERT_NAME:-hammurapi-public}
 WEB_HOST=${NABU_WEB_HOST:-nabu}
@@ -109,7 +109,7 @@ check_stand() {
   local st cfg=()
   [[ -f ${HAMMURAPI_INFRA_CONFIG:-} ]] && cfg=(--config "$HAMMURAPI_INFRA_CONFIG")
   st=$(bash "$STATUS_CMD" status --json --no-color "${cfg[@]}" 2>/dev/null) || true
-  jq -e . >/dev/null 2>&1 <<<"$st" || fail "$E_STAND" "стенд не отвечает: hammurapi-infra.sh status --json"
+  jq -e . >/dev/null 2>&1 <<<"$st" || fail "$E_STAND" "стенд не отвечает: installer status --json"
   if [[ $(jq -r '.ok' <<<"$st") != true ]]; then
     fail "$E_STAND" "стенд не готов: $(jq -r '[.checks[] | select(.ok | not) | "\(.name): \(.message)"] | join("; ")' <<<"$st")"
   fi

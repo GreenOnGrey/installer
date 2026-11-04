@@ -1,5 +1,5 @@
 # vmagent — сбор метрик (R8). Задания сбора (config.scrape_configs) собираются
-# hammurapi-infra.sh из values/scrape/*.yaml: задания встроенных хранилищ
+# installer из values/scrape/*.yaml: задания встроенных хранилищ
 # включаются только в режиме internal.
 mode: deployment
 remoteWrite:

@@ -1,4 +1,4 @@
-# AGENTS.md — hammurapi-infra
+# AGENTS.md — installer
 
 Guide for coding agents and developers working in this repository.
 
@@ -6,7 +6,7 @@ Guide for coding agents and developers working in this repository.
 
 Hammurapi is five repositories checked out side by side: `hammurapi-core` (Go backend),
 `hammurapi-web` (SPA), `hammurapi` (public docs, Helm chart, reusable deploy workflow),
-`hammurapi-infra` (this one, private: the stand, the charts of Hammurapi, of Nabu and of the site) and
+`installer` (this one, private: the stand, the charts of Hammurapi, of Nabu and of the site) and
 `hammurapi-specs`. Nabu (`nabu-core`, `nabu-web`, `nabu` — FTR.NAB.CMN-0001) runs on the same stand;
 its charts and `bin/nabu-deploy` live here too, exactly like those of Hammurapi. The site of GreenOnGrey
 (`landing` — FTR.LND.WEB-0001) runs here as well: namespace `landing`, host `web.<domain>`.
@@ -22,7 +22,7 @@ its charts and `bin/nabu-deploy` live here too, exactly like those of Hammurapi.
 ## Contents
 
 ```text
-hammurapi-infra.sh       CLI: up | status | creds | down — a minikube stand with storages,
+installer       CLI: up | status | creds | down — a minikube stand with storages,
                          observability, public access (MetalLB, Traefik, cert-manager)
 lib/*.sh                 functions sourced by the CLI (common, host, prereqs, cluster, deploy, public, …)
 bin/hammurapi-deploy     deploys hammurapi-core/web on the stand; reads one JSON from stdin
@@ -51,7 +51,7 @@ tests/unit/*.bats        unit tests (Linux); tests/manifests.sh — rendered man
 ## Commands
 
 ```sh
-shellcheck -x hammurapi-infra.sh                       # CI pins shellcheck v0.11.0
+shellcheck -x installer                       # CI pins shellcheck v0.11.0
 shellcheck -x tests/manifests.sh tests/e2e/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/landing-deploy bin/ingress-forward bin/stand-autostart images/publish.sh images/*/test.sh
 bats tests/unit                                        # Linux; needs jq, yq for some tests
 bash tests/manifests.sh                                # helm, kubeconform, jq, yq, network

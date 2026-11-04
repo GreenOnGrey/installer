@@ -87,11 +87,11 @@ load helpers
   kill %1 2>/dev/null || true
 }
 
-# fake_release <каталог прода> — выгрузка v1.0.0, чей hammurapi-infra.sh печатает окружение и аргументы.
+# fake_release <каталог прода> — выгрузка v1.0.0, чей installer печатает окружение и аргументы.
 fake_release() {
   mkdir -p "$1/releases/v1.0.0" "$1/logs"
   printf '#!/usr/bin/env bash\necho "args: $*"\necho "public=${PUBLIC_ACCESS:-} email=${ACME_EMAIL:-} id=${GRAFANA_GITHUB_CLIENT_ID:-} org=${GRAFANA_GITHUB_ORG:-} secret=${GRAFANA_GITHUB_CLIENT_SECRET:-}"\n' \
-    >"$1/releases/v1.0.0/hammurapi-infra.sh"
+    >"$1/releases/v1.0.0/installer"
 }
 
 @test "PUB-15: параметры из GitHub — в окружение up через stdin, не в argv и не на диск" {
@@ -103,15 +103,27 @@ fake_release() {
   [[ $output == *'public=true email=ops@example.org id=Ov23li1 org= secret=s3cr=t $x;`y`'* ]]
   [[ $output == *"параметр из GitHub: GRAFANA_GITHUB_CLIENT_SECRET"* ]]
   [[ $(grep 'args:' <<<"$output") != *s3cr* ]]
-  not_grep -rq s3cr "$d" --exclude=hammurapi-infra.sh
+  not_grep -rq s3cr "$d" --exclude=installer
   # В Git Bash символические ссылки эмулируются копией — проверка только в Linux.
   [[ $(uname) != Linux ]] || [ "$(readlink "$d/current")" = releases/v1.0.0 ]
+}
+
+@test "FTR.INFRA.INST-0001 R26: откат на тег до переименования — up и status через hammurapi-infra.sh" {
+  local d=$BATS_TEST_TMPDIR/prod
+  fake_release "$d"
+  mv "$d/releases/v1.0.0/installer" "$d/releases/v1.0.0/hammurapi-infra.sh"
+  run bash "$ROOT/.github/scripts/deploy-remote.sh" up "$d" v1.0.0 abc anna </dev/null
+  [ "$status" -eq 0 ]
+  [[ $output == *"args: up"* ]]
+  run bash "$ROOT/.github/scripts/deploy-remote.sh" status "$d" v1.0.0
+  [ "$status" -eq 0 ]
+  [[ $output == *"args: status"* ]]
 }
 
 @test "FTR.NAB.CMN-0006: опции MCP-серверов из GitHub — в окружение up" {
   local d=$BATS_TEST_TMPDIR/prod
   mkdir -p "$d/releases/v1.0.0" "$d/logs"
-  printf '#!/usr/bin/env bash\necho "mcp=${MCP_DOCLING:-}/${MCP_YANDEX_MAIL:-}/${MCP_DOCGEN:-} engines=${MCP_SEARCH_ENGINES:-}"\n' >"$d/releases/v1.0.0/hammurapi-infra.sh"
+  printf '#!/usr/bin/env bash\necho "mcp=${MCP_DOCLING:-}/${MCP_YANDEX_MAIL:-}/${MCP_DOCGEN:-} engines=${MCP_SEARCH_ENGINES:-}"\n' >"$d/releases/v1.0.0/installer"
   run bash "$ROOT/.github/scripts/deploy-remote.sh" up "$d" v1.0.0 abc anna \
     <<<$'MCP_DOCLING=true\nMCP_YANDEX_MAIL=true\nMCP_DOCGEN=true\nMCP_SEARCH_ENGINES=bing,mojeek\n'
   [ "$status" -eq 0 ]

@@ -208,5 +208,5 @@ esac'
 }
 
 @test "стенд не зависит от yq: на машине его нет (prereqs ставит jq)" {
-  not_grep -nE '(^|[^#]*[|;&(] *|^ *)yq\b' "$ROOT"/lib/*.sh "$ROOT/hammurapi-infra.sh"
+  not_grep -nE '(^|[^#]*[|;&(] *|^ *)yq\b' "$ROOT"/lib/*.sh "$ROOT/installer"
 }

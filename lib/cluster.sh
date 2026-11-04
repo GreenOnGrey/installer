@@ -90,7 +90,7 @@ install_autostart() {
   as_root install -m 755 "$ROOT/bin/stand-autostart" "$AUTOSTART_BIN"
   as_root tee "$AUTOSTART_UNIT" >/dev/null <<EOF
 # Кластер minikube стенда Hammurapi при загрузке и выключении машины
-# (FTR.HMR.INFRA-0001). Устанавливает hammurapi-infra.sh up; STAND_AUTOSTART=false — не ставить.
+# (FTR.HMR.INFRA-0001). Устанавливает installer up; STAND_AUTOSTART=false — не ставить.
 [Unit]
 Description=Hammurapi: кластер minikube стенда
 After=docker.service network-online.target

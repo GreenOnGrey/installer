@@ -25,7 +25,7 @@ CHART_REPO=${CHART_REPO:-oci://ghcr.io/greenongrey/charts}
 REGISTRY=${REGISTRY:-ghcr.io}
 GITHUB_API=${GITHUB_API:-https://api.github.com}
 DEPLOY_LOCK_DIR=${DEPLOY_LOCK_DIR:-/var/lock}
-STATUS_CMD=${STATUS_CMD:-"$ROOT/hammurapi-infra.sh"}
+STATUS_CMD=${STATUS_CMD:-"$ROOT/installer"}
 
 COMPONENT="" TAG="" CHART_VERSION="" ALLOW_KEY_ROTATION=0
 FIRST_INSTALL=false BASE_DOMAIN="" REVISION="" DIAG="" PAYLOAD="" HELM_REG=""
@@ -100,13 +100,13 @@ check_stand() {
   [[ -f ${HAMMURAPI_INFRA_CONFIG:-} ]] && cfg=(--config "$HAMMURAPI_INFRA_CONFIG")
   st=$(bash "$STATUS_CMD" status --json --no-color "${cfg[@]}" 2>/dev/null) || true
   if ! jq -e . >/dev/null 2>&1 <<<"$st"; then
-    fail "$E_STAND" "стенд не отвечает: hammurapi-infra.sh status --json"
+    fail "$E_STAND" "стенд не отвечает: installer status --json"
   fi
   if [[ $(jq -r '.ok' <<<"$st") != true ]]; then
     fail "$E_STAND" "стенд не готов: $(jq -r '[.checks[] | select(.ok | not) | "\(.name): \(.message)"] | join("; ")' <<<"$st")"
   fi
   if [[ $(jq -r '.public.enabled' <<<"$st") != true ]]; then
-    fail "$E_STAND" "публичный доступ стенда выключен: PUBLIC_ACCESS=true в конфигурации hammurapi-infra и up"
+    fail "$E_STAND" "публичный доступ стенда выключен: PUBLIC_ACCESS=true в конфигурации installer и up"
   fi
   BASE_DOMAIN=$(jq -r '.public.baseDomain // empty' <<<"$st")
   [[ -n $BASE_DOMAIN ]] || fail "$E_STAND" "стенд не сообщил базовый домен"

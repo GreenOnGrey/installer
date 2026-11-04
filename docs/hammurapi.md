@@ -37,7 +37,7 @@ gcloud compute instances add-tags hammurapi --zone "$ZONE" --tags hammurapi-publ
 1. Organization settings → Developer settings → OAuth Apps → New OAuth App:
    - Homepage URL: `https://grafana.<базовый домен>`;
    - Authorization callback URL: `https://grafana.<базовый домен>/login/github`.
-2. Сгенерируйте client secret. На проде задайте в `hammurapi-infra` (окружение `production` или
+2. Сгенерируйте client secret. На проде задайте в `installer` (окружение `production` или
    уровень репозитория) переменную `GRAFANA_GITHUB_CLIENT_ID` и секрет
    `GRAFANA_GITHUB_CLIENT_SECRET`; при желании — переменную `GRAFANA_GITHUB_ORG` (по умолчанию
    `GreenOnGrey`). `deploy-prod` передаёт их в `up` через stdin SSH-сессии: на диск машины и в
@@ -51,7 +51,7 @@ gcloud compute instances add-tags hammurapi --zone "$ZONE" --tags hammurapi-publ
 ### 1.3 Конфигурация стенда
 
 На проде параметры публичного доступа задаются переменными GitHub репозитория
-`hammurapi-infra` (окружение `production` или уровень репозитория) — так же, как вход в Grafana
+`installer` (окружение `production` или уровень репозитория) — так же, как вход в Grafana
 (п. 1.2): `deploy-prod` передаёт их в `up` через stdin, значения из GitHub важнее `local.env`.
 
 | Переменная | Значение |
@@ -80,7 +80,7 @@ ACME_EMAIL=ops@example.org
 # GRAFANA_GITHUB_ORG=GreenOnGrey
 ```
 
-Следующий `up` (или выкатка тега `hammurapi-infra`) добавляет шаг `public`:
+Следующий `up` (или выкатка тега `installer`) добавляет шаг `public`:
 
 1. MetalLB (дополнение minikube) с пулом `<подсеть minikube>.200–.209`.
 2. cert-manager и `ClusterIssuer` `letsencrypt` и `letsencrypt-staging` (HTTP-01 через Traefik).
@@ -153,12 +153,12 @@ Repository access: selected). В git она не хранится.
 выкатки: разрешённые теги `v*.*.*`, при желании ревьюеры. Своих значений в нём нет.
 
 Переиспользуемый workflow `deploy-component.yml` лежит в публичном репозитории `hammurapi`:
-workflow приватного `hammurapi-infra` нельзя вызвать из публичных `hammurapi-core` и
+workflow приватного `installer` нельзя вызвать из публичных `hammurapi-core` и
 `hammurapi-web`. Настраивать доступ к нему не нужно.
 
 ## 4. Релизы и выкатка
 
-1. Тег релиза `vX.Y.Z` в `hammurapi-infra` запускает `deploy-prod.yml`: сначала публикуются
+1. Тег релиза `vX.Y.Z` в `installer` запускает `deploy-prod.yml`: сначала публикуются
    чарты `oci://ghcr.io/greenongrey/charts/{hammurapi,nabu}-{core,web}:X.Y.Z` (версия чартов
    совпадает с версией стенда), затем, только при успехе, тег выкатывается на стенд вместе с
    `bin/hammurapi-deploy` и `bin/nabu-deploy` — на машине скрипты берутся из

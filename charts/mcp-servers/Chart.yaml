@@ -2,6 +2,6 @@ apiVersion: v2
 name: mcp-servers
 description: "MCP-серверы стенда (FTR.NAB.CMN-0006): разбор документов, веб-поиск, Яндекс Почта только для чтения"
 type: application
-# Версию задаёт deploy-prod.yml hammurapi-infra из тега стенда vX.Y.Z (как у остальных чартов).
+# Версию задаёт deploy-prod.yml installer из тега стенда vX.Y.Z (как у остальных чартов).
 version: 0.0.0
 appVersion: "0.0.0"

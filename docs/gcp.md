@@ -25,8 +25,8 @@ gcloud compute instances create hammurapi-demo \
 
 ```sh
 gcloud compute ssh hammurapi-demo --zone europe-west1-b -- -L 3000:localhost:3000
-git clone https://github.com/GreenOnGrey/hammurapi-infra.git && cd hammurapi-infra
-./hammurapi-infra.sh up
+git clone https://github.com/GreenOnGrey/installer.git && cd installer
+./installer up
 kubectl --context hammurapi -n observability port-forward svc/grafana 3000:80
 ```
 
@@ -116,13 +116,13 @@ Workload Identity Federation для репозитория:
 
 ```sh
 gcloud iam workload-identity-pools create github --location global
-gcloud iam workload-identity-pools providers create-oidc hammurapi-infra --location global \
+gcloud iam workload-identity-pools providers create-oidc installer --location global \
   --workload-identity-pool github --issuer-uri https://token.actions.githubusercontent.com \
   --attribute-mapping google.subject=assertion.sub,attribute.repository=assertion.repository \
-  --attribute-condition "assertion.repository == 'GreenOnGrey/hammurapi-infra'"
+  --attribute-condition "assertion.repository == 'GreenOnGrey/installer'"
 gcloud iam service-accounts add-iam-policy-binding deploy@PROJECT.iam.gserviceaccount.com \
   --role roles/iam.workloadIdentityUser \
-  --member "principalSet://iam.googleapis.com/projects/NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/GreenOnGrey/hammurapi-infra"
+  --member "principalSet://iam.googleapis.com/projects/NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/GreenOnGrey/installer"
 ```
 
 ## e2e

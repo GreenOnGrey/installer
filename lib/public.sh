@@ -205,7 +205,7 @@ install_forward() {
   echo "$LB_IP" | as_root tee "$FORWARD_STATE/lb-ip" >/dev/null
   as_root tee "$FORWARD_UNIT" >/dev/null <<EOF
 # Проброс TCP 80/443 внешнего интерфейса на адрес Traefik в сети minikube
-# (FTR.HMR.INFRA-0002). Устанавливает hammurapi-infra.sh up.
+# (FTR.HMR.INFRA-0002). Устанавливает installer up.
 [Unit]
 Description=Hammurapi: проброс 80/443 на ingress minikube
 After=docker.service
