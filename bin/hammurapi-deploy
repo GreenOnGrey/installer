@@ -21,7 +21,6 @@ source "$ROOT/lib/common.sh"
 
 readonly E_STAND=20 E_NO_CORE=21 E_NS=22 E_SECRETS=23 E_KEY=24 E_HELM=25 E_APP=26 E_READY=27
 NS=${HAMMURAPI_NAMESPACE:-hammurapi}
-RUNNERS_NS=${HAMMURAPI_RUNNERS_NAMESPACE:-hammurapi-runners}
 CHART_REPO=${CHART_REPO:-oci://ghcr.io/greenongrey/charts}
 REGISTRY=${REGISTRY:-ghcr.io}
 GITHUB_API=${GITHUB_API:-https://api.github.com}
@@ -132,10 +131,7 @@ check_order() {
 
 ensure_namespaces() {
   step namespaces
-  local ns
-  for ns in "$NS" "$RUNNERS_NS"; do
-    kc create namespace "$ns" --dry-run=client -o yaml | apply_stdin || fail "$E_NS" "не удалось создать namespace $ns"
-  done
+  kc create namespace "$NS" --dry-run=client -o yaml | apply_stdin || fail "$E_NS" "не удалось создать namespace $NS"
 }
 
 # --- 4. Секреты и конфигурация ---
@@ -150,18 +146,12 @@ ghcr_pull() {
     kc -n "$NS" get secret ghcr-pull >/dev/null 2>&1 || fail "$E_SECRETS" "нет ghcrPullToken и секрета ghcr-pull"
     return
   fi
-  local ns
-  for ns in "$NS" "$RUNNERS_NS"; do
-    printf '%s' "$token" | jq -Rc --arg ns "$ns" --arg reg "$REGISTRY" '
-      {auths: {($reg): {username: "hammurapi", password: ., auth: ("hammurapi:" + . | @base64)}}} as $cfg
-      | {apiVersion: "v1", kind: "Secret", type: "kubernetes.io/dockerconfigjson",
-         metadata: {name: "ghcr-pull", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
-         data: {".dockerconfigjson": ($cfg | tojson | @base64)}}' | apply_json ||
-      fail "$E_SECRETS" "не удалось записать ghcr-pull в $ns"
-  done
-  # Поды задач runner создаются без imagePullSecrets — секрет берётся из ServiceAccount.
-  kc -n "$RUNNERS_NS" patch serviceaccount default --type merge \
-    -p '{"imagePullSecrets":[{"name":"ghcr-pull"}]}' >/dev/null || fail "$E_SECRETS" "не удалось настроить ServiceAccount $RUNNERS_NS/default"
+  printf '%s' "$token" | jq -Rc --arg ns "$NS" --arg reg "$REGISTRY" '
+    {auths: {($reg): {username: "hammurapi", password: ., auth: ("hammurapi:" + . | @base64)}}} as $cfg
+    | {apiVersion: "v1", kind: "Secret", type: "kubernetes.io/dockerconfigjson",
+       metadata: {name: "ghcr-pull", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
+       data: {".dockerconfigjson": ($cfg | tojson | @base64)}}' | apply_json ||
+    fail "$E_SECRETS" "не удалось записать ghcr-pull в $NS"
 }
 
 check_key_fingerprint() {
@@ -226,9 +216,6 @@ sync_core_config() {
        stringData: ($s | del(.DEPLOY_CALLBACK_SECRET, .ACP_AGENT_ENV)
          | .GITHUB_APP_PRIVATE_KEY = (.GITHUB_APP_PRIVATE_KEY | gsub("\\\\n"; "\n")))}' |
     apply_json || fail "$E_SECRETS" "не удалось записать hammurapi-secrets"
-
-  # Переменные агента в namespace задач больше не нужны: агент работает в операторе.
-  kc -n "$RUNNERS_NS" delete secret hammurapi-runner-agent --ignore-not-found >/dev/null 2>&1 || true
 
   copy_conn_secrets
   ok "конфигурация и секреты синхронизированы с GitHub"

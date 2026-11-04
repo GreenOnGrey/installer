@@ -1,6 +1,6 @@
 apiVersion: v2
 name: hammurapi-core
-description: "Hammurapi core (FTR.HMR.INFRA-0002, FTR.HMR.CMN-0004): api, worker, оператор агента, migrate, cleaner, права runner на Job"
+description: "Hammurapi core (FTR.HMR.INFRA-0002, FTR.HMR.CMN-0007): api, worker, migrate, cleaner"
 type: application
 # Версию задаёт publish-charts.yml из тега charts-vX.Y.Z.
 version: 0.0.0
