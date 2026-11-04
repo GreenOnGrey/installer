@@ -113,7 +113,7 @@ jobs:
       - name: Доступ к машине (ssh)
         if: env.DEPLOY_TRANSPORT == 'ssh'
         env:
-          PROD_HOST: ${{ vars.PROD_HOST }}
+          PROD_HOST: ${{ secrets.PROD_HOST || vars.PROD_HOST }}
           PROD_USER: ${{ vars.PROD_USER }}
           PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
           PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
@@ -141,7 +141,7 @@ jobs:
           SHA: ${{ steps.tag.outputs.sha }}
           # Публичный доступ стенда (FTR.HMR.INFRA-0002, R17–R21).
           PUBLIC_ACCESS: ${{ vars.PUBLIC_ACCESS }}
-          ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+          ACME_EMAIL: ${{ secrets.ACME_EMAIL || vars.ACME_EMAIL }}
           ACME_ISSUER: ${{ vars.ACME_ISSUER }}
           PUBLIC_BASE_DOMAIN: ${{ vars.PUBLIC_BASE_DOMAIN }}
           PUBLIC_IP: ${{ vars.PUBLIC_IP }}
@@ -196,22 +196,3 @@ jobs:
               echo "status недоступен"
             fi
           } >>"$GITHUB_STEP_SUMMARY"
-
-      - name: Артефакт status
-        if: always() && steps.tag.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with: { name: status, path: status.json, if-no-files-found: ignore }
-
-      - name: Диагностика при ошибке
-        if: failure() && steps.up.outcome == 'failure'
-        env:
-          GCP_PROJECT: ${{ vars.GCP_PROJECT }}
-          GCP_ZONE: ${{ vars.GCP_ZONE }}
-          GCP_INSTANCE: ${{ vars.GCP_INSTANCE }}
-        run: |
-          bash .github/scripts/remote.sh "cd $PROD_DIR/logs && tar -czf - \"\$(ls -1t | head -1)\"" >deploy-logs.tar.gz
-
-      - name: Артефакт deploy-logs
-        if: failure() && steps.up.outcome == 'failure'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with: { name: deploy-logs, path: deploy-logs.tar.gz, if-no-files-found: warn }
