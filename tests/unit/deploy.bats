@@ -114,8 +114,10 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   grep -q '"name":"hammurapi-secrets"' "$APPLIED/manifests"
   grep -q '"name":"hammurapi-config"' "$APPLIED/manifests"
   grep -q '"HAMMURAPI_BOT_LOGIN":"hammurapi-demo\[bot\]"' "$APPLIED/manifests"
-  grep -q '"name":"ghcr-pull"' "$APPLIED/manifests"
-  called "delete secret hammurapi-runner-agent"
+  grep -q '"name":"ghcr-pull","namespace":"hammurapi"' "$APPLIED/manifests"
+  called "create namespace hammurapi "
+  not_called "hammurapi-runner"
+  not_grep -q "hammurapi-runner" "$APPLIED/manifests"
 }
 
 @test "INS-12, R14: секреты не попадают в аргументы команд и во временные файлы" {
@@ -185,6 +187,7 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   called "upgrade --install hammurapi-web oci://ghcr.io/greenongrey/charts/hammurapi-web --version 0.4.0"
   not_called "upgrade --install hammurapi-core"
   not_called "/app/hook/config"
+  not_called "hammurapi-runner"
 }
 
 @test "неверный тег или компонент — код 2" {

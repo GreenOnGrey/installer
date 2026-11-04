@@ -200,18 +200,13 @@ Nabu (`FTR.NAB.CMN-0001`) выкатывается так же: тег `nabu` �
 `callback_url={callback_url}`.
 
 **Первая установка** — та же выкатка core. Если релиза нет, `hammurapi-deploy` создаёт
-namespace `hammurapi` и `hammurapi-runners`, секреты конфигурации и `ghcr-pull`, копирует
+namespace `hammurapi`, секреты конфигурации и `ghcr-pull`, копирует
 `*-conn` из `storages`, устанавливает чарт (миграции — хуком до `api` и `worker`) и
 настраивает GitHub App: адрес вебхука и секрет, проверка доступа к `hammurapi-spec`. Web до
 core не выкатывается: «сначала выкатите hammurapi-core».
 
-**Агент (FTR.HMR.CMN-0004).** Чарт ставит оператор агента `agent` (по процессу Pi на сессию чата
-или задачи, `:8090`), сервис `worker-mcp` (`:8083`, MCP фоновых сценариев) и сетевые политики:
-к оператору — только `api`, `worker` и задачи runner, к серверу рабочей копии задачи (`:8095`) —
-только оператор. Токен `AGENT_SERVICE_TOKEN` между ними `hammurapi-deploy` создаёт при первой
-выкатке и сохраняет в `hammurapi-secrets`. Подключения к LLM, модели, скиллы и MCP-серверы
-настраиваются в «Администрирование → Агент»; секрет `HAMMURAPI_BOOTSTRAP_DEEPSEEK_API_KEY`
-создаёт первое подключение. Старый секрет `hammurapi-runner-agent` удаляется.
+**Агент (FTR.HMR.CMN-0007).** В чарте core нет агента и runner: задачи с кодом выполняются в
+песочницах Nabu, а MCP воркера (`worker-mcp:8083`) открыт только namespace Nabu.
 
 **Проверки после выкатки** — с раннера GitHub через публичные домены: `/api/v1/config`,
 подписанный `ping` на `/hooks/v1/git` (202), закрытый `/metrics`, перенаправление HTTP →
