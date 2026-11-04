@@ -196,7 +196,7 @@ mcp_budget() {
   local system=$((capacity - alloc))
   # память ноды, при которой need — две трети allocatable, плюс системная часть
   local want_gib=$(((need * 3 / 2 + system + 1073741823) / 1073741824))
-  printf 'MCP-серверам не хватает %s ГиБ памяти стенда: нужен MK_MEMORY=%sg (сейчас %s). Профиль minikube пересоздаётся: ./hammurapi-infra.sh down, затем up\n' \
+  printf 'MCP-серверам не хватает %s ГиБ памяти стенда: нужен MK_MEMORY=%sg (сейчас %s). Профиль minikube пересоздаётся: ./installer down, затем up\n' \
     "$(gib $((need - limit)))" "$want_gib" "$MK_MEMORY"
 }
 
@@ -341,7 +341,7 @@ call() {
       -H "MCP-Protocol-Version: 2025-06-18" "\$@" "$url"
 }
 SID=
-call -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"hammurapi-infra","version":"1"}}}' >/dev/null
+call -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"installer","version":"1"}}}' >/dev/null
 CODE=\$(head -1 /tmp/hdr | cut -d" " -f2)
 if [ "\$CODE" != "200" ]; then echo "HTTP \$CODE"; exit 0; fi
 SID=\$(grep -i "^mcp-session-id:" /tmp/hdr | cut -d" " -f2 | tr -d "\\r")

@@ -6,7 +6,7 @@ persistence: { enabled: true, size: 1Gi }
 service: { type: ClusterIP, port: 80 }
 grafana.ini:
   # Плагин VictoriaLogs ставится до старта сервера (нужен доступ в интернет);
-  # hammurapi-infra.sh задаёт plugins.preinstall_sync из VL_PLUGIN_VERSION.
+  # installer задаёт plugins.preinstall_sync из VL_PLUGIN_VERSION.
   plugins: { preinstall_sync: "" }
   auth.anonymous: { enabled: false }
   users: { allow_sign_up: false }

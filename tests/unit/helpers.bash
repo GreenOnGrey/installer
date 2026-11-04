@@ -39,10 +39,10 @@ not_grep() {
   fi
 }
 
-# load_script — функции hammurapi-infra.sh с конфигурацией по умолчанию.
+# load_script — функции installer с конфигурацией по умолчанию.
 load_script() {
-  # shellcheck source=../../hammurapi-infra.sh
-  source "$ROOT/hammurapi-infra.sh"
+  # shellcheck source=../../installer
+  source "$ROOT/installer"
   COLOR=0
   setup_color
   load_config "$ROOT" /dev/null

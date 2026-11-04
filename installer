@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Демо-стенд Hammurapi на minikube (FTR.HMR.INFRA-0001): хранилища и наблюдаемость.
-#   ./hammurapi-infra.sh up | status | creds | down | help
+#   ./installer up | status | creds | down | help
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -27,7 +27,7 @@ source "$ROOT/lib/mcp.sh"
 
 usage() {
   cat <<'EOF'
-Использование: ./hammurapi-infra.sh <команда> [флаги]
+Использование: ./installer <команда> [флаги]
 
 Команды:
   up       проверка машины, зависимости, кластер, развёртывание, проверки, сводка
@@ -154,7 +154,7 @@ Grafana:
   на машине стенда: kubectl --context $MK_PROFILE -n $NS_OBSERVABILITY port-forward svc/grafana $GRAFANA_LOCAL_PORT:80
   затем откройте http://localhost:$GRAFANA_LOCAL_PORT
 
-Пароли: ./hammurapi-infra.sh creds
+Пароли: ./installer creds
 EOF
   if public_enabled; then
     cat <<EOF

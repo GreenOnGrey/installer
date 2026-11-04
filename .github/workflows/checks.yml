@@ -21,7 +21,7 @@ jobs:
         run: |
           curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VERSION/shellcheck-$SHELLCHECK_VERSION.linux.x86_64.tar.xz" | tar -xJ
           sc=./shellcheck-$SHELLCHECK_VERSION/shellcheck
-          $sc -x hammurapi-infra.sh
+          $sc -x installer
           $sc -x tests/manifests.sh tests/e2e/*.sh dashboards/normalize.sh .github/scripts/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/landing-deploy bin/ingress-forward bin/stand-autostart \
             images/publish.sh images/*/test.sh
           $sc -s bash tests/unit/*.bats tests/unit/helpers.bash

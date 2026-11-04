@@ -4,7 +4,7 @@
 
 load helpers
 
-SCRIPT="$BATS_TEST_DIRNAME/../../hammurapi-infra.sh"
+SCRIPT="$BATS_TEST_DIRNAME/../../installer"
 
 setup() {
   setup_stubs
@@ -73,7 +73,7 @@ setup() {
   [[ $output == *"Kafka $KAFKA_VERSION"* && $output == *"grafana"*"13.2.7"* ]]
   [[ $output == *"ssh -L 3000:localhost:3000"* ]]
   [[ $output == *"port-forward svc/grafana 3000:80"* ]]
-  [[ $output == *"./hammurapi-infra.sh creds"* ]]
+  [[ $output == *"./installer creds"* ]]
   [[ $output == *"(25 %)"* ]]
 }
 

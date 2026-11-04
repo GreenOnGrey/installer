@@ -1,6 +1,6 @@
 # MCP-серверы стенда (FTR.NAB.CMN-0006, tech §2.5). Включение — опциями
 # MCP_DOCLING, MCP_SEARCH, MCP_YANDEX_MAIL, MCP_DOCGEN; образы и версии — config/versions.env.
-# Ключи доступа приходят из секретов namespace (их создаёт hammurapi-infra.sh).
+# Ключи доступа приходят из секретов namespace (их создаёт installer).
 
 docling:
   enabled: false

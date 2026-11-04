@@ -16,6 +16,10 @@ mode=$1 dir=$2 tag=$3
 keep=${KEEP_RELEASES:-5}
 [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "недопустимый тег $tag" >&2; exit 1; }
 
+# cli — CLI выгрузки в текущем каталоге. Выгрузки тегов до переименования содержат
+# hammurapi-infra.sh, а этот скрипт при откате на такой тег — новый.
+cli() { if [[ -f ./installer ]]; then echo ./installer; else echo ./hammurapi-infra.sh; fi; }
+
 case $mode in
   unpack)
     mkdir -p "$dir/releases" "$dir/logs"
@@ -49,7 +53,7 @@ case $mode in
     ln -sfn "$dir/logs" logs
     cfg=()
     [[ -f $dir/local.env ]] && cfg=(--config "$dir/local.env")
-    INFRA_TAG=$tag INFRA_COMMIT=$commit DEPLOYED_BY=$actor bash ./hammurapi-infra.sh up --no-color "${cfg[@]}"
+    INFRA_TAG=$tag INFRA_COMMIT=$commit DEPLOYED_BY=$actor bash "$(cli)" up --no-color "${cfg[@]}"
     ln -sfn "releases/$tag" "$dir/current"
     # Храним текущую выгрузку и ещё keep-1 последних; имена — проверенные теги.
     n=1
@@ -67,7 +71,7 @@ case $mode in
       { echo '{"error":"нет выгрузки релиза на машине"}'; exit 1; }
     cfg=()
     [[ -f $dir/local.env ]] && cfg=(--config "$dir/local.env")
-    bash ./hammurapi-infra.sh status --json --no-color "${cfg[@]}" 2>/dev/null
+    bash "$(cli)" status --json --no-color "${cfg[@]}" 2>/dev/null
     ;;
   *)
     echo "режим: unpack | up | status" >&2

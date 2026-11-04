@@ -125,7 +125,7 @@ mk_state() {
 }
 
 @test "AUTO-09: недопустимое STAND_AUTOSTART — код 2" {
-  STAND_AUTOSTART=maybe run bash "$BATS_TEST_DIRNAME/../../hammurapi-infra.sh" up --no-color
+  STAND_AUTOSTART=maybe run bash "$BATS_TEST_DIRNAME/../../installer" up --no-color
   [ "$status" -eq 2 ]
   [[ $output == *"STAND_AUTOSTART"* ]]
 }

@@ -1,4 +1,4 @@
-# hammurapi-infra
+# installer
 
 Демо-стенд для запуска и отладки [Hammurapi](../hammurapi) одной командой на чистой машине
 с Debian 13: кластер minikube с хранилищами (Kafka, Postgres, S3-совместимое хранилище) и
@@ -45,9 +45,9 @@
 ## Быстрый старт
 
 ```sh
-git clone https://github.com/GreenOnGrey/hammurapi-infra.git
-cd hammurapi-infra
-./hammurapi-infra.sh up
+git clone https://github.com/GreenOnGrey/installer.git
+cd installer
+./installer up
 ```
 
 `up` ставит Docker Engine, kubectl, Helm и minikube нужных версий (уже установленные не
@@ -61,17 +61,17 @@ Grafana открывается через SSH-туннель — наружу н
 ssh -L 3000:localhost:3000 <пользователь>@<адрес машины>
 # на машине стенда, в этой сессии
 kubectl --context hammurapi -n observability port-forward svc/grafana 3000:80
-# затем откройте http://localhost:3000; логин и пароль — ./hammurapi-infra.sh creds
+# затем откройте http://localhost:3000; логин и пароль — ./installer creds
 ```
 
 ## Команды
 
 | Команда | Что делает |
 |---|---|
-| `./hammurapi-infra.sh up` | Установка и развёртывание. Повторный запуск безопасен: доводит стенд до описанного состояния, не теряет данные и не меняет пароли; применяет изменённые версии |
-| `./hammurapi-infra.sh status [--json]` | Состояние кластера, релизов и подов, развёрнутая версия, проверки стенда, запрошенная память |
-| `./hammurapi-infra.sh creds [--json]` | Адреса сервисов, имена секретов, логины и пароли хранилищ и Grafana |
-| `./hammurapi-infra.sh down [--yes]` | Удаление профиля minikube со всеми данными — с подтверждением |
+| `./installer up` | Установка и развёртывание. Повторный запуск безопасен: доводит стенд до описанного состояния, не теряет данные и не меняет пароли; применяет изменённые версии |
+| `./installer status [--json]` | Состояние кластера, релизов и подов, развёрнутая версия, проверки стенда, запрошенная память |
+| `./installer creds [--json]` | Адреса сервисов, имена секретов, логины и пароли хранилищ и Grafana |
+| `./installer down [--yes]` | Удаление профиля minikube со всеми данными — с подтверждением |
 
 Флаги: `--config <файл>` (по умолчанию `config/local.env`), `--verbose`, `--no-color`.
 
@@ -181,7 +181,7 @@ TCP-подключение: токен получает само приложе�
 `up` создаёт в namespace `nabu` секрет `nabu-docs-preview` (адреса и ключи `doc-convert` и `docgen`) и
 перезапускает `api` Nabu, если секрет изменился: без него предпросмотр офисных файлов выключен.
 
-**Внесение в каталог Nabu.** `./hammurapi-infra.sh creds` выводит адреса и ключи. В админке Nabu →
+**Внесение в каталог Nabu.** `./installer creds` выводит адреса и ключи. В админке Nabu →
 «Каталог» → «MCP-сервер»:
 
 - **Документы** — адрес `http://docling-mcp.mcp.svc:8080/mcp`, платформенный, заголовок
@@ -286,7 +286,7 @@ Grafana — через GitHub для участников организации
 ## Разработка
 
 ```text
-hammurapi-infra.sh        точка входа: up | status | creds | down
+installer        точка входа: up | status | creds | down
 lib/                      common, host, prereqs, cluster, secrets, deploy, external, checks
 config/                   versions.env (версии), defaults.env, local.env.example
 values/                   значения чартов; values/scrape/ — задания сбора метрик vmagent
@@ -300,7 +300,7 @@ tests/e2e/e2e.sh          e2e на временной машине Google Cloud
 ```
 
 ```sh
-shellcheck -x hammurapi-infra.sh tests/manifests.sh tests/e2e/*.sh dashboards/normalize.sh .github/scripts/*.sh
+shellcheck -x installer tests/manifests.sh tests/e2e/*.sh dashboards/normalize.sh .github/scripts/*.sh
 bats tests/unit             # bats-core ≥ 1.5
 tests/manifests.sh          # helm ≥ 3.17, kubeconform, jq, yq
 ```

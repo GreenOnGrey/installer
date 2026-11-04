@@ -1,6 +1,6 @@
 # Объектное хранилище: SeaweedFS all-in-one (мастер, том, filer и S3-шлюз в
 # одном поде) вместо MinIO — образы MinIO community больше не публикуются.
-# Учётные данные S3 — из секрета s3-seaweedfs-config (создаёт hammurapi-infra.sh).
+# Учётные данные S3 — из секрета s3-seaweedfs-config (создаёт installer).
 master: { enabled: false }
 volume: { enabled: false }
 filer: { enabled: false }
@@ -12,7 +12,7 @@ allInOne:
     existingConfigSecret: s3-seaweedfs-config
     createBucketsHook:
       resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { cpu: 200m, memory: 128Mi } }
-    # Имя бакета задаёт hammurapi-infra.sh из S3_BUCKET.
+    # Имя бакета задаёт installer из S3_BUCKET.
     createBuckets: []
   data:
     type: persistentVolumeClaim

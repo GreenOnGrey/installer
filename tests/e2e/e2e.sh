@@ -14,12 +14,12 @@ INSTANCE=${GCP_INSTANCE:-hammurapi-infra-e2e-$(date -u +%Y%m%d%H%M%S)}
 MACHINE_TYPE=${MACHINE_TYPE:-e2-standard-4}
 REPORT=${REPORT:-$ROOT/.work/e2e-report.md}
 KEEP=${KEEP:-0}
-REMOTE_DIR=hammurapi-infra
+REMOTE_DIR=installer
 FAILED=0
 
 mkdir -p "$(dirname "$REPORT")"
 {
-  echo "# e2e hammurapi-infra — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "# e2e installer — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo
   echo "Машина: $MACHINE_TYPE, Debian 13, $GCP_ZONE. Коммит: $(git -C "$ROOT" rev-parse --short HEAD)."
   echo
@@ -63,7 +63,7 @@ git -C "$ROOT" archive --format=tar.gz --prefix="$REMOTE_DIR/" HEAD >"$ROOT/.wor
 g compute scp "$ROOT/.work/e2e.tar.gz" "$INSTANCE:e2e.tar.gz" --zone "$GCP_ZONE" "${IAP_ARGS[@]}"
 g compute ssh "$INSTANCE" --zone "$GCP_ZONE" "${IAP_ARGS[@]}" --command "tar -xzf e2e.tar.gz && rm e2e.tar.gz"
 
-H="bash ./hammurapi-infra.sh"
+H="bash ./installer"
 stage UP-01 "up на чистой машине (цель ≤ 20 мин)" "$H up --no-color"
 stage CMD-01 "status --json" "$H status --json --no-color | jq -e '.ok and (.checks | length) >= 6'"
 stage CMD-02 "creds: адреса и пароли всех хранилищ и Grafana" \

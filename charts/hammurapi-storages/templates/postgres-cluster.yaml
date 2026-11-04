@@ -1,6 +1,6 @@
 {{- if eq .Values.postgres.mode "internal" }}
 # Postgres через CloudNativePG: один экземпляр, пользователь и база из секрета
-# postgres-credentials (создаёт hammurapi-infra.sh), метрики на порту 9187.
+# postgres-credentials (создаёт installer), метрики на порту 9187.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
