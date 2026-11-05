@@ -72,6 +72,17 @@ install_docker_deb() {
   as_root apt-mark hold docker-ce docker-ce-cli containerd.io >/dev/null
 }
 
+# ensure_el_kernel_modules — on EL10 the netfilter modules that Docker needs are in kernel-modules-extra, which a
+# minimal install does not have, and without them dockerd does not start. The package follows the running kernel.
+ensure_el_kernel_modules() {
+  modinfo xt_addrtype >/dev/null 2>&1 && return 0
+  local kernel
+  kernel=$(uname -r)
+  log "kernel modules of netfilter: kernel-modules-extra-$kernel"
+  retry 3 10 as_root dnf install -y -q "kernel-modules-extra-$kernel" >/dev/null ||
+    die "$E_PREREQ" "kernel-modules-extra of the running kernel $kernel is not available: update the kernel, reboot and run up again"
+}
+
 # install_docker_el — the repository of Docker; container-selinux comes as its dependency, and SELinux
 # stays as it is (FTR.INFRA.INST-0001 R9).
 install_docker_el() {
@@ -101,8 +112,10 @@ install_docker() {
     log "Docker Engine $(docker_wanted_version)"
     if os_is_el; then install_docker_el; else install_docker_deb; fi
   fi
+  if os_is_el; then ensure_el_kernel_modules; fi
   if ! systemctl is-enabled --quiet docker 2>/dev/null; then
-    as_root systemctl enable --now docker >/dev/null
+    as_root systemctl enable --now docker >/dev/null ||
+      die "$E_PREREQ" "Docker did not start, see journalctl -u docker"
   fi
   local user=${SUDO_USER:-$(id -un)}
   if [[ $user != root ]] && ! id -nG "$user" | tr ' ' '\n' | grep -qx docker; then

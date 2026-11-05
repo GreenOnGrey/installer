@@ -137,3 +137,45 @@ setup() {
   [ "$status" -eq 0 ]
   not_called curl
 }
+
+@test "R9: EL10 without netfilter modules: kernel-modules-extra of the running kernel, before Docker starts" {
+  os_release rocky 10.2
+  stub rpm "printf '%s' '$DOCKER_VERSION_RPM_EL10'"
+  stub modinfo 'exit 1'
+  stub uname 'echo 6.12.0-1.el10.x86_64'
+  stub dnf 'exit 0'
+  stub systemctl '[[ $* == *is-enabled* ]] && exit 1; exit 0'
+  stub id '[[ $1 == -nG ]] && echo "user docker" || /usr/bin/id "$@"'
+  as_root() { "$@"; }
+  run install_docker
+  [ "$status" -eq 0 ]
+  called "dnf install -y -q kernel-modules-extra-6.12.0-1.el10.x86_64"
+  [ "$(grep -n 'kernel-modules-extra' "$CALLS" | cut -d: -f1)" -lt "$(grep -n 'enable --now docker' "$CALLS" | cut -d: -f1)" ]
+}
+
+@test "R9: the modules are there: nothing installs; the package is gone: code 11 with what to do" {
+  os_release rocky 9.4
+  stub rpm "printf '%s' '$DOCKER_VERSION_RPM_EL9'"
+  stub modinfo 'exit 0'
+  stub dnf 'exit 1'
+  stub systemctl 'exit 0'
+  stub id '[[ $1 == -nG ]] && echo "user docker" || /usr/bin/id "$@"'
+  run install_docker
+  [ "$status" -eq 0 ]
+  not_called "kernel-modules-extra"
+  stub modinfo 'exit 1'
+  sleep() { :; }
+  as_root() { "$@"; }
+  run ensure_el_kernel_modules
+  [ "$status" -eq 11 ]
+  [[ $output == *"update the kernel, reboot"* ]]
+}
+
+@test "R9: Docker that does not start names the journal" {
+  stub dpkg-query "printf '%s' '$DOCKER_VERSION_DEB'"
+  stub systemctl 'exit 1'
+  as_root() { "$@"; }
+  run install_docker
+  [ "$status" -eq 11 ]
+  [[ $output == *"journalctl -u docker"* ]]
+}
