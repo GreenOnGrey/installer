@@ -65,14 +65,19 @@ kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 networking: { disableDefaultCNI: true, podSubnet: 10.244.0.0/16 }
 EOF
+  # Flannel exits when the kernel of the host has no bridge netfilter, as on a GitHub runner.
+  sudo modprobe br_netfilter || true
   # --wait fails without a CNI: the nodes become Ready only after flannel.
   kind create cluster --name "$CLUSTER" --image "$KIND_NODE" --config "$cfg" >/dev/null
   # Flannel needs the bridge CNI plugin, which the kind node does not ship.
   docker exec "$CLUSTER-control-plane" sh -c 'mkdir -p /opt/cni/bin && curl -fsSL https://github.com/containernetworking/plugins/releases/download/v1.7.1/cni-plugins-linux-amd64-v1.7.1.tgz | tar -xz -C /opt/cni/bin ./bridge ./host-local ./loopback ./portmap'
   "${K[@]}" apply -f "https://github.com/flannel-io/flannel/releases/download/$FLANNEL_VERSION/kube-flannel.yml" >/dev/null
+  "${K[@]}" -n kube-flannel rollout status daemonset/kube-flannel-ds --timeout=3m >/dev/null ||
+    { "${K[@]}" -n kube-flannel logs daemonset/kube-flannel-ds --tail=20 >&2 || true; fail "flannel did not start"; }
   "${K[@]}" wait --for=condition=Ready node --all --timeout=5m >/dev/null
+  "${K[@]}" -n kube-system rollout status deployment/coredns --timeout=3m >/dev/null || fail "CoreDNS did not start"
   installer_run 18 up
-  grep -q "does not apply NetworkPolicy" "$RUN_LOG" || fail "the reason is not named"
+  grep -q "does not apply NetworkPolicy to incoming traffic" "$RUN_LOG" || fail "the reason is not named"
   preflight_gone
   no_release storages
   pass "TGT-07: code 18, sandboxes named, the namespace removed, nothing installed"
