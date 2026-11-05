@@ -1,14 +1,10 @@
-# Google Cloud: машина стенда и managed-хранилища
+# Google Cloud: the stand's machine and managed storages
 
-Скрипт стенда не использует API облака — всё облачное задаётся параметрами внешних хранилищ в
-`config/local.env`. Здесь — пример для Google Cloud. Для другого облака нужны только машина с
-Debian 13 и адреса с учётными данными его managed-сервисов.
+The stand's script uses no cloud API: everything cloud-related is set through external storage parameters in `config/local.env`. This is an example for Google Cloud. Another cloud needs only a machine with Debian 13 and the addresses and credentials of its managed services.
 
-## Машина
+## Machine
 
-`e2-standard-4` (4 vCPU, 16 ГБ), Debian 13, диск 100 ГБ. Если стенд будет ходить в Cloud SQL
-или Managed Kafka по приватным адресам, машина должна быть в той же VPC: поды minikube выходят
-к адресам VPC через NAT ноды и Docker-сети машины.
+`e2-standard-4` (4 vCPU, 16 GB), Debian 13, a 100 GB disk. If the stand reaches Cloud SQL or Managed Kafka through private addresses, the machine must be in the same VPC: minikube pods reach VPC addresses through the NAT of the node and the machine's Docker network.
 
 ```sh
 gcloud compute instances create hammurapi-demo \
@@ -20,8 +16,7 @@ gcloud compute instances create hammurapi-demo \
   --metadata enable-oslogin=TRUE
 ```
 
-Без публичного доступа порты наружу открывать не нужно: Grafana открывается через SSH-туннель.
-С `PUBLIC_ACCESS=true` откройте TCP 80 и 443 — см. [hammurapi.md](hammurapi.md#11-межсетевой-экран-google-cloud).
+Without public access no ports need opening, because Grafana opens through an SSH tunnel. With `PUBLIC_ACCESS=true`, open TCP 80 and 443: see [hammurapi.md](hammurapi.md#11-google-cloud-firewall).
 
 ```sh
 gcloud compute ssh hammurapi-demo --zone europe-west1-b -- -L 3000:localhost:3000
@@ -32,11 +27,11 @@ kubectl --context hammurapi -n observability port-forward svc/grafana 3000:80
 
 ## Cloud SQL for PostgreSQL
 
-Экземпляр с приватным IP в VPC машины, база и пользователь `hammurapi`.
+An instance with a private IP in the machine's VPC, and the database and user `hammurapi`.
 
 ```bash
 POSTGRES_MODE=external
-POSTGRES_HOST=10.20.0.5            # приватный IP экземпляра → сервис с EndpointSlice
+POSTGRES_HOST=10.20.0.5            # private IP of the instance → a service with an EndpointSlice
 POSTGRES_PORT=5432
 POSTGRES_DATABASE=hammurapi
 POSTGRES_USER=hammurapi
@@ -46,9 +41,7 @@ POSTGRES_SSLMODE=require
 
 ## Managed Service for Apache Kafka
 
-Кластер в той же VPC; доступ — SASL/PLAIN по ключу сервисного аккаунта с ролью
-`roles/managedkafka.client` (логин — e-mail сервисного аккаунта, пароль — JSON-ключ в base64) или
-OAUTHBEARER.
+A cluster in the same VPC. Access is SASL/PLAIN with a key of a service account with the role `roles/managedkafka.client` (the username is the service account's email, the password is the JSON key in base64), or OAUTHBEARER.
 
 ```bash
 KAFKA_MODE=external
@@ -59,17 +52,16 @@ KAFKA_USERNAME=hammurapi-kafka@PROJECT.iam.gserviceaccount.com
 KAFKA_PASSWORD_FILE=/secure/kafka-password
 ```
 
-Проверки стенда пишут и читают сообщение в топике `hammurapi-infra-probe` — создайте его:
+The stand's checks write and read a message in the topic `hammurapi-infra-probe`, so create it:
 
 ```sh
 gcloud managed-kafka topics create hammurapi-infra-probe --cluster hammurapi \
   --location europe-west1 --partitions 1 --replication-factor 3
 ```
 
-## Cloud Storage через S3-совместимый интерфейс
+## Cloud Storage through the S3-compatible interface
 
-Бакет и HMAC-ключ сервисного аккаунта с доступом к нему
-(`gcloud storage hmac create SA_EMAIL`).
+A bucket and an HMAC key of a service account with access to it (`gcloud storage hmac create SA_EMAIL`).
 
 ```bash
 S3_MODE=external
@@ -81,38 +73,25 @@ S3_SECRET_KEY_FILE=/secure/s3-secret-key
 S3_PATH_STYLE=false
 ```
 
-Файлы в `/secure/` — вне репозитория, с правами `600`. Метрики managed-хранилищ стенд не
-собирает — они остаются в Cloud Monitoring.
+Files in `/secure/` stay outside the repository, with mode `600`. The stand does not collect metrics of managed storages, which stay in Cloud Monitoring.
 
-## Машина прода
+## Production machine
 
-Прод — такая же машина, на которую workflow `deploy-prod` выкатывает теги.
+Production is the same kind of machine, to which the workflow `deploy-prod` rolls out tags.
 
-1. Пользователь выкатки (например, `github`, созданный из ключа в метаданных ВМ) — с `sudo` без
-   пароля и владельцем каталога прода:
+1. The rollout user (such as `github`, created from a key in the VM metadata) has passwordless `sudo` and owns the production directory:
 
    ```sh
    sudo install -d -o github -g github /opt/hammurapi-infra
    ```
 
-   Клонировать репозиторий на машину не нужно: workflow сам передаёт выгрузку тега по SSH и
-   раскладывает её в `/opt/hammurapi-infra/releases/<тег>` (ссылка `current` — на развёрнутый).
-   Доступ машины к GitHub не требуется — deploy keys запрещены политикой организации.
-2. `/opt/hammurapi-infra/local.env` и файлы секретов внешних хранилищ кладутся на машину один
-   раз и между выкатками не меняются; в GitHub они не хранятся. Журналы — в
-   `/opt/hammurapi-infra/logs`.
-3. Доступ из GitHub Actions — одним из способов:
-   - **`ssh`** (по умолчанию, не зависит от облака): ключ пользователя выкатки в секрете
-     `PROD_SSH_KEY`, отпечаток хоста в `PROD_KNOWN_HOSTS`
-     (`ssh-keyscan -t ed25519 <адрес>`), порт 22 открыт для раннеров GitHub;
-   - **`gcp-iap`**: `gcloud compute ssh --tunnel-through-iap` с Workload Identity Federation.
-     Ключи сервисного аккаунта не хранятся, порт 22 наружу закрыт — открыт только для диапазона
-     IAP `35.235.240.0/20`. Сервисному аккаунту нужны `roles/iap.tunnelResourceAccessor`,
-     `roles/compute.osAdminLogin` и `roles/iam.serviceAccountUser` на машине. Пользователь выкатки
-     в этом случае — OS Login-пользователь сервисного аккаунта (`sa_<id>`): сделайте его
-     владельцем `/opt/hammurapi-infra`.
+   There is no need to clone the repository on the machine: the workflow passes an export of the tag over SSH and unpacks it into `/opt/hammurapi-infra/releases/<tag>` (the link `current` points to the deployed one). The machine needs no access to GitHub, because deploy keys are forbidden by the organization's policy.
+2. `/opt/hammurapi-infra/local.env` and the secret files of external storages go on the machine once and do not change between rollouts. They are not kept in GitHub. Logs are in `/opt/hammurapi-infra/logs`.
+3. Access from GitHub Actions, in one of these ways:
+   - **`ssh`** (default, independent of a cloud): the rollout user's key in the secret `PROD_SSH_KEY`, the host fingerprint in `PROD_KNOWN_HOSTS` (`ssh-keyscan -t ed25519 <address>`), and port 22 open to GitHub runners;
+   - **`gcp-iap`**: `gcloud compute ssh --tunnel-through-iap` with Workload Identity Federation. No service account keys are stored, and port 22 is closed outside, open only to the IAP range `35.235.240.0/20`. The service account needs `roles/iap.tunnelResourceAccessor`, `roles/compute.osAdminLogin` and `roles/iam.serviceAccountUser` on the machine. The rollout user is then the service account's OS Login user (`sa_<id>`), so make it the owner of `/opt/hammurapi-infra`.
 
-Workload Identity Federation для репозитория:
+Workload Identity Federation for the repository:
 
 ```sh
 gcloud iam workload-identity-pools create github --location global
@@ -127,7 +106,4 @@ gcloud iam service-accounts add-iam-policy-binding deploy@PROJECT.iam.gserviceac
 
 ## e2e
 
-Workflow `e2e` использует тот же способ входа (окружение GitHub `e2e`: `GCP_PROJECT`,
-`GCP_WIF_PROVIDER`, `GCP_SERVICE_ACCOUNT`). Сервисному аккаунту e2e нужны права создавать и
-удалять машины (`roles/compute.instanceAdmin.v1`) и входить на них
-(`roles/compute.osAdminLogin`, `roles/iap.tunnelResourceAccessor`).
+The workflow `e2e` uses the same sign-in (the GitHub environment `e2e`: `GCP_PROJECT`, `GCP_WIF_PROVIDER`, `GCP_SERVICE_ACCOUNT`). The e2e service account needs rights to create and delete machines (`roles/compute.instanceAdmin.v1`) and to sign in to them (`roles/compute.osAdminLogin`, `roles/iap.tunnelResourceAccessor`).

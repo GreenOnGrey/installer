@@ -1,4 +1,4 @@
-    # --- Hammurapi (FTR.HMR.INFRA-0002) и Nabu (FTR.NAB.CMN-0001 arch §11): поды с аннотацией prometheus.io/scrape ---
+    # --- Hammurapi (FTR.HMR.INFRA-0002) and Nabu (FTR.NAB.CMN-0001 arch §11): pods with the annotation prometheus.io/scrape ---
     - job_name: hammurapi
       kubernetes_sd_configs: [{ role: pod, namespaces: { names: [hammurapi, nabu, nabu-sandboxes, nabu-agents] } }]
       relabel_configs:
@@ -9,7 +9,7 @@
         - { source_labels: [__meta_kubernetes_pod_name], target_label: pod }
         - { source_labels: [__meta_kubernetes_pod_container_name], target_label: container }
         - { source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component], target_label: component }
-    # --- MCP-серверы стенда (FTR.NAB.CMN-0006, FTR.NAB.CHAT-0003): docgen, Gotenberg (путь из аннотации) ---
+    # --- MCP servers of the stand (FTR.NAB.CMN-0006, FTR.NAB.CHAT-0003): docgen, Gotenberg (path from the annotation) ---
     - job_name: mcp
       kubernetes_sd_configs: [{ role: pod, namespaces: { names: [mcp] } }]
       relabel_configs:

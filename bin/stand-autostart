@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# stand-autostart start | stop — кластер minikube стенда при загрузке и выключении
-# машины. Запускается systemd-юнитом hammurapi-stand от пользователя стенда;
-# юнит ставит `installer up`.
-#   start — minikube start профиля (у контейнера minikube нет политики перезапуска,
-#           после перезагрузки машины он остаётся остановленным); компоненты стенда
-#           поднимаются сами — их объекты и тома хранятся в профиле. Скрипт ждёт
-#           готовности ноды и подов, чтобы итог был виден в journalctl.
-#   stop  — minikube stop: хранилища останавливаются штатно, а не обрываются.
-#   kubelet-gc — сборка мусора образов в kubelet ноды (вызывает и up).
-# Если кластер уже запущен (юнит включает up), start сразу завершается; если
-# профиля нет (down), оба режима ничего не делают.
+# stand-autostart start | stop — the minikube cluster of the stand on machine boot and
+# shutdown. Run by the systemd unit hammurapi-stand as the user of the stand;
+# `installer up` installs the unit.
+#   start — minikube start of the profile (the minikube container has no restart policy,
+#           so it stays stopped after a reboot); components of the stand come back on
+#           their own, since their objects and volumes live in the profile. The script waits
+#           for the node and pods so the outcome shows in journalctl.
+#   stop  — minikube stop: storages stop cleanly instead of being cut off.
+#   kubelet-gc — image garbage collection in the node's kubelet (up calls it too).
+# If the cluster already runs (up enables the unit), start ends at once; if
+# the profile is gone (down), both modes do nothing.
 set -euo pipefail
 
 MK_PROFILE=${MK_PROFILE:-hammurapi}
-DOCKER_WAIT=${DOCKER_WAIT:-120}     # секунд: docker.service активен раньше, чем отвечает API
+DOCKER_WAIT=${DOCKER_WAIT:-120}     # seconds: docker.service is active before its API answers
 PODS_TIMEOUT=${PODS_TIMEOUT:-15m}
 IMAGE_GC_HIGH=${IMAGE_GC_HIGH:-85}
 IMAGE_GC_LOW=${IMAGE_GC_LOW:-80}
@@ -35,46 +35,46 @@ wait_docker() {
     docker info >/dev/null 2>&1 && return 0
     sleep 2
   done
-  log "Docker не отвечает ${DOCKER_WAIT} с"
+  log "Docker has not answered for ${DOCKER_WAIT} s"
   return 1
 }
 
 start() {
-  profile_exists || { log "профиля $MK_PROFILE нет — запускать нечего"; return 0; }
+  profile_exists || { log "no profile $MK_PROFILE, nothing to start"; return 0; }
   wait_docker
   if running; then
-    # Так юнит включает up: компоненты разворачивает он сам, ждать здесь нечего.
-    log "кластер $MK_PROFILE уже запущен"
+    # This is how up enables the unit: up deploys components itself, nothing to wait for.
+    log "cluster $MK_PROFILE is already running"
     return 0
   fi
-  log "запуск кластера $MK_PROFILE"
+  log "starting cluster $MK_PROFILE"
   minikube start -p "$MK_PROFILE" --interactive=false
   kubectl --context "$MK_PROFILE" wait --for=condition=Ready node --all --timeout=5m >/dev/null
-  # Без сборки мусора стенд работает, пока хватает диска, — юнит из-за неё не проваливаем.
+  # Without garbage collection the stand works while the disk lasts, so the unit does not fail.
   kubelet_gc || true
-  log "нода готова, ожидание подов (до $PODS_TIMEOUT)"
-  # Поды заданий (Job, CronJob) не ждём: упавший при старте под задания готовым не
-  # станет никогда, а задание повторит его само. Вытесненные (Failed) — тоже.
+  log "node is ready, waiting for pods (up to $PODS_TIMEOUT)"
+  # Pods of Job and CronJob are not awaited: a job pod that failed at start never becomes
+  # ready, and the job retries it itself. Evicted (Failed) pods neither.
   if kubectl --context "$MK_PROFILE" wait pods --all-namespaces --for=condition=Ready \
     --selector='!job-name' --field-selector=status.phase!=Succeeded,status.phase!=Failed \
     --timeout="$PODS_TIMEOUT" >/dev/null; then
-    log "стенд поднят: все поды готовы"
+    log "the stand is up: all pods are ready"
   else
-    # Кластер запущен — юнит не проваливаем, неготовые поды видны в журнале и в status.
-    log "не все поды готовы за $PODS_TIMEOUT:"
+    # The cluster runs, so the unit does not fail: unready pods show in the log and in status.
+    log "not all pods are ready after $PODS_TIMEOUT:"
     kubectl --context "$MK_PROFILE" get pods --all-namespaces \
       --selector='!job-name' --field-selector=status.phase!=Succeeded --no-headers 2>/dev/null |
       awk '{split($3, r, "/"); if (r[1] != r[2]) print "  " $1 "/" $2 " " $3 " " $4}' >&2 || true
   fi
 }
 
-# kubelet_gc — minikube пишет в конфигурацию kubelet imageGCHighThresholdPercent: 100,
-# то есть выключает сборку мусора образов, и старые теги Nabu и Hammurapi копятся на
-# диске ноды (FTR.NAB.CMN-0008). Включаем её: по заполнению диска и по возрасту
-# неиспользуемого образа. minikube start переписывает файл, поэтому правка — после
-# каждого запуска; kubelet перезапускается, только если файл изменился (поды при этом
-# работают дальше).
-# shellcheck disable=SC2016 # скрипт выполняет shell ноды: $f и $1…$3 — его переменные
+# kubelet_gc — minikube writes imageGCHighThresholdPercent: 100 to the kubelet config,
+# which turns image garbage collection off, and old tags of Nabu and Hammurapi pile up on
+# the node's disk (FTR.NAB.CMN-0008). This turns it on: by disk usage and by the age of an
+# unused image. minikube start rewrites the file, so the edit follows every
+# start; kubelet restarts only if the file changed (pods keep
+# running).
+# shellcheck disable=SC2016 # the script runs in the node's shell: $f and $1…$3 are its variables
 kubelet_gc() {
   local script
   script='f=/var/lib/kubelet/config.yaml; cp "$f" "$f.orig";'
@@ -87,9 +87,9 @@ kubelet_gc() {
   case $out in
     *unchanged*) ;;
     *changed*)
-      log "сборка мусора образов: диск $IMAGE_GC_HIGH→$IMAGE_GC_LOW %, неиспользуемые старше $IMAGE_GC_MAX_AGE; kubelet перезапущен" ;;
+      log "image garbage collection: disk $IMAGE_GC_HIGH→$IMAGE_GC_LOW%, unused images older than $IMAGE_GC_MAX_AGE; kubelet restarted" ;;
     *)
-      log "сборку мусора образов настроить не удалось: $out"
+      log "failed to configure image garbage collection: $out"
       return 1
       ;;
   esac
@@ -97,8 +97,8 @@ kubelet_gc() {
 
 stop() {
   profile_exists || return 0
-  running || { log "кластер $MK_PROFILE не запущен"; return 0; }
-  log "остановка кластера $MK_PROFILE"
+  running || { log "cluster $MK_PROFILE is not running"; return 0; }
+  log "stopping cluster $MK_PROFILE"
   minikube stop -p "$MK_PROFILE"
 }
 
@@ -107,7 +107,7 @@ case ${1:-} in
   stop) stop ;;
   kubelet-gc) kubelet_gc ;;
   *)
-    echo "использование: stand-autostart start | stop | kubelet-gc" >&2
+    echo "usage: stand-autostart start | stop | kubelet-gc" >&2
     exit 2
     ;;
 esac

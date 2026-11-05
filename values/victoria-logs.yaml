@@ -1,5 +1,5 @@
-# VictoriaLogs single. Срок хранения — VL_RETENTION, размер тома — VL_STORAGE.
-# Логи собирает отдельный релиз vector, встроенный в чарт Vector не включается.
+# VictoriaLogs single. Retention is VL_RETENTION, volume size is VL_STORAGE.
+# A separate release vector collects logs; the Vector built into the chart stays off.
 server:
   retentionPeriod: 3d
   persistentVolume: { enabled: true, size: 10Gi }

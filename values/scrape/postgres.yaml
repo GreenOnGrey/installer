@@ -1,4 +1,4 @@
-    # --- Postgres (CloudNativePG): экземпляр, порт metrics (9187) ---
+    # --- Postgres (CloudNativePG): the instance, port metrics (9187) ---
     - job_name: postgres
       kubernetes_sd_configs: [{ role: pod, namespaces: { names: [storages] } }]
       relabel_configs:

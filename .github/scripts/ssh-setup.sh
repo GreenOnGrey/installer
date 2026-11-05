@@ -1,45 +1,45 @@
 #!/usr/bin/env bash
-# ssh-setup.sh — доступ к машине прода по SSH (DEPLOY_TRANSPORT=ssh).
-# Проверка ключа хоста не отключается: отпечаток — из секрета PROD_KNOWN_HOSTS.
-# Окружение: PROD_HOST, PROD_USER, PROD_SSH_KEY, PROD_KNOWN_HOSTS; SSH_DIR (по умолчанию ~/.ssh).
+# ssh-setup.sh — SSH access to the production machine (DEPLOY_TRANSPORT=ssh).
+# Host key checking stays on: the fingerprint comes from the secret PROD_KNOWN_HOSTS.
+# Environment: PROD_HOST, PROD_USER, PROD_SSH_KEY, PROD_KNOWN_HOSTS; SSH_DIR (default: ~/.ssh).
 set -euo pipefail
 dir=${SSH_DIR:-$HOME/.ssh}
 
-# Все пропущенные настройки сразу, с подсказкой, где их задать.
+# All missing settings at once, with a hint on where to set them.
 missing=()
-[[ -n ${PROD_HOST:-} ]] || missing+=("PROD_HOST (секрет)")
-[[ -n ${PROD_USER:-} ]] || missing+=("PROD_USER (переменная)")
-[[ -n ${PROD_SSH_KEY:-} ]] || missing+=("PROD_SSH_KEY (секрет)")
-[[ -n ${PROD_KNOWN_HOSTS:-} ]] || missing+=("PROD_KNOWN_HOSTS (секрет; без отпечатка хоста подключение запрещено)")
+[[ -n ${PROD_HOST:-} ]] || missing+=("PROD_HOST (secret)")
+[[ -n ${PROD_USER:-} ]] || missing+=("PROD_USER (variable)")
+[[ -n ${PROD_SSH_KEY:-} ]] || missing+=("PROD_SSH_KEY (secret)")
+[[ -n ${PROD_KNOWN_HOSTS:-} ]] || missing+=("PROD_KNOWN_HOSTS (secret; connecting without a host fingerprint is forbidden)")
 if ((${#missing[@]})); then
   {
-    echo "::error::не заданы настройки доступа к проду: $(
+    echo "::error::production access settings are missing: $(
       IFS=,
       echo "${missing[*]}"
     )"
-    echo "Задайте их в Settings → Environments → production (переменные — во вкладке Variables, секреты — в Secrets)."
-    echo "Настройки уровня репозитория тоже подходят; настройки другого окружения job не видит."
+    echo "Set them in Settings → Environments → production (variables in the tab Variables, secrets in Secrets)."
+    echo "Repository-level settings also work; the job does not see settings of another environment."
   } >&2
   exit 1
 fi
 mkdir -p "$dir"
 chmod 700 "$dir" 2>/dev/null || true
 umask 077
-# \r из секретов, вставленных из Windows, ломает разбор ключа.
+# \r from secrets pasted on Windows breaks key parsing.
 printf '%s\n' "$PROD_SSH_KEY" | tr -d '\r' >"$dir/deploy_key"
 printf '%s\n' "$PROD_KNOWN_HOSTS" | tr -d '\r' >"$dir/deploy_known_hosts"
 
-# Диагностика: ключ читается, и его открытую часть можно сравнить с
-# ~/.ssh/authorized_keys пользователя на машине.
+# Diagnostics: the key is readable, and its public part can be compared with
+# ~/.ssh/authorized_keys of the user on the machine.
 if ! pub=$(ssh-keygen -y -P '' -f "$dir/deploy_key" 2>/dev/null); then
-  echo "::error::PROD_SSH_KEY не читается как закрытый ключ OpenSSH без пароля (нужен весь файл с BEGIN/END)" >&2
+  echo "::error::PROD_SSH_KEY cannot be read as an OpenSSH private key without a passphrase (the whole file with BEGIN/END is required)" >&2
   exit 1
 fi
-echo "Ключ выкатки: $(ssh-keygen -lf - <<<"$pub")"
-echo "Его открытая часть должна быть в ~$PROD_USER/.ssh/authorized_keys на $PROD_HOST:"
+echo "Rollout key: $(ssh-keygen -lf - <<<"$pub")"
+echo "Its public part must be in ~$PROD_USER/.ssh/authorized_keys on $PROD_HOST:"
 echo "  $pub"
 if [[ $PROD_USER == *@* ]]; then
-  echo "::warning::PROD_USER «$PROD_USER» содержит @ — нужно имя пользователя Linux на машине (например, deploy), а не адрес"
+  echo "::warning::PROD_USER '$PROD_USER' contains @: it must be a Linux user name on the machine (such as deploy), not an address"
 fi
 cat >"$dir/config" <<EOF
 Host prod

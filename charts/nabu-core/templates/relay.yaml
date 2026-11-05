@@ -1,6 +1,6 @@
 {{ include "nabu.deployment" (dict "root" . "name" "relay" "ports" (list (dict "name" "relay" "port" 8085)) "grace" 30) }}
 ---
-# Каналы рабочих пространств (WebSocket) и вызовы инструментов оператора агента.
+# Workspace channels (WebSocket) and tool calls of the agent operator.
 apiVersion: v1
 kind: Service
 metadata:

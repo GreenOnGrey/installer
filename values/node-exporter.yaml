@@ -1,5 +1,5 @@
 fullnameOverride: node-exporter
 resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { cpu: 100m, memory: 64Mi } }
 service:
-  # Только внутри кластера; nodePort не создаётся.
+  # Inside the cluster only; no nodePort is created.
   type: ClusterIP

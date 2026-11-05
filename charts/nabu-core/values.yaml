@@ -1,81 +1,81 @@
-# Образ core вместе с агентом Pi; тег задаёт выкатка (nabu-deploy).
+# The core image with the Pi agent; the rollout sets the tag (nabu-deploy).
 image: { repository: ghcr.io/greenongrey/nabu-core, tag: "", pullPolicy: IfNotPresent }
 imagePullSecrets: [{ name: ghcr-pull }]
 
-# Базовый домен: сайт nabu.<домен>, API nabu-api.<домен>. Обязателен.
+# Base domain: site nabu.<domain>, API nabu-api.<domain>. Required.
 publicBaseDomain: ""
-# Поддомены сайта и API (FTR.NAB.CMN-0001 arch §11).
+# Subdomains of the site and API (FTR.NAB.CMN-0001 arch §11).
 hosts: { web: nabu, api: nabu-api }
 
-# Секреты и конфигурация создаёт nabu-deploy до Helm: чарт получает только
-# ссылки, значения не попадают в историю релизов.
+# nabu-deploy creates secrets and configuration before Helm: the chart gets only
+# references, and values stay out of the release history.
 existingSecrets:
-  config: nabu-secrets          # SECRETS_KEY, токен оператора, OAuth GitHub, Telegram, ключ LLM первого запуска
-  configMap: nabu-config        # несекретная конфигурация из GitHub
-  postgres: nabu-postgres-conn  # база nabu и пользователь nabu
-  kafka: kafka-conn             # копия секрета стенда
-  s3: nabu-s3-conn              # бакет nabu
+  config: nabu-secrets          # SECRETS_KEY, operator token, GitHub OAuth, Telegram, the LLM key of the first run
+  configMap: nabu-config        # non-secret configuration from GitHub
+  postgres: nabu-postgres-conn  # database nabu and user nabu
+  kafka: kafka-conn             # a copy of the stand's secret
+  s3: nabu-s3-conn              # bucket nabu
 
-# Дополнительные несекретные переменные окружения.
+# Additional non-secret environment variables.
 config: {}
 
-# Общий пул: запуски служебных агентов и проверки подключений
-# (FTR.NAB.CMN-0004 arch §3.3). Разговоры идут в подах владельцев — agents.
+# The shared pool: service agent runs and connection checks
+# (FTR.NAB.CMN-0004 arch §3.3). Conversations run in owner pods, see agents.
 agent:
-  maxRuns: 10             # запусков служебных агентов на под (AGENT_MAX_RUNS)
-  idleTimeout: 15m        # простой сессии до закрытия (и в подах владельцев)
-  workSizeLimit: 4Gi      # каталоги сессий (/work)
+  maxRuns: 10             # service agent runs per pod (AGENT_MAX_RUNS)
+  idleTimeout: 15m        # session idle time before closing (also in owner pods)
+  workSizeLimit: 4Gi      # session directories (/work)
 
-# Поды агентов: под на пользователя и на группового агента
-# (FTR.NAB.CMN-0004 tech §7.2). Namespace создаёт nabu-deploy.
+# Agent pods: a pod per user and per group agent
+# (FTR.NAB.CMN-0004 tech §7.2). nabu-deploy creates the namespace.
 agents:
-  enabled: true           # false — все сессии в общем операторе (AGENT_EXECUTOR=local)
+  enabled: true           # false: all sessions in the shared operator (AGENT_EXECUTOR=local)
   namespace: nabu-agents
-  podsMax: 0              # потолок числа подов; 0 — по квоте или по факту размещения
-  maxSessions: 8          # сессий в поде
+  podsMax: 0              # pod count ceiling; 0 means by quota or actual placement
+  maxSessions: 8          # sessions in a pod
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits:   { cpu: "1", memory: 1Gi }
   workSizeLimit: 1GB
-  idleTimeout: 15m        # простой до остановки пода
-  minIdle: 60s            # простой, после которого под может уступить место
-  queueTimeout: 10m       # наибольшее ожидание хода в очереди
-  scheduleTimeout: 15s    # при автомасштабировании узлов — время появления узла
-  startTimeout: 60s       # срок готовности пода после размещения
+  idleTimeout: 15m        # idle time before a pod stops
+  minIdle: 60s            # idle time after which a pod may give way
+  queueTimeout: 10m       # longest wait of a turn in the queue
+  scheduleTimeout: 15s    # with node autoscaling, the time for a node to appear
+  startTimeout: 60s       # pod readiness deadline after placement
   startParallel: 10
   warm: { window: 3h, share: 0.3, max: 0 }
-  # hard для ResourceQuota namespace (pods, requests.cpu, requests.memory); пусто — без квоты.
+  # hard of the namespace ResourceQuota (pods, requests.cpu, requests.memory); empty means no quota.
   quota: {}
-  # CIDR моделей внутри сети компании: в интернет поды ходят только на 443.
+  # CIDRs of models inside the company network: pods reach the internet only on 443.
   egressAllow: []
-  # Образ агента заранее на каждом узле: без этого холодный старт не укладывается в 30 секунд.
+  # The agent image in advance on every node: without it a cold start does not fit in 30 seconds.
   prepull: true
 
-# Память коммуникаций (FTR.NAB.CMN-0003 tech §12). Саму функцию разрешает
-# администратор в «Настройках»; здесь — ёмкость сбора.
+# Communications memory (FTR.NAB.CMN-0003 tech §12). An administrator allows the feature
+# itself in Settings; this is the collection capacity.
 memory:
-  collectConcurrency: 40  # одновременных запусков сборщика (MEMORY_COLLECT_CONCURRENCY)
-  batchThreads: 20        # цепочек в пакете одного запуска
-  runTimeout: 10m         # наибольшая длительность запуска
-  backfillDays: 30        # глубина первого сбора
-  backfillPoolShare: 0.3  # доля одновременных запусков под первый сбор
-  gmailOverlap: 24h       # перекрытие поиска Gmail перед курсором
-  # Отдельный пул оператора для сборщика. false — запуски идут в общий пул agent.
+  collectConcurrency: 40  # concurrent collector runs (MEMORY_COLLECT_CONCURRENCY)
+  batchThreads: 20        # threads in the batch of one run
+  runTimeout: 10m         # longest run time
+  backfillDays: 30        # depth of the first collection
+  backfillPoolShare: 0.3  # share of concurrent runs for the first collection
+  gmailOverlap: 24h       # overlap of the Gmail search before the cursor
+  # A separate operator pool for the collector. false: runs go to the shared pool agent.
   pool:
     enabled: true
     replicas: 1
-    maxRuns: 40           # запусков на под; держите replicas × maxRuns не меньше collectConcurrency
-    # Замер на проде за 7 дней (2026-10-24): CPU p95 1m, пик 10m; память пик 95 МиБ.
-    # Первый сбор и всплески — в пределах лимита.
+    maxRuns: 40           # runs per pod; keep replicas × maxRuns at least collectConcurrency
+    # Measured on production over 7 days (2026-10-24): CPU p95 1m, peak 10m; memory peak 95 MiB.
+    # The first collection and spikes stay within the limit.
     resources: { requests: { cpu: 50m, memory: 192Mi }, limits: { cpu: "2", memory: 3Gi } }
-    # Модель сбора у внешнего поставщика: пулу открыт интернет на 443 (кроме
-    # частных диапазонов). false — модель внутри сети компании, интернет закрыт
-    # целиком, а её адреса перечислены в egressAllow.
+    # The collection model at an external provider: the pool has internet on 443 (except
+    # private ranges). false: the model is inside the company network, the internet is closed
+    # entirely, and its addresses are listed in egressAllow.
     egressInternet: true
-    # CIDR модели сбора внутри сети компании.
+    # CIDRs of the collection model inside the company network.
     egressAllow: []
 
-# Личные песочницы (FTR.NAB.CMN-0001 arch §5.2).
+# Personal sandboxes (FTR.NAB.CMN-0001 arch §5.2).
 sandboxes:
   enabled: true
   namespace: nabu-sandboxes
@@ -83,39 +83,39 @@ sandboxes:
   cpu: "1"
   memory: 1Gi
   spaceQuota: 5GB
-  # CIDR, куда песочницам разрешены исходящие соединения (реестры пакетов и т. п.).
+  # CIDRs sandboxes may connect to (package registries and so on).
   egressAllow: []
-  # Встроенные профили образов песочниц (FTR.NAB.CMN-0008): репозиторий, тег —
-  # версия nabu (image.tag). Пусто — один образ nabu-core, как до профилей.
+  # Built-in profiles of sandbox images (FTR.NAB.CMN-0008): repository; the tag is
+  # the nabu version (image.tag). Empty means one nabu-core image, as before profiles.
   profiles:
     base: ghcr.io/greenongrey/nabu-sandbox-base
     documents: ghcr.io/greenongrey/nabu-sandbox-documents
-    # FTR.HMR.CMN-0007 R25: Go, Python и JavaScript для агентов кода.
+    # FTR.HMR.CMN-0007 R25: Go, Python and JavaScript for code agents.
     code: ghcr.io/greenongrey/nabu-sandbox-code
-  # Профили по умолчанию; персональным и групповым администратор меняет их в панели.
+  # Default profiles; an administrator changes them for personal and group agents in the panel.
   defaults: { personal: documents, group: documents, service: base }
-  # Собственные образы команды инсталляции: только из allowedPrefixes (каждый
-  # оканчивается на /), секреты доступа к реестрам — в namespace песочниц.
+  # Custom images of the install's team: only from allowedPrefixes (each
+  # ends with /), with registry secrets in the sandbox namespace.
   customImages:
     enabled: false
     allowedPrefixes: []
     pullSecrets: []
-  # Сколько может длиться проверка собственного образа вместе с загрузкой.
+  # How long a check of a custom image may take, with pulling.
   probeTimeout: 5m
 
 ingress:
   className: traefik
-  # Публичные префиксы API; служебный :9100 и внутренний :8081 не маршрутизируются.
+  # Public API prefixes; the service :9100 and internal :8081 are not routed.
   paths: [/api/, /admin/api/, /client/v1/, /hooks/, /auth/, /oauth/, /.well-known/]
-  # Канал рабочих пространств (wss) снаружи не открывается: пространства
-  # вызывающих сервисов удалены (FTR.HMR.CMN-0007 R12), песочницы ходят в relay внутри кластера.
+  # The workspace channel (wss) is not open outside: workspaces of
+  # calling services are gone (FTR.HMR.CMN-0007 R12), and sandboxes reach relay inside the cluster.
   relayPaths: []
 
 cleaner:
   schedule: "30 3 * * *"
 
-# Распознаватель речи (FTR.NAB.CHAT-0001 R19): опция стенда NABU_WHISPER.
-# small на процессоре с int8; large-v3-turbo точнее на русском, но тяжелее.
+# Speech recognition (FTR.NAB.CHAT-0001 R19): the stand's option NABU_WHISPER.
+# small on CPU with int8; large-v3-turbo is more accurate on Russian but heavier.
 whisper:
   enabled: false
   image: onerahmet/openai-whisper-asr-webservice:v1.10.0
@@ -125,8 +125,8 @@ whisper:
   # the recognizer idles between messages: a small request leaves room for the pods of agents
   resources: { requests: { cpu: 50m, memory: 1Gi }, limits: { cpu: "2", memory: 2Gi } }
 
-# Шлюз исходящего трафика песочниц (FTR.HMR.CMN-0007 tech §3.5): песочницы с
-# выданными прокси ходят наружу только через него; адреса прокси — в админке Nabu.
+# The egress gateway of sandboxes (FTR.HMR.CMN-0007 tech §3.5): sandboxes with
+# granted proxies go outside only through it; proxy addresses are in the Nabu admin area.
 egress:
   enabled: true
 

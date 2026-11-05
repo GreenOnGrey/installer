@@ -1,8 +1,8 @@
 {{- if .Values.egress.enabled }}
 {{ include "nabu.deployment" (dict "root" . "name" "egress" "ports" (list (dict "name" "egress" "port" 3128)) "grace" 30) }}
 ---
-# Шлюз исходящего трафика песочниц (FTR.HMR.CMN-0007 tech §3.5): HTTP CONNECT
-# с токеном песочницы, только к адресам выданных ей прокси.
+# The egress gateway of sandboxes (FTR.HMR.CMN-0007 tech §3.5): HTTP CONNECT
+# with a sandbox token, only to addresses of proxies granted to it.
 apiVersion: v1
 kind: Service
 metadata:
@@ -16,8 +16,8 @@ spec:
   ports:
     - { name: egress, port: 3128, targetPort: egress }
 ---
-# Входящие к шлюзу — из песочниц и от api (проверка прокси); исходящие — любые:
-# адреса ограничивает сам шлюз.
+# Ingress to the gateway from sandboxes and api (proxy check); egress is open:
+# the gateway itself limits addresses.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

@@ -1,7 +1,7 @@
 apiVersion: v2
 name: nabu-core
-description: "Nabu core (FTR.NAB.CMN-0001): api, worker, оператор агента, relay, migrate, cleaner, права worker на песочницы"
+description: "Nabu core (FTR.NAB.CMN-0001): api, worker, agent operator, relay, migrate, cleaner, worker rights on sandboxes"
 type: application
-# Версию задаёт deploy-prod.yml installer из тега стенда vX.Y.Z (как у чартов Hammurapi).
+# deploy-prod.yml of installer sets the version from the tag vX.Y.Z (like the Hammurapi charts).
 version: 0.0.0
 appVersion: "0.0.0"

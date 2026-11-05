@@ -1,5 +1,5 @@
-# Режим каждого хранилища: internal — разворачивается в кластере, external —
-# сервис с тем же именем указывает на внешний хост (R12).
+# Mode of each storage: internal deploys it in the cluster, external means
+# a service of the same name points to the external host (R12).
 postgres:
   mode: internal
   external: { host: "", port: 5432, isIP: false }
@@ -21,7 +21,7 @@ kafka:
 s3:
   mode: internal
   external: { host: "", port: 443, isIP: false }
-  # Встроенное объектное хранилище: SeaweedFS all-in-one, S3 на порту 8333.
+  # Built-in object storage: SeaweedFS all-in-one, S3 on port 8333.
   selector:
     app.kubernetes.io/name: seaweedfs
     app.kubernetes.io/instance: seaweedfs

@@ -1,7 +1,7 @@
 {{- if eq .Values.kafka.mode "internal" }}
-# Kafka в режиме KRaft: одна нода с ролями controller и broker (node pool
-# single), листенер plain 9092 без аутентификации, метрики JMX и kafkaExporter.
-# Topic и User Operator не включаются — экономия ресурсов.
+# Kafka in KRaft mode: one node with the roles controller and broker (node pool
+# single), the listener plain 9092 without authentication, JMX metrics and kafkaExporter.
+# Topic and User Operators stay off to save resources.
 apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
@@ -9,7 +9,7 @@ metadata:
   labels: {{- include "storages.labels" . | nindent 4 }}
 spec:
   kafka:
-    version: {{ required "kafka.version обязателен" .Values.kafka.version | quote }}
+    version: {{ required "kafka.version is required" .Values.kafka.version | quote }}
     listeners:
       - { name: plain, port: 9092, type: internal, tls: false }
     config:

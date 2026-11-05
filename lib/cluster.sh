@@ -1,12 +1,12 @@
 # shellcheck shell=bash
-# Кластер minikube (R3, R16): профиль, драйвер docker, ресурсы из конфигурации.
+# The minikube cluster (R3, R16): profile, docker driver, resources from the configuration.
 
 profile_exists() {
   [[ -f "${MINIKUBE_HOME:-$HOME/.minikube}/profiles/$MK_PROFILE/config.json" ]]
 }
 
-# mk <аргументы…> — minikube; если группа docker ещё не применена к текущей
-# сессии (первая установка), команда выполняется через `sg docker`.
+# mk <arguments…> — minikube; if the docker group does not apply to this session yet
+# (a first install), the command runs through `sg docker`.
 mk() {
   if docker_ok; then
     minikube "$@"
@@ -31,23 +31,23 @@ cluster_k8s_version() {
 cluster_up() {
   step cluster
   if cluster_running && [[ $(cluster_k8s_version) == "$K8S_VERSION" ]]; then
-    ok "кластер $MK_PROFILE уже запущен (Kubernetes $K8S_VERSION)"
+    ok "cluster $MK_PROFILE is already running (Kubernetes $K8S_VERSION)"
   else
     if profile_exists; then
-      log "запуск профиля $MK_PROFILE (Kubernetes $K8S_VERSION)"
+      log "starting profile $MK_PROFILE (Kubernetes $K8S_VERSION)"
     else
-      log "создание профиля $MK_PROFILE: $MK_CPUS CPU, $MK_MEMORY, диск $MK_DISK, Kubernetes $K8S_VERSION"
+      log "creating profile $MK_PROFILE: $MK_CPUS CPU, $MK_MEMORY, disk $MK_DISK, Kubernetes $K8S_VERSION"
     fi
     mk start -p "$MK_PROFILE" --driver=docker \
       --kubernetes-version="$K8S_VERSION" \
       --cpus="$MK_CPUS" --memory="$MK_MEMORY" --disk-size="$MK_DISK" \
       --addons=default-storageclass,storage-provisioner \
       --interactive=false >"$RUN_DIR/minikube-start.log" 2>&1 ||
-      die "$E_CLUSTER" "minikube start не выполнен, см. $RUN_DIR/minikube-start.log"
-    ok "кластер запущен"
+      die "$E_CLUSTER" "minikube start failed, see $RUN_DIR/minikube-start.log"
+    ok "cluster started"
   fi
   kc wait --for=condition=Ready node --all --timeout=5m >/dev/null ||
-    die "$E_CLUSTER" "нода кластера не готова"
+    die "$E_CLUSTER" "the cluster node is not ready"
   kubelet_gc
   ensure_namespace "$NS_STORAGES"
   ensure_namespace "$NS_OBSERVABILITY"
@@ -58,41 +58,41 @@ cluster_up() {
   fi
 }
 
-# kubelet_gc — сборка мусора образов в kubelet ноды (bin/stand-autostart kubelet-gc):
-# minikube её выключает, и старые образы копятся на диске (FTR.NAB.CMN-0008).
-# Не настроилась — предупреждение: стенд работает, пока хватает диска.
+# kubelet_gc — image garbage collection in the kubelet of the node (bin/stand-autostart kubelet-gc):
+# minikube turns it off, and old images pile up on disk (FTR.NAB.CMN-0008).
+# A failure is only a warning: the stand works while the disk lasts.
 kubelet_gc() {
   local cmd
-  # через bash: в релизе у bin/stand-autostart нет бита исполнения, в систему
-  # его ставит install -m 755 (install_autostart)
+  # through bash: bin/stand-autostart has no executable bit in a release, and
+  # install -m 755 sets it in the system (install_autostart)
   printf -v cmd '%q ' env MK_PROFILE="$MK_PROFILE" IMAGE_GC_HIGH="$IMAGE_GC_HIGH" \
     IMAGE_GC_LOW="$IMAGE_GC_LOW" IMAGE_GC_MAX_AGE="$IMAGE_GC_MAX_AGE" \
     bash "$ROOT/bin/stand-autostart" kubelet-gc
   if { if docker_ok; then eval "$cmd"; else sg docker -c "$cmd"; fi; } 2>"$RUN_DIR/kubelet-gc.log"; then
-    ok "сборка мусора образов: диск ${IMAGE_GC_HIGH} %, неиспользуемые старше $IMAGE_GC_MAX_AGE"
+    ok "image garbage collection: disk ${IMAGE_GC_HIGH}%, unused images older than $IMAGE_GC_MAX_AGE"
   else
-    warn "сборка мусора образов не настроена, см. $RUN_DIR/kubelet-gc.log"
+    warn "image garbage collection is not configured, see $RUN_DIR/kubelet-gc.log"
   fi
 }
 
 AUTOSTART_BIN=${AUTOSTART_BIN:-/usr/local/lib/hammurapi-infra/stand-autostart}
 AUTOSTART_UNIT=${AUTOSTART_UNIT:-/etc/systemd/system/hammurapi-stand.service}
 
-# install_autostart — systemd-юнит hammurapi-stand: после перезагрузки машины
-# кластер и компоненты стенда поднимаются сами, при выключении кластер
-# останавливается штатно. Юнит работает от пользователя, запустившего up.
+# install_autostart — the systemd unit hammurapi-stand: after a reboot the cluster and
+# components come back on their own, and on shutdown the cluster stops
+# cleanly. The unit runs as the user who ran up.
 install_autostart() {
   local user group path
   user=$(id -un) group=$(id -gn)
-  # PATH юнита: каталоги minikube и kubectl, где их нашёл up.
+  # PATH of the unit: the directories where up found minikube and kubectl.
   path="$(dirname "$(command -v minikube)"):$(dirname "$(command -v kubectl)"):/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   as_root install -d -m 755 "$(dirname "$AUTOSTART_BIN")"
   as_root install -m 755 "$ROOT/bin/stand-autostart" "$AUTOSTART_BIN"
   as_root tee "$AUTOSTART_UNIT" >/dev/null <<EOF
-# Кластер minikube стенда Hammurapi при загрузке и выключении машины
-# (FTR.HMR.INFRA-0001). Устанавливает installer up; STAND_AUTOSTART=false — не ставить.
+# The minikube cluster of the stand on machine boot and shutdown
+# (FTR.HMR.INFRA-0001). Installed by installer up; STAND_AUTOSTART=false skips it.
 [Unit]
-Description=Hammurapi: кластер minikube стенда
+Description=Hammurapi: minikube cluster of the stand
 After=docker.service network-online.target
 Wants=network-online.target
 Requires=docker.service
@@ -119,16 +119,16 @@ WantedBy=multi-user.target
 EOF
   as_root systemctl daemon-reload
   as_root systemctl enable hammurapi-stand.service >/dev/null 2>&1 ||
-    die "$E_CLUSTER" "не удалось включить автозапуск стенда (systemctl enable hammurapi-stand)"
-  # start: кластер уже запущен — юнит только становится активным, и при выключении
-  # машины сработает штатная остановка.
+    die "$E_CLUSTER" "failed to enable autostart of the stand (systemctl enable hammurapi-stand)"
+  # start: the cluster is already running, so the unit only becomes active, and a
+  # machine shutdown then stops it cleanly.
   as_root systemctl start hammurapi-stand.service ||
-    die "$E_CLUSTER" "юнит автозапуска не запустился, см. journalctl -u hammurapi-stand"
-  ok "автозапуск после перезагрузки машины: hammurapi-stand.service"
+    die "$E_CLUSTER" "the autostart unit did not start, see journalctl -u hammurapi-stand"
+  ok "autostart after a machine reboot: hammurapi-stand.service"
 }
 
-# remove_autostart — снимает юнит (down или STAND_AUTOSTART=false); кластер не трогает:
-# остановка юнита (ExecStop — minikube stop) — только когда профиля уже нет.
+# remove_autostart — removes the unit (down or STAND_AUTOSTART=false); the cluster stays:
+# the unit is stopped (ExecStop: minikube stop) only when the profile is already gone.
 remove_autostart() {
   [[ -f $AUTOSTART_UNIT ]] || return 0
   local now=()
@@ -136,7 +136,7 @@ remove_autostart() {
   as_root systemctl disable "${now[@]}" hammurapi-stand.service >/dev/null 2>&1 || true
   as_root rm -f "$AUTOSTART_UNIT" "$AUTOSTART_BIN"
   as_root systemctl daemon-reload
-  log "автозапуск стенда отключён"
+  log "autostart of the stand is disabled"
 }
 
 ensure_namespace() {

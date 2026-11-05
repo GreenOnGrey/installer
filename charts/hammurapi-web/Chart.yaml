@@ -1,7 +1,7 @@
 apiVersion: v2
 name: hammurapi-web
-description: "Hammurapi web (FTR.HMR.INFRA-0002): SPA на web.<базовый домен>"
+description: "Hammurapi web (FTR.HMR.INFRA-0002): SPA on hammurapi.<base domain>"
 type: application
-# Версию задаёт publish-charts.yml из тега charts-vX.Y.Z.
+# The version comes from the release tag of the installer.
 version: 0.0.0
 appVersion: "0.0.0"

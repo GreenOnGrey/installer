@@ -1,6 +1,6 @@
-# worker: Kafka, движок workflow, запуски служебных агентов Nabu, задачи кода в
-# песочнице Nabu и MCP запусков (:8083, сервис worker-mcp). Прав в Kubernetes
-# ему не нужно (FTR.HMR.CMN-0007 R3).
+# worker: Kafka, the workflow engine, runs of Nabu service agents, code tasks in a
+# Nabu sandbox and the runs MCP (:8083, service worker-mcp). It needs no rights in
+# Kubernetes (FTR.HMR.CMN-0007 R3).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,8 +20,8 @@ spec:
       annotations:
         {{- toYaml .Values.podAnnotations | nindent 8 }}
     spec:
-      # Явно: без этого поля устаревший двойник serviceAccount в живом Deployment
-      # вернёт удалённый ServiceAccount worker, и новые поды не создадутся.
+      # Explicit: without this field the deprecated twin serviceAccount in the live Deployment
+      # brings back the removed ServiceAccount worker, and new pods are not created.
       serviceAccountName: default
       automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
@@ -44,7 +44,7 @@ spec:
           {{- include "core.volumeMounts" . | nindent 10 }}
       {{- include "core.volumes" . | nindent 6 }}
 ---
-# MCP запусков: к нему ходят только служебные агенты Nabu.
+# The runs MCP: only Nabu service agents reach it.
 apiVersion: v1
 kind: Service
 metadata:
@@ -69,9 +69,9 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
-        # Служебные агенты Nabu с токеном сценария или задачи (FTR.HMR.CMN-0006 tech §3.4).
+        # Nabu service agents with a scenario or task token (FTR.HMR.CMN-0006 tech §3.4).
         - namespaceSelector:
             matchLabels: { kubernetes.io/metadata.name: {{ .Values.nabu.namespace }} }
       ports: [{ port: 8083 }]
-    # Метрики и пробы.
+    # Metrics and probes.
     - ports: [{ port: 9100 }]

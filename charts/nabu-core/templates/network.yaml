@@ -1,5 +1,5 @@
-# Сетевые политики (FTR.NAB.CMN-0001 arch §5.2, tech §7).
-# К оператору агента — только api и worker.
+# Network policies (FTR.NAB.CMN-0001 arch §5.2, tech §7).
+# Only api and worker reach the agent operator.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -18,8 +18,8 @@ spec:
       ports: [{ port: 9100 }]
 {{- if .Values.sandboxes.enabled }}
 ---
-# Песочницы: входящих соединений нет; исходящие — DNS, relay и внутренний
-# API Nabu, адреса из sandboxes.egressAllow.
+# Sandboxes: no ingress; egress to DNS, relay and the internal
+# Nabu API, addresses from sandboxes.egressAllow.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -48,7 +48,7 @@ spec:
     {{- end }}
 {{- if .Values.egress.enabled }}
 ---
-# Песочницы с выданными прокси (метка nabu.io/egress) ходят к шлюзу egress.
+# Sandboxes with granted proxies (label nabu.io/egress) reach the egress gateway.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

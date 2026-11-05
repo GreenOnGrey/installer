@@ -1,7 +1,7 @@
 # shellcheck shell=bash
-# Общие функции: журнал, коды выхода, повторы, конфигурация.
+# Shared functions: logging, exit codes, retries, configuration.
 
-# Коды выхода (техническая спецификация, п. 1).
+# Exit codes (technical specification, §1).
 readonly E_OK=0 E_UNKNOWN=1 E_USAGE=2 E_HOST=10 E_PREREQ=11 E_CLUSTER=12 E_DEPLOY=13 \
   E_EXTERNAL=14 E_CHECKS=15 E_CANCELLED=16 E_LOCKED=17
 
@@ -10,7 +10,7 @@ VERBOSE=${VERBOSE:-0}
 COLOR=${COLOR:-auto}
 RUN_DIR=${RUN_DIR:-}
 
-# Ключи, значения которых нельзя писать прямо в local.env (tech, п. 2).
+# Keys whose values must not be written directly into local.env (tech, §2).
 readonly SECRET_KEYS=(POSTGRES_PASSWORD KAFKA_PASSWORD S3_ACCESS_KEY S3_SECRET_KEY GRAFANA_GITHUB_CLIENT_SECRET)
 
 setup_color() {
@@ -26,13 +26,13 @@ setup_color() {
 
 now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
-# log <сообщение> — строка журнала вида «время [шаг] сообщение».
+# log <message> — a log line: time [step] message.
 log() { printf '%s %s[%s]%s %s\n' "$(now_utc)" "$C_DIM" "$STEP" "$C_RESET" "$*" >&2; }
 ok() { printf '%s %s[%s]%s %s✓%s %s\n' "$(now_utc)" "$C_DIM" "$STEP" "$C_RESET" "$C_GREEN" "$C_RESET" "$*" >&2; }
 warn() { printf '%s %s[%s]%s %s!%s %s\n' "$(now_utc)" "$C_DIM" "$STEP" "$C_RESET" "$C_YELLOW" "$C_RESET" "$*" >&2; }
 debug() { [[ $VERBOSE == 1 ]] && log "$*"; return 0; }
 
-# die <код> <сообщение>
+# die <code> <message>
 die() {
   local code=$1
   shift
@@ -42,13 +42,13 @@ die() {
 
 step() { STEP=$1; }
 
-# run_cmd <команда…> — выполняет команду; с --verbose печатает её.
+# run_cmd <command…> — runs the command; prints it with --verbose.
 run_cmd() {
   debug "\$ $*"
   "$@"
 }
 
-# retry <попытки> <задержка> <команда…> — повторяет сетевые операции.
+# retry <attempts> <delay> <command…> — retries network operations.
 retry() {
   local attempts=$1 delay=$2 n=1
   shift 2
@@ -56,7 +56,7 @@ retry() {
     if ((n >= attempts)); then
       return 1
     fi
-    warn "повтор $n/$attempts через ${delay} с: $1"
+    warn "retry $n/$attempts in ${delay}s: $1"
     sleep "$delay"
     n=$((n + 1))
   done
@@ -64,24 +64,23 @@ retry() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# as_root <команда…> — через sudo, если не root.
+# as_root <command…> — through sudo unless already root.
 as_root() {
   if [[ $(id -u) == 0 ]]; then "$@"; else sudo "$@"; fi
 }
 
-# env_keys <файл> — имена ключей KEY=… из env-файла.
+# env_keys <file> — names of KEY=… keys in an env file.
 env_keys() {
   sed -nE 's/^[[:space:]]*([A-Z_][A-Z0-9_]*)=.*/\1/p' "$1"
 }
 
-# load_config — defaults.env → local.env → окружение (флаги применяются раньше,
-# через экспорт переменных в точке входа).
+# load_config — defaults.env → local.env → environment (flags apply earlier,
+# by exporting variables at the entry point).
 load_config() {
   local root=$1 local_file=$2 key
   local -A from_env=()
-  # Ключи, заданные этим запуском: файлом или окружением (restore_config их не трогает).
+  # Keys set by this run through the file or the environment (restore_config leaves them alone).
   declare -gA CONFIG_EXPLICIT=()
-  CONFIG_LOADED_FILE=$local_file
   local files=("$root/config/versions.env" "$root/config/defaults.env")
   [[ -f $local_file ]] && files+=("$local_file")
   for f in "${files[@]}"; do
@@ -94,7 +93,7 @@ load_config() {
   if [[ -f $local_file ]]; then
     for key in "${SECRET_KEYS[@]}"; do
       if env_keys "$local_file" | grep -qx "$key"; then
-        die "$E_USAGE" "$key записан прямо в $local_file; используйте ${key}_FILE или переменную окружения"
+        die "$E_USAGE" "$key is written directly in $local_file; use ${key}_FILE or an environment variable"
       fi
     done
   fi
@@ -112,8 +111,8 @@ load_config() {
   if [[ -f $local_file ]]; then
     while read -r key; do CONFIG_EXPLICIT[$key]=1; done < <(env_keys "$local_file")
   fi
-  # Опции MCP-серверов — ключи MCP_*=true|false файлов конфигурации: в окружении бывают
-  # чужие MCP_*, а в конфигурации — параметры с другими значениями.
+  # MCP server options are the MCP_*=true|false keys of config files: the environment may hold
+  # foreign MCP_* variables, and config files hold parameters with other values.
   MCP_OPTIONS=()
   for f in "${files[@]}"; do
     while read -r key; do
@@ -122,13 +121,13 @@ load_config() {
   done
 }
 
-# secret_value <ключ> — значение из переменной окружения или файла <ключ>_FILE.
+# secret_value <key> — the value from the environment variable or the file <key>_FILE.
 secret_value() {
   local key=$1 file_key="${1}_FILE"
   if [[ -n ${!key:-} ]]; then
     printf '%s' "${!key}"
   elif [[ -n ${!file_key:-} ]]; then
-    [[ -r ${!file_key} ]] || die "$E_USAGE" "$file_key: файл ${!file_key} не читается"
+    [[ -r ${!file_key} ]] || die "$E_USAGE" "$file_key: cannot read file ${!file_key}"
     tr -d '\r\n' <"${!file_key}"
   fi
 }
@@ -137,7 +136,7 @@ require_param() {
   local mode_name=$1 key=$2
   [[ $mode_name == *=* ]] || mode_name+="=external"
   if [[ -z ${!key:-} ]]; then
-    die "$E_USAGE" "$mode_name: не задан параметр $key"
+    die "$E_USAGE" "$mode_name: parameter $key is not set"
   fi
 }
 
@@ -145,27 +144,27 @@ require_secret() {
   local mode_name=$1 key=$2
   [[ $mode_name == *=* ]] || mode_name+="=external"
   if [[ -z $(secret_value "$key") ]]; then
-    die "$E_USAGE" "$mode_name: не задан $key (переменная окружения) или ${key}_FILE"
+    die "$E_USAGE" "$mode_name: neither $key (environment variable) nor ${key}_FILE is set"
   fi
 }
 
-# validate_config — режимы и обязательные параметры внешних хранилищ.
+# validate_config — modes and required parameters of external storages.
 validate_config() {
   local m
   case ${STAND_AUTOSTART:-true} in
     true | false) ;;
-    *) die "$E_USAGE" "STAND_AUTOSTART должен быть true или false" ;;
+    *) die "$E_USAGE" "STAND_AUTOSTART must be true or false" ;;
   esac
   if ! [[ ${IMAGE_GC_HIGH:-85} =~ ^[0-9]+$ && ${IMAGE_GC_LOW:-80} =~ ^[0-9]+$ ]] ||
     ((${IMAGE_GC_LOW:-80} >= ${IMAGE_GC_HIGH:-85} || ${IMAGE_GC_HIGH:-85} > 100)); then
-    die "$E_USAGE" "IMAGE_GC_LOW и IMAGE_GC_HIGH — проценты, IMAGE_GC_LOW < IMAGE_GC_HIGH ≤ 100"
+    die "$E_USAGE" "IMAGE_GC_LOW and IMAGE_GC_HIGH are percentages, IMAGE_GC_LOW < IMAGE_GC_HIGH ≤ 100"
   fi
   [[ ${IMAGE_GC_MAX_AGE:-336h} =~ ^[0-9]+[hms]$ ]] ||
-    die "$E_USAGE" "IMAGE_GC_MAX_AGE — длительность вида 336h, а не «$IMAGE_GC_MAX_AGE»"
+    die "$E_USAGE" "IMAGE_GC_MAX_AGE must be a duration like 336h, not '$IMAGE_GC_MAX_AGE'"
   for m in POSTGRES_MODE KAFKA_MODE S3_MODE; do
     case ${!m} in
       internal | external) ;;
-      *) die "$E_USAGE" "$m должен быть internal или external, а не «${!m}»" ;;
+      *) die "$E_USAGE" "$m must be internal or external, not '${!m}'" ;;
     esac
   done
   if [[ $POSTGRES_MODE == external ]]; then
@@ -184,12 +183,12 @@ validate_config() {
         require_param KAFKA_MODE KAFKA_SASL_MECHANISM
         case $KAFKA_SASL_MECHANISM in
           PLAIN | SCRAM-SHA-512 | OAUTHBEARER) ;;
-          *) die "$E_USAGE" "KAFKA_SASL_MECHANISM должен быть PLAIN, SCRAM-SHA-512 или OAUTHBEARER" ;;
+          *) die "$E_USAGE" "KAFKA_SASL_MECHANISM must be PLAIN, SCRAM-SHA-512 or OAUTHBEARER" ;;
         esac
         require_param KAFKA_MODE KAFKA_USERNAME
         require_secret KAFKA_MODE KAFKA_PASSWORD
         ;;
-      *) die "$E_USAGE" "KAFKA_SECURITY_PROTOCOL должен быть PLAINTEXT или SASL_SSL" ;;
+      *) die "$E_USAGE" "KAFKA_SECURITY_PROTOCOL must be PLAINTEXT or SASL_SSL" ;;
     esac
   fi
   if [[ $S3_MODE == external ]]; then
@@ -199,36 +198,36 @@ validate_config() {
     require_secret S3_MODE S3_ACCESS_KEY
     require_secret S3_MODE S3_SECRET_KEY
   fi
-  [[ $MK_MEMORY =~ ^[0-9]+[gGmM]$ ]] || die "$E_USAGE" "MK_MEMORY: ожидается число с g или m, например 12g"
+  [[ $MK_MEMORY =~ ^[0-9]+[gGmM]$ ]] || die "$E_USAGE" "MK_MEMORY: expected a number with g or m, such as 12g"
   validate_public_config
   validate_mcp_config
-  # FTR.NAB.CHAT-0001 R19: распознаватель речи Nabu
+  # FTR.NAB.CHAT-0001 R19: speech recognition of Nabu
   case ${NABU_WHISPER:-false} in
     true | false) ;;
-    *) die "$E_USAGE" "NABU_WHISPER должен быть true или false, а не «$NABU_WHISPER»" ;;
+    *) die "$E_USAGE" "NABU_WHISPER must be true or false, not '$NABU_WHISPER'" ;;
   esac
   [[ ${NABU_WHISPER_MODEL:-small} =~ ^(tiny|base|small|medium|large-v3|large-v3-turbo|turbo)$ ]] ||
-    die "$E_USAGE" "NABU_WHISPER_MODEL: tiny, base, small, medium, large-v3 или large-v3-turbo"
+    die "$E_USAGE" "NABU_WHISPER_MODEL must be tiny, base, small, medium, large-v3 or large-v3-turbo"
 }
 
-# validate_public_config — параметры публичного доступа (FTR.HMR.INFRA-0002, R21).
+# validate_public_config — public access parameters (FTR.HMR.INFRA-0002, R21).
 validate_public_config() {
   case ${PUBLIC_ACCESS:-false} in
     true) ;;
     false) return 0 ;;
-    *) die "$E_USAGE" "PUBLIC_ACCESS должен быть true или false" ;;
+    *) die "$E_USAGE" "PUBLIC_ACCESS must be true or false" ;;
   esac
   require_param PUBLIC_ACCESS=true ACME_EMAIL
-  [[ $ACME_EMAIL == *@*.* ]] || die "$E_USAGE" "ACME_EMAIL: нужен адрес электронной почты"
+  [[ $ACME_EMAIL == *@*.* ]] || die "$E_USAGE" "ACME_EMAIL: an email address is required"
   case ${ACME_ISSUER:-letsencrypt} in
     letsencrypt | letsencrypt-staging) ;;
-    *) die "$E_USAGE" "ACME_ISSUER должен быть letsencrypt или letsencrypt-staging" ;;
+    *) die "$E_USAGE" "ACME_ISSUER must be letsencrypt or letsencrypt-staging" ;;
   esac
   if [[ -n ${PUBLIC_BASE_DOMAIN:-} && ! $PUBLIC_BASE_DOMAIN =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$ ]]; then
-    die "$E_USAGE" "PUBLIC_BASE_DOMAIN: недопустимое имя «$PUBLIC_BASE_DOMAIN»"
+    die "$E_USAGE" "PUBLIC_BASE_DOMAIN: invalid name '$PUBLIC_BASE_DOMAIN'"
   fi
   if [[ -n ${PUBLIC_IP:-} && ! $PUBLIC_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    die "$E_USAGE" "PUBLIC_IP: нужен IPv4-адрес"
+    die "$E_USAGE" "PUBLIC_IP: an IPv4 address is required"
   fi
   if [[ -n ${GRAFANA_GITHUB_CLIENT_ID:-} ]]; then
     require_secret PUBLIC_ACCESS=true GRAFANA_GITHUB_CLIENT_SECRET
@@ -236,7 +235,7 @@ validate_public_config() {
   fi
 }
 
-# mem_mib <12g|12288m> — память minikube в МиБ.
+# mem_mib <12g|12288m> — minikube memory in MiB.
 mem_mib() {
   local v=${1,,}
   case $v in
@@ -246,7 +245,7 @@ mem_mib() {
   esac
 }
 
-# to_bytes <количество Kubernetes> — 512Mi, 1Gi, 1536Mi, 1G, 100k, 1024.
+# to_bytes <Kubernetes quantity> — 512Mi, 1Gi, 1536Mi, 1G, 100k, 1024.
 to_bytes() {
   local q=$1 n unit
   [[ -z $q ]] && {
@@ -268,16 +267,16 @@ to_bytes() {
   esac
 }
 
-# human_duration <секунды> — «14 мин 32 с».
+# human_duration <seconds> — 14m 32s.
 human_duration() {
   local s=$1
-  if ((s >= 60)); then printf '%d мин %d с' $((s / 60)) $((s % 60)); else printf '%d с' "$s"; fi
+  if ((s >= 60)); then printf '%dm %ds' $((s / 60)) $((s % 60)); else printf '%ds' "$s"; fi
 }
 
-# kube_context — контекст kubeconfig: KUBE_CONTEXT или контекст профиля minikube.
+# kube_context — the kubeconfig context: KUBE_CONTEXT or the context of the minikube profile.
 kube_context() { echo "${KUBE_CONTEXT:-$MK_PROFILE}"; }
 kc() { kubectl --context "$(kube_context)" "$@"; }
 hm() { helm --kube-context "$(kube_context)" "$@"; }
 
-# apply_stdin — kubectl apply из stdin (манифест не попадает в аргументы).
+# apply_stdin — kubectl apply from stdin (the manifest stays out of the arguments).
 apply_stdin() { kc apply -f - >/dev/null; }

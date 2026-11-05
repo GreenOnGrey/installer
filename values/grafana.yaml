@@ -1,12 +1,12 @@
-# Grafana (R7). Пароль администратора — из секрета grafana-admin; анонимный
-# доступ и регистрация выключены. Источники данных с фиксированными UID,
-# дашборды — ConfigMap с меткой grafana_dashboard (чарт hammurapi-dashboards).
+# Grafana (R7). The administrator password comes from the secret grafana-admin; anonymous
+# access and registration are off. Data sources have fixed UIDs,
+# dashboards are ConfigMaps with the label grafana_dashboard (chart hammurapi-dashboards).
 admin: { existingSecret: grafana-admin, userKey: admin-user, passwordKey: admin-password }
 persistence: { enabled: true, size: 1Gi }
 service: { type: ClusterIP, port: 80 }
 grafana.ini:
-  # Плагин VictoriaLogs ставится до старта сервера (нужен доступ в интернет);
-  # installer задаёт plugins.preinstall_sync из VL_PLUGIN_VERSION.
+  # The VictoriaLogs plugin installs before the server starts (needs internet access);
+  # installer sets plugins.preinstall_sync from VL_PLUGIN_VERSION.
   plugins: { preinstall_sync: "" }
   auth.anonymous: { enabled: false }
   users: { allow_sign_up: false }
@@ -28,9 +28,9 @@ datasources:
         access: proxy
         url: http://victoria-logs-victoria-logs-single-server:9428
         editable: false
-# Правила алертинга Grafana (unified alerting; правила в панелях Grafana 11+
-# не поддерживает). Состояние видно в Alerting → Alert rules; каналов
-# уведомлений стенд не заводит.
+# Grafana alert rules (unified alerting; Grafana 11+ does not support rules in
+# panels). See the state in Alerting → Alert rules; the stand sets up no
+# notification channels.
 alerting:
   rules.yaml:
     apiVersion: 1
@@ -40,7 +40,7 @@ alerting:
         folder: Nabu
         interval: 1m
         rules:
-          # FTR.NAB.CMN-0008 tech §7.10: больше трёх сбоев старта собственного профиля за 10 минут
+          # FTR.NAB.CMN-0008 tech §7.10: more than three start failures of a custom profile in 10 minutes
           - uid: nabu-sandbox-custom-start-failing
             title: NabuSandboxCustomStartFailing
             condition: C
@@ -57,9 +57,9 @@ alerting:
             execErrState: Error
             labels: { severity: warning }
             annotations:
-              summary: Песочницы собственного профиля не стартуют
-              # чарт пропускает alerting через tpl: шаблон Grafana экранирован от Helm
-              description: 'Сбои старта профиля kind=custom за 10 минут: {{ "{{" }} $values.A {{ "}}" }}. Дашборд «Песочницы Nabu», раздел «Образы песочниц» в админке.'
+              summary: Sandboxes of a custom profile do not start
+              # the chart passes alerting through tpl: the Grafana template is escaped from Helm
+              description: 'Start failures of a profile with kind=custom in 10 minutes: {{ "{{" }} $values.A {{ "}}" }}. See the dashboard Nabu sandboxes and the section Sandbox images in the Nabu admin area.'
 sidecar:
   dashboards:
     enabled: true
@@ -68,16 +68,16 @@ sidecar:
     folderAnnotation: grafana_folder
     searchNamespace: observability
     provider: { foldersFromFilesStructure: true, allowUiUpdates: false }
-  # Замер на стенде: до 100 МиБ, троттлинг CPU 79% при лимите 100m.
+  # Measured on the stand: up to 100 MiB, CPU throttling 79% with the limit 100m.
   resources: { requests: { cpu: 20m, memory: 96Mi }, limits: { cpu: 200m, memory: 192Mi } }
 initChownData:
   resources: { requests: { cpu: 10m, memory: 16Mi }, limits: { cpu: 50m, memory: 32Mi } }
 testFramework: { enabled: false }
-# Grafana 13 тяжелее, чем закладывала архитектура (300m / 256Mi): на стенде память
-# доходила до 254 МиБ, CPU троттлился 31%, старт с установкой плагина не укладывался
-# в liveness-пробу — CrashLoopBackOff и таймаут helm --wait.
+# Grafana 13 is heavier than the architecture assumed (300m / 256Mi): on the stand memory
+# reached 254 MiB, CPU throttled 31%, and a start with the plugin install did not fit in
+# the liveness probe, causing CrashLoopBackOff and a helm --wait timeout.
 resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 768Mi } }
-# Первый старт ставит плагин VictoriaLogs и мигрирует базу — даём ему время.
+# The first start installs the VictoriaLogs plugin and migrates the database, so give it time.
 livenessProbe:
   httpGet: { path: /api/health, port: grafana }
   initialDelaySeconds: 180

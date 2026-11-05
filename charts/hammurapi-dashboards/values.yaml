@@ -1,4 +1,4 @@
-# Папка в Grafana, в которую sidecar кладёт дашборды.
+# The Grafana folder where the sidecar puts dashboards.
 folder: Hammurapi Infra
-# JSON дашбордов лежат в dashboards/ корня репозитория; installer и
-# тесты копируют их в files/ перед установкой чарта (Helm не читает файлы вне чарта).
+# Dashboard JSON is in dashboards/ at the repository root; installer and
+# tests copy it to files/ before installing the chart (Helm reads no files outside a chart).

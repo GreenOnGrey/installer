@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 # landing-deploy <tag> <chart_version>
 #
-# Выкатка сайта GreenOnGrey на стенд Hammurapi (FTR.LND.WEB-0001 arch §7, tech §9):
-# тот же minikube, отдельный namespace landing, хост web.<домен стенда> в общем
-# сертификате Traefik. Хранилищ, базы и секретов у сайта нет: это nginx со
-# статическими страницами. Запускается workflow release.yml репозитория landing по
-# SSH на машине стенда, как hammurapi-deploy и nabu-deploy: скрипты лежат в
-# /opt/hammurapi-infra/current/bin и берут функции стенда из lib/ этого же релиза.
-#   stdin   JSON { image, ghcrPullToken, domain }; читается в память, на диск, в
-#           аргументы команд и журнал не попадает
-#   stdout  журнал; последняя строка — JSON-итог
+# Rolls out the GreenOnGrey site on the Hammurapi stand (FTR.LND.WEB-0001 arch §7, tech §9):
+# the same minikube, its own namespace landing, host web.<stand domain> in the shared
+# Traefik certificate. The site has no storages, database or secrets: it is nginx with
+# static pages. Run by the workflow release.yml of the repository landing over
+# SSH on the machine, like hammurapi-deploy and nabu-deploy: the scripts are in
+# /opt/hammurapi-infra/current/bin and take stand functions from lib/ of the same release.
+#   stdin   JSON { image, ghcrPullToken, domain }; read into memory, it never reaches disk,
+#           command arguments or logs
+#   stdout  log; the last line is the JSON result
 #           { status, component, tag, chartVersion, revision, firstInstall, publicBaseDomain,
 #             webUrl, standUrl, domain, … }
 #
-# domain (необязателен) — собственный домен сайта, например greenongrey.tech: сайт
-# открывается по https://<domain>, www.<domain> перенаправляется на него, для обоих
-# имён выпускается отдельный сертификат; адрес web.<домен стенда> остаётся. До
-# изменений в кластере проверяется, что оба имени указывают на адрес стенда.
+# domain (optional) — the site's own domain, such as greenongrey.tech: the site
+# opens at https://<domain>, www.<domain> redirects to it, and both names get a
+# separate certificate; the address web.<stand domain> stays. Before any change in
+# the cluster, both names are checked to point to the stand's address.
 #
-# Коды: 2 аргументы; 17 уже идёт выкатка; 20 стенд не готов или не удалось добавить
-# хост в сертификат; 22 namespace; 23 секреты и конфигурация; 25 релиз Helm;
-# 27 готовность подов; 28 DNS собственного домена; 29 сертификат собственного домена.
+# Codes: 2 arguments; 17 a rollout is running; 20 the stand is not ready or a host could not
+# join the certificate; 22 namespace; 23 secrets and configuration; 25 Helm release;
+# 27 pod readiness; 28 DNS of the own domain; 29 certificate of the own domain.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
@@ -43,7 +43,7 @@ FIRST_INSTALL=false BASE_DOMAIN="" REVISION="" DIAG="" PAYLOAD="" HELM_REG="" FA
 DOMAIN="" PUBLIC_IP_STAND="" ISSUER=""
 
 usage() {
-  echo "использование: landing-deploy <vX.Y.Z> <версия чарта>" >&2
+  echo "usage: landing-deploy <vX.Y.Z> <chart version>" >&2
   exit "$E_USAGE"
 }
 
@@ -64,22 +64,22 @@ result() {
      + (if $d != "" then {standUrl: "https://\($web).\($d)"} else {} end)
      + (if $own != "" then {domain: $own, webUrl: "https://\($own)"}
         elif $d != "" then {webUrl: "https://\($web).\($d)"} else {} end)
-     + (if $s == "failure" then {error: (if $e == "" then "код \($code)" else $e end), diagnostics: $diag} else {} end)'
+     + (if $s == "failure" then {error: (if $e == "" then "code \($code)" else $e end), diagnostics: $diag} else {} end)'
 }
 
 parse_args() {
   (($# == 2)) || usage
   TAG=$1 CHART_VERSION=$2
-  [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$E_USAGE" "тег «$TAG» не в формате vX.Y.Z"
-  [[ $CHART_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$E_USAGE" "версия чарта «$CHART_VERSION» не в формате X.Y.Z"
+  [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$E_USAGE" "tag '$TAG' is not in the format vX.Y.Z"
+  [[ $CHART_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$E_USAGE" "chart version '$CHART_VERSION' is not in the format X.Y.Z"
 }
 
 acquire_deploy_lock() {
   exec 8>>"$DEPLOY_LOCK_DIR/landing-deploy.lock"
-  flock -n 8 || fail "$E_LOCKED" "уже выполняется выкатка $COMPONENT на этой машине"
+  flock -n 8 || fail "$E_LOCKED" "a rollout of $COMPONENT is already running on this machine"
 }
 
-# payload <jq-путь> — значение из JSON stdin (jq читает из pipe, не из аргументов).
+# payload <jq path> — a value from the stdin JSON (jq reads a pipe, not arguments).
 payload() { printf '%s' "$PAYLOAD" | jq -r "$1 // empty"; }
 
 read_payload() {
@@ -89,50 +89,50 @@ read_payload() {
     PAYLOAD=$(cat)
     [[ -n $PAYLOAD ]] || PAYLOAD='{}'
   fi
-  printf '%s' "$PAYLOAD" | jq -e 'type == "object"' >/dev/null 2>&1 || fail "$E_SECRETS" "stdin: ожидается JSON-объект"
+  printf '%s' "$PAYLOAD" | jq -e 'type == "object"' >/dev/null 2>&1 || fail "$E_SECRETS" "stdin: a JSON object is expected"
   DOMAIN=$(payload .domain)
   if [[ -n $DOMAIN && ! $DOMAIN =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$ ]]; then
     local bad=$DOMAIN
     DOMAIN=""
-    fail "$E_SECRETS" "domain: недопустимое имя «$bad»"
+    fail "$E_SECRETS" "domain: invalid name '$bad'"
   fi
 }
 
 apply_json() { kc apply -f - >/dev/null; }
 
-# --- 1. Стенд ---
+# --- 1. The stand ---
 
 check_stand() {
   step stand
   local st cfg=()
   [[ -f ${HAMMURAPI_INFRA_CONFIG:-} ]] && cfg=(--config "$HAMMURAPI_INFRA_CONFIG")
   st=$(INSTALLER_STAND_ONLY=1 bash "$STATUS_CMD" status --json --no-color "${cfg[@]}" 2>/dev/null) || true
-  jq -e . >/dev/null 2>&1 <<<"$st" || fail "$E_STAND" "стенд не отвечает: installer status --json"
+  jq -e . >/dev/null 2>&1 <<<"$st" || fail "$E_STAND" "the stand does not answer: installer status --json"
   if [[ $(jq -r '.ok' <<<"$st") != true ]]; then
-    fail "$E_STAND" "стенд не готов: $(jq -r '[.checks[] | select(.ok | not) | "\(.name): \(.message)"] | join("; ")' <<<"$st")"
+    fail "$E_STAND" "the stand is not ready: $(jq -r '[.checks[] | select(.ok | not) | "\(.name): \(.message)"] | join("; ")' <<<"$st")"
   fi
-  [[ $(jq -r '.public.enabled' <<<"$st") == true ]] || fail "$E_STAND" "публичный доступ стенда выключен (PUBLIC_ACCESS=true)"
+  [[ $(jq -r '.public.enabled' <<<"$st") == true ]] || fail "$E_STAND" "public access of the stand is off (PUBLIC_ACCESS=true)"
   BASE_DOMAIN=$(jq -r '.public.baseDomain // empty' <<<"$st")
-  [[ -n $BASE_DOMAIN ]] || fail "$E_STAND" "стенд не сообщил базовый домен"
+  [[ -n $BASE_DOMAIN ]] || fail "$E_STAND" "the stand did not report a base domain"
   PUBLIC_IP_STAND=$(jq -r '.public.publicIp // empty' <<<"$st")
   ISSUER=$(jq -r '.public.issuer // "letsencrypt"' <<<"$st")
-  ok "стенд готов, домен $BASE_DOMAIN"
+  ok "the stand is ready, domain $BASE_DOMAIN"
   hm status "$COMPONENT" -n "$NS" >/dev/null 2>&1 || FIRST_INSTALL=true
 }
 
-# --- 2. Namespace и доступ к реестру ---
+# --- 2. Namespace and registry access ---
 
 ensure_namespace() {
   step namespace
   kc create namespace "$NS" --dry-run=client -o yaml | kc label --local -f - "app.kubernetes.io/part-of=landing" -o yaml |
-    apply_stdin || fail "$E_NS" "не удалось создать namespace $NS"
+    apply_stdin || fail "$E_NS" "failed to create namespace $NS"
 }
 
 ghcr_pull() {
   local token
   token=$(payload .ghcrPullToken)
   if [[ -z $token ]]; then
-    kc -n "$NS" get secret ghcr-pull >/dev/null 2>&1 || fail "$E_SECRETS" "нет ghcrPullToken и секрета ghcr-pull"
+    kc -n "$NS" get secret ghcr-pull >/dev/null 2>&1 || fail "$E_SECRETS" "neither ghcrPullToken nor the secret ghcr-pull exists"
     return
   fi
   printf '%s' "$token" | jq -Rc --arg ns "$NS" --arg reg "$REGISTRY" '
@@ -140,45 +140,45 @@ ghcr_pull() {
     | {apiVersion: "v1", kind: "Secret", type: "kubernetes.io/dockerconfigjson",
        metadata: {name: "ghcr-pull", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "landing-deploy"}},
        data: {".dockerconfigjson": ($cfg | tojson | @base64)}}' | apply_json ||
-    fail "$E_SECRETS" "не удалось записать ghcr-pull в $NS"
+    fail "$E_SECRETS" "failed to write ghcr-pull to $NS"
 }
 
-# --- 3. Сертификат ---
+# --- 3. Certificate ---
 
-# ensure_certificate — web. в общем сертификате Traefik стенда. Стенд добавляет его
-# сам (PUBLIC_EXTRA_HOSTS), но выкатка сайта не должна зависеть от порядка релизов.
+# ensure_certificate — web. in the shared Traefik certificate. The stand adds it
+# itself (PUBLIC_EXTRA_HOSTS), but a site rollout must not depend on release order.
 ensure_certificate() {
   step certificate
   local names want=$WEB_HOST.$BASE_DOMAIN
   names=$(kc -n "$NS_INGRESS" get certificate "$CERT_NAME" -o json 2>/dev/null | jq -r '.spec.dnsNames[]?') ||
-    fail "$E_STAND" "нет сертификата $NS_INGRESS/$CERT_NAME"
+    fail "$E_STAND" "certificate $NS_INGRESS/$CERT_NAME does not exist"
   if grep -qxF "$want" <<<"$names"; then
-    ok "сертификат содержит $want"
+    ok "the certificate includes $want"
     return
   fi
   jq -cn --arg h "$want" '[{op: "add", path: "/spec/dnsNames/-", value: $h}]' |
     kc -n "$NS_INGRESS" patch certificate "$CERT_NAME" --type json --patch-file /dev/stdin >/dev/null ||
-    fail "$E_STAND" "не удалось добавить $want в сертификат"
-  log "сертификат: добавлен $want, ожидание выпуска"
+    fail "$E_STAND" "failed to add $want to the certificate"
+  log "certificate: added $want, waiting for issuance"
   kc -n "$NS_INGRESS" wait "certificate/$CERT_NAME" --for=condition=Ready --timeout=5m >/dev/null 2>&1 ||
-    warn "сертификат ещё не выпущен; проверьте, что *.$BASE_DOMAIN указывает на машину"
+    warn "the certificate is not issued yet; check that *.$BASE_DOMAIN points to the machine"
 }
 
-# check_domain_dns — оба имени собственного домена указывают на адрес стенда.
-# Иначе Let's Encrypt не выпустит сертификат, а сайт по домену не откроется:
-# выкатка останавливается до изменений в кластере.
+# check_domain_dns — both names of the own domain point to the stand's address.
+# Otherwise Let's Encrypt issues no certificate and the site does not open by domain:
+# the rollout stops before any change in the cluster.
 check_domain_dns() {
   [[ -n $DOMAIN ]] || return 0
   step dns
-  [[ -n $PUBLIC_IP_STAND ]] || fail "$E_STAND" "стенд не сообщил публичный адрес"
+  [[ -n $PUBLIC_IP_STAND ]] || fail "$E_STAND" "the stand did not report a public address"
   local name ips
   for name in "$DOMAIN" "www.$DOMAIN"; do
     ips=$(getent ahostsv4 "$name" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')
     ips=${ips% }
     [[ $ips == "$PUBLIC_IP_STAND" ]] ||
-      fail "$E_DNS" "$name указывает на «${ips:-нет записи}», а нужна одна A-запись на $PUBLIC_IP_STAND"
+      fail "$E_DNS" "$name points to '${ips:-no record}', but one A record for $PUBLIC_IP_STAND is required"
   done
-  ok "$DOMAIN и www.$DOMAIN указывают на $PUBLIC_IP_STAND"
+  ok "$DOMAIN and www.$DOMAIN point to $PUBLIC_IP_STAND"
 }
 
 # --- 4. Helm ---
@@ -188,11 +188,11 @@ helm_login() {
   token=$(payload .ghcrPullToken)
   [[ -n $token ]] || token=$(kc -n "$NS" get secret ghcr-pull -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null |
     base64 -d | jq -r --arg r "$REGISTRY" '.auths[$r].password // empty')
-  [[ -n $token ]] || fail "$E_HELM" "нет токена чтения реестра для чарта"
+  [[ -n $token ]] || fail "$E_HELM" "no registry read token for the chart"
   HELM_REG=$(mktemp -p /dev/shm landing-helm-XXXXXX.json 2>/dev/null || mktemp)
   export HELM_REGISTRY_CONFIG=$HELM_REG
   printf '%s' "$token" | helm registry login "$REGISTRY" --username landing --password-stdin >/dev/null 2>&1 ||
-    fail "$E_HELM" "не удалось войти в $REGISTRY"
+    fail "$E_HELM" "failed to sign in to $REGISTRY"
 }
 
 diagnostics() {
@@ -222,10 +222,10 @@ helm_deploy() {
     --set-string "hosts.web=$WEB_HOST" --set-string "domain=$DOMAIN" --set-string "issuer=$ISSUER"
     --atomic --wait --timeout "${HELM_TIMEOUT:-10m}")
   [[ -n $image ]] && args+=(--set-string "image.repository=$image")
-  log "helm upgrade --install $COMPONENT $TAG (чарт $CHART_VERSION)"
+  log "helm upgrade --install $COMPONENT $TAG (chart $CHART_VERSION)"
   if ! hm "${args[@]}" >&2; then
     diagnostics
-    fail "$E_HELM" "релиз $COMPONENT $TAG не развёрнут, Helm вернул прежнюю ревизию; диагностика: $DIAG"
+    fail "$E_HELM" "release $COMPONENT $TAG was not deployed, Helm restored the previous revision; diagnostics: $DIAG"
   fi
   REVISION=$(hm status "$COMPONENT" -n "$NS" -o json 2>/dev/null | jq -r '.version // empty')
 }
@@ -234,22 +234,22 @@ wait_ready() {
   step ready
   if ! kc -n "$NS" rollout status deploy/web --timeout=5m >/dev/null 2>&1; then
     diagnostics
-    fail "$E_READY" "web не готов; диагностика: $DIAG"
+    fail "$E_READY" "web is not ready; diagnostics: $DIAG"
   fi
-  ok "$COMPONENT $TAG готов (ревизия $REVISION)"
+  ok "$COMPONENT $TAG is ready (revision $REVISION)"
 }
 
-# wait_domain_certificate — сертификат собственного домена выпущен. Сайт уже
-# работает по адресу стенда; по домену он откроется без предупреждения только
-# с этим сертификатом.
+# wait_domain_certificate — the certificate of the own domain is issued. The site
+# already works at the stand's address; by domain it opens without a warning only
+# with this certificate.
 wait_domain_certificate() {
   [[ -n $DOMAIN ]] || return 0
   step domain
   if ! kc -n "$NS" wait certificate/landing-domain --for=condition=Ready --timeout=5m >/dev/null 2>&1; then
     diagnostics
-    fail "$E_CERT" "сертификат для $DOMAIN не выпущен за 5 минут; диагностика: $DIAG"
+    fail "$E_CERT" "the certificate for $DOMAIN was not issued in 5 minutes; diagnostics: $DIAG"
   fi
-  ok "сертификат для $DOMAIN и www.$DOMAIN выпущен"
+  ok "the certificate for $DOMAIN and www.$DOMAIN is issued"
 }
 
 on_exit() {
@@ -260,7 +260,7 @@ on_exit() {
 
 main() {
   trap on_exit EXIT
-  # shellcheck disable=SC2034 # COLOR читает setup_color стенда
+  # shellcheck disable=SC2034 # setup_color of the stand reads COLOR
   COLOR=0
   setup_color
   parse_args "$@"

@@ -14,12 +14,12 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
 {{- define "core.image" -}}
-{{- $tag := required "image.tag обязателен (задаёт выкатка)" .Values.image.tag -}}
+{{- $tag := required "image.tag is required (set by the rollout)" .Values.image.tag -}}
 {{ printf "%s:%s" .Values.image.repository $tag }}
 {{- end }}
 
 {{- define "core.domain" -}}
-{{ required "publicBaseDomain обязателен" .Values.publicBaseDomain }}
+{{ required "publicBaseDomain is required" .Values.publicBaseDomain }}
 {{- end }}
 
 {{- define "core.webHost" -}}
@@ -30,7 +30,7 @@ app.kubernetes.io/component: {{ .component }}
 {{ printf "%s.%s" .Values.hosts.api (include "core.domain" .) }}
 {{- end }}
 
-{{/* Окружение всех режимов: конфигурация из GitHub, публичные адреса, хранилища. */}}
+{{/* Environment of all modes: configuration from GitHub, public addresses, storages. */}}
 {{- define "core.env" -}}
 {{- $d := include "core.domain" . -}}
 envFrom:
@@ -44,7 +44,7 @@ env:
   - { name: COOKIE_DOMAIN, value: {{ $d | quote }} }
   - { name: HTTP_ADDR, value: ":8080" }
   - { name: SERVICE_ADDR, value: ":9100" }
-  # Задачи кода выполняются в песочнице Nabu (FTR.HMR.CMN-0007): агента и runner здесь нет.
+  # Code tasks run in a Nabu sandbox (FTR.HMR.CMN-0007): there is no agent or runner here.
   - { name: CODE_MAX_PARALLEL, value: {{ .Values.code.maxParallel | quote }} }
   - { name: WORKER_MCP_ADDR, value: ":8083" }
   - { name: WORKER_MCP_URL, value: "http://worker-mcp.{{ .Release.Namespace }}.svc:8083" }
@@ -80,7 +80,7 @@ securityContext:
   capabilities: { drop: [ALL] }
 {{- end }}
 
-{{/* Записываемые каталоги при read-only корне: /tmp и HOME. */}}
+{{/* Writable directories under a read-only root: /tmp and HOME. */}}
 {{- define "core.volumeMounts" -}}
 volumeMounts:
   - { name: tmp, mountPath: /tmp }

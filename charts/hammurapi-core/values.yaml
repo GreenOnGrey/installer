@@ -1,38 +1,38 @@
-# Образ core вместе с агентом; тег задаёт выкатка (hammurapi-deploy).
+# The core image; the rollout sets the tag (hammurapi-deploy).
 image: { repository: ghcr.io/greenongrey/hammurapi-core, tag: "", pullPolicy: IfNotPresent }
 imagePullSecrets: [{ name: ghcr-pull }]
 
-# Базовый домен: сайт hammurapi.<домен>, API hammurapi-api.<домен>. Обязателен.
+# Base domain: site hammurapi.<domain>, API hammurapi-api.<domain>. Required.
 publicBaseDomain: ""
-# Поддомены сайта и API: на одном стенде с Nabu (nabu., nabu-api.).
+# Subdomains of the site and API: on one stand with Nabu (nabu., nabu-api.).
 hosts: { web: hammurapi, api: hammurapi-api }
 
-# Секреты и конфигурация создаёт hammurapi-deploy до Helm: чарт получает только
-# ссылки, значения не попадают в историю релизов (R14).
+# hammurapi-deploy creates secrets and configuration before Helm: the chart gets only
+# references, and values stay out of the release history (R14).
 existingSecrets:
-  config: hammurapi-secrets        # GitHub App, секрет вебхуков, ключ шифрования, токен оператора агента
-  configMap: hammurapi-config      # несекретная конфигурация из GitHub
-  postgres: postgres-conn          # копии секретов стенда из storages
+  config: hammurapi-secrets        # GitHub App, webhook secret, encryption key
+  configMap: hammurapi-config      # non-secret configuration from GitHub
+  postgres: postgres-conn          # copies of the stand's secrets from storages
   kafka: kafka-conn
   s3: s3-conn
 
-# Дополнительные несекретные переменные окружения.
+# Additional non-secret environment variables.
 config: {}
 
-# Задачи кода в песочнице Nabu (FTR.HMR.CMN-0007): сколько выполняется одновременно.
+# Code tasks in a Nabu sandbox (FTR.HMR.CMN-0007): how many run at once.
 code:
   maxParallel: 2
 
-# Nabu (FTR.HMR.CMN-0006, FTR.HMR.CMN-0007): служебные агенты Nabu вызывают MCP
-# воркера (worker-mcp:8083) из своего namespace; webUrl — сайт Nabu для ссылок на запуски.
+# Nabu (FTR.HMR.CMN-0006, FTR.HMR.CMN-0007): Nabu service agents call the worker's MCP
+# (worker-mcp:8083) from their namespace; webUrl is the Nabu site for links to runs.
 nabu:
   namespace: nabu
   webUrl: ""
 
 ingress:
   className: traefik
-  # Только публичные префиксы; служебные :9100 и внутренний :8081 не маршрутизируются.
-  # /mcp/nabu — MCP для персональных агентов Nabu (JWT Nabu, FTR.HMR.CMN-0006 R7).
+  # Only public prefixes; the service :9100 and internal :8081 are not routed.
+  # /mcp/nabu is the MCP for personal Nabu agents (Nabu JWT, FTR.HMR.CMN-0006 R7).
   paths: [/api/, /admin/api/, /hooks/, /mcp/nabu]
 
 cleaner:

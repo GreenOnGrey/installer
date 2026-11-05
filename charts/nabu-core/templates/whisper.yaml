@@ -1,7 +1,7 @@
 {{- if .Values.whisper.enabled }}
-# Распознаватель речи (FTR.NAB.CHAT-0001 R19–R21, arch §3.6): голос на сайте и
-# голосовые сообщения мессенджеров. Модель скачивается при первом старте в том
-# whisper-cache и остаётся там между перезапусками.
+# Speech recognition (FTR.NAB.CHAT-0001 R19–R21, arch §3.6): voice on the site and
+# voice messages of messengers. The model downloads on the first start to the volume
+# whisper-cache and stays there between restarts.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -47,7 +47,7 @@ spec:
           startupProbe:
             httpGet: { path: /docs, port: http }
             periodSeconds: 10
-            failureThreshold: 60   # первый старт скачивает модель
+            failureThreshold: 60   # the first start downloads the model
           resources: {{- toYaml .Values.whisper.resources | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -68,8 +68,8 @@ spec:
   selector: {{- include "nabu.selector" (dict "root" . "component" "whisper") | nindent 4 }}
   ports: [{ name: http, port: 9000, targetPort: http }]
 ---
-# К распознавателю — только api и worker (VOC-03); наружу — DNS и HTTPS для
-# скачивания модели.
+# Only api and worker reach the recognizer (VOC-03); outward, DNS and HTTPS for
+# downloading the model.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

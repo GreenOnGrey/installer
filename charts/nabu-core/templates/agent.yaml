@@ -1,7 +1,7 @@
-# Общий пул оператора агента (FTR.NAB.CMN-0004 arch §3.3): процессы Pi запусков
-# служебных агентов и проверки подключений. Разговоры и задания пользователей
-# идут в подах владельцев (agents.yaml). Под получает только токен оператора:
-# ни хранилищ, ни других секретов Nabu.
+# The shared pool of the agent operator (FTR.NAB.CMN-0004 arch §3.3): Pi processes of
+# service agent runs and connection checks. User conversations and tasks
+# run in pods of their owners (agents.yaml). The pod gets only the operator token:
+# no storages or other Nabu secrets.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

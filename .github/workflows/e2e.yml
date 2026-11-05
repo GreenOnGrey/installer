@@ -1,17 +1,17 @@
-# End-to-end на временной машине Google Cloud (QA, уровень E). Только ручной
-# запуск: перед релизом репозитория и при изменении версий, values/ или charts/.
+# End-to-end on a temporary Google Cloud machine (QA, level E). Manual only:
+# before a release of the repository and when versions, values/ or charts/ change.
 name: e2e
 on:
   workflow_dispatch:
     inputs:
-      zone: { description: "Зона Google Cloud", default: europe-west1-b, type: string }
-      keep: { description: "Не удалять машину после прогона", default: false, type: boolean }
+      zone: { description: "Google Cloud zone", default: europe-west1-b, type: string }
+      keep: { description: "Keep the machine after the run", default: false, type: boolean }
 concurrency: { group: e2e, cancel-in-progress: false }
 permissions: { contents: read, id-token: write }
 
 jobs:
   e2e:
-    runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest is moving to Ubuntu 26
     environment: e2e
     timeout-minutes: 150
     steps:
@@ -30,7 +30,7 @@ jobs:
         run: |
           mkdir -p .work
           bash tests/e2e/e2e.sh
-      - name: Отчёт
+      - name: Report
         if: always()
         run: if [ -f e2e-report.md ]; then cat e2e-report.md >>"$GITHUB_STEP_SUMMARY"; fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

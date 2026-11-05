@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# ingress-forward apply | remove | status — проброс TCP 80/443 внешнего
-# интерфейса машины на адрес Traefik, выданный MetalLB в Docker-сети minikube
-# (FTR.HMR.INFRA-0002, R17). Запускается systemd-юнитом hammurapi-ingress-forward
-# после docker.service и командой `up`.
-#   - DNAT в nat/PREROUTING: <внешний интерфейс>:80,443 → LB_IP;
-#   - разрешение в DOCKER-USER: Docker эту цепочку не трогает.
-# SNAT не нужен: ответы из Docker-сети идут через машину, conntrack возвращает
-# их клиенту, адрес клиента сохраняется. Все правила помечены комментарием и
-# перед добавлением удаляются — после перезапуска Docker дублей нет.
+# ingress-forward apply | remove | status — forwards TCP 80/443 of the machine's external
+# interface to the Traefik address given by MetalLB in the minikube Docker network
+# (FTR.HMR.INFRA-0002, R17). Run by the systemd unit hammurapi-ingress-forward
+# after docker.service and by `up`.
+#   - DNAT in nat/PREROUTING: <external interface>:80,443 → LB_IP;
+#   - an allow rule in DOCKER-USER: Docker leaves this chain alone.
+# No SNAT: answers from the Docker network go through the machine, conntrack returns
+# them to the client, and the client address is preserved. All rules carry a comment and
+# are removed before adding, so a Docker restart leaves no duplicates.
 set -euo pipefail
 
 COMMENT=hammurapi-ingress
@@ -17,8 +17,8 @@ IPTABLES=${IPTABLES:-iptables}
 
 log() { echo "ingress-forward: $*" >&2; }
 
-# lb_ip — LB_IP из окружения или из кэша, который пишет `up`: при загрузке
-# машины кластер ещё не поднят, а адрес MetalLB закреплён за Traefik.
+# lb_ip — LB_IP from the environment or the cache `up` writes: at boot the
+# cluster is not up yet, but the MetalLB address stays with Traefik.
 lb_ip() {
   local ip=${LB_IP:-}
   [[ -z $ip && -r $FORWARD_STATE/lb-ip ]] && ip=$(tr -d '[:space:]' <"$FORWARD_STATE/lb-ip")
@@ -33,14 +33,14 @@ ext_if() {
   echo "$dev"
 }
 
-# remove_rules — удаляет все правила с комментарием из nat/PREROUTING и DOCKER-USER.
+# remove_rules — removes all commented rules from nat/PREROUTING and DOCKER-USER.
 remove_rules() {
   local table chain rule spec args
   for spec in "nat PREROUTING" "filter DOCKER-USER"; do
     read -r table chain <<<"$spec"
-    # «|| true»: своих правил может не быть (первый apply) — это не ошибка при pipefail.
+    # || true: there may be no rules yet (first apply), which is no error under pipefail.
     { "$IPTABLES" -t "$table" -S "$chain" 2>/dev/null || true; } | { grep -F -- "--comment $COMMENT" || true; } | while IFS= read -r rule; do
-      # «-A CHAIN …» из iptables -S → «-D CHAIN …»; в наших правилах нет пробелов в значениях.
+      # -A CHAIN … from iptables -S → -D CHAIN …; our rules have no spaces in values.
       read -ra args <<<"${rule#-A }"
       "$IPTABLES" -t "$table" -D "${args[@]}"
     done
@@ -49,12 +49,12 @@ remove_rules() {
 
 apply_rules() {
   local ip dev
-  ip=$(lb_ip) || { log "нет адреса Traefik (LB_IP или $FORWARD_STATE/lb-ip)"; exit 1; }
-  dev=$(ext_if) || { log "не найден внешний интерфейс (маршрут по умолчанию)"; exit 1; }
+  ip=$(lb_ip) || { log "no Traefik address (LB_IP or $FORWARD_STATE/lb-ip)"; exit 1; }
+  dev=$(ext_if) || { log "no external interface found (default route)"; exit 1; }
   remove_rules
   "$IPTABLES" -t nat -A PREROUTING -i "$dev" -p tcp -m multiport --dports "$PORTS" \
     -m comment --comment "$COMMENT" -j DNAT --to-destination "$ip"
-  # DOCKER-USER создаёт Docker; если его ещё нет — создаём, Docker его сохранит.
+  # Docker creates DOCKER-USER; if it is missing we create it, and Docker keeps it.
   "$IPTABLES" -t filter -N DOCKER-USER 2>/dev/null || true
   "$IPTABLES" -t filter -I DOCKER-USER -d "$ip" -p tcp -m multiport --dports "$PORTS" \
     -m comment --comment "$COMMENT" -j ACCEPT
@@ -69,7 +69,7 @@ case ${1:-} in
     "$IPTABLES" -t filter -S DOCKER-USER 2>/dev/null | grep -F -- "--comment $COMMENT" || true
     ;;
   *)
-    echo "использование: ingress-forward apply | remove | status" >&2
+    echo "usage: ingress-forward apply | remove | status" >&2
     exit 2
     ;;
 esac

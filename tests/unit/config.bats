@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # shellcheck disable=SC2034,SC2016,SC2030,SC2031,SC2153,SC2329
-# R12, R13: конфигурация, внешний режим, секреты.
+# R12, R13: configuration, external mode, secrets.
 
 load helpers
 
@@ -9,23 +9,23 @@ setup() {
   load_script
 }
 
-@test "SEC-03: пароль прямо в local.env — код 2" {
+@test "SEC-03: a password directly in local.env: code 2" {
   printf 'POSTGRES_MODE=external\nPOSTGRES_PASSWORD=s3cret\n' >"$BATS_TEST_TMPDIR/local.env"
   run load_config "$ROOT" "$BATS_TEST_TMPDIR/local.env"
   [ "$status" -eq 2 ]
-  [[ $output == *"POSTGRES_PASSWORD записан прямо"* ]]
+  [[ $output == *"POSTGRES_PASSWORD is written directly"* ]]
   [[ $output != *"s3cret"* ]]
 }
 
-@test "SEC-03: путь к файлу пароля (*_FILE) в local.env допустим" {
+@test "SEC-03: a path to a password file (*_FILE) in local.env is allowed" {
   printf 'POSTGRES_PASSWORD_FILE=/secure/pg\n' >"$BATS_TEST_TMPDIR/local.env"
   run load_config "$ROOT" "$BATS_TEST_TMPDIR/local.env"
   [ "$status" -eq 0 ]
 }
 
-@test "конфигурация: переменная окружения важнее local.env, local.env важнее defaults.env" {
+@test "configuration: an environment variable wins over local.env, and local.env over defaults.env" {
   printf 'MK_CPUS=5\nVM_RETENTION=30d\n' >"$BATS_TEST_TMPDIR/local.env"
-  # load_script уже загрузил значения по умолчанию — сбрасываем их, как в новом процессе.
+  # load_script already loaded the defaults, so reset them as in a new process.
   unset MK_CPUS VM_RETENTION VL_RETENTION
   MK_CPUS=6 load_config "$ROOT" "$BATS_TEST_TMPDIR/local.env"
   [ "$MK_CPUS" = 6 ]
@@ -33,14 +33,14 @@ setup() {
   [ "$VL_RETENTION" = 3d ]
 }
 
-@test "EXT-06: внешний Postgres без хоста — код 2 с именем параметра" {
+@test "EXT-06: external Postgres without a host: code 2 with the parameter name" {
   POSTGRES_MODE=external POSTGRES_HOST=""
   run validate_config
   [ "$status" -eq 2 ]
   [[ $output == *"POSTGRES_HOST"* ]]
 }
 
-@test "EXT-06: внешний Postgres без пароля — код 2" {
+@test "EXT-06: external Postgres without a password: code 2" {
   POSTGRES_MODE=external POSTGRES_HOST=db POSTGRES_PORT=5432 POSTGRES_DATABASE=h POSTGRES_USER=h POSTGRES_SSLMODE=require
   unset POSTGRES_PASSWORD POSTGRES_PASSWORD_FILE
   run validate_config
@@ -48,7 +48,7 @@ setup() {
   [[ $output == *"POSTGRES_PASSWORD"* ]]
 }
 
-@test "EXT-06: пароль из файла *_FILE принимается" {
+@test "EXT-06: a password from a *_FILE file is accepted" {
   POSTGRES_MODE=external POSTGRES_HOST=db POSTGRES_PORT=5432 POSTGRES_DATABASE=h POSTGRES_USER=h POSTGRES_SSLMODE=require
   echo -n secret >"$BATS_TEST_TMPDIR/pg"
   POSTGRES_PASSWORD_FILE=$BATS_TEST_TMPDIR/pg
@@ -57,27 +57,27 @@ setup() {
   [ "$(secret_value POSTGRES_PASSWORD)" = secret ]
 }
 
-@test "EXT-06: внешняя Kafka SASL_SSL без механизма — код 2" {
+@test "EXT-06: external Kafka SASL_SSL without a mechanism: code 2" {
   KAFKA_MODE=external KAFKA_BOOTSTRAP=b:9092 KAFKA_SECURITY_PROTOCOL=SASL_SSL KAFKA_SASL_MECHANISM=""
   run validate_config
   [ "$status" -eq 2 ]
   [[ $output == *"KAFKA_SASL_MECHANISM"* ]]
 }
 
-@test "EXT-06: неизвестный протокол Kafka — код 2" {
+@test "EXT-06: an unknown Kafka protocol: code 2" {
   KAFKA_MODE=external KAFKA_BOOTSTRAP=b:9092 KAFKA_SECURITY_PROTOCOL=SSL
   run validate_config
   [ "$status" -eq 2 ]
 }
 
-@test "EXT-06: неверный режим — код 2" {
+@test "EXT-06: a wrong mode: code 2" {
   S3_MODE=managed
   run validate_config
   [ "$status" -eq 2 ]
   [[ $output == *"S3_MODE"* ]]
 }
 
-@test "EXT-02 (U): внешний хост-IP даёт isIP, DNS-имя — нет" {
+@test "EXT-02 (U): an external IP host gives isIP, a DNS name does not" {
   POSTGRES_MODE=external POSTGRES_HOST=10.20.0.5 POSTGRES_PORT=5432
   S3_MODE=external S3_ENDPOINT=https://storage.googleapis.com
   run external_values
@@ -86,12 +86,12 @@ setup() {
   [[ $output != *"s3.external.isIP"* ]]
 }
 
-@test "встроенный режим: external_values ничего не печатает" {
+@test "built-in mode: external_values prints nothing" {
   run external_values
   [ -z "$output" ]
 }
 
-@test "SEC-02: существующий секрет не пересоздаётся" {
+@test "SEC-02: an existing secret is not recreated" {
   stub kubectl 'exit 0'
   run ensure_secret storages postgres-credentials kubernetes.io/basic-auth username hammurapi password x
   [ "$status" -eq 0 ]
@@ -99,7 +99,7 @@ setup() {
   not_called "kubectl --context hammurapi create"
 }
 
-@test "SEC-02: отсутствующий секрет создаётся, значение идёт через stdin" {
+@test "SEC-02: a missing secret is created, the value goes through stdin" {
   stub kubectl '[[ $* == *"get secret"* ]] && exit 1; [[ $* == *"create -f -"* ]] && cat >"$STUBS/../created.yaml"; exit 0'
   run ensure_secret storages grafana-admin Opaque admin-password topsecret
   [ "$status" -eq 0 ]
@@ -108,12 +108,12 @@ setup() {
   grep -q "app.kubernetes.io/managed-by: hammurapi-infra" "$BATS_TEST_TMPDIR/created.yaml"
 }
 
-@test "SEC: сгенерированный пароль — 32 буквенно-цифровых символа" {
+@test "SEC: a generated password has 32 alphanumeric characters" {
   run gen_password
   [[ $output =~ ^[A-Za-z0-9]{32}$ ]]
 }
 
-@test "STO-04 (U): ключи postgres-conn во внешнем режиме совпадают со спецификацией" {
+@test "STO-04 (U): keys of postgres-conn in external mode match the specification" {
   stub kubectl '[[ $* == *"apply -f -"* ]] && cat >"$STUBS/../conn.yaml"; exit 0'
   POSTGRES_MODE=external POSTGRES_HOST=db POSTGRES_PORT=5432 POSTGRES_DATABASE=h POSTGRES_USER=u POSTGRES_SSLMODE=require POSTGRES_PASSWORD='p@ss'
   run write_postgres_conn
@@ -124,7 +124,7 @@ setup() {
   [ "$uri" = "postgresql://u:p%40ss@db:5432/h?sslmode=require" ]
 }
 
-@test "STO-04 (U): ключи kafka-conn и s3-conn" {
+@test "STO-04 (U): keys of kafka-conn and s3-conn" {
   stub kubectl '[[ $* == *"apply -f -"* ]] && cat >>"$STUBS/../conn.yaml"; exit 0'
   KAFKA_MODE=external KAFKA_BOOTSTRAP=b:9092 KAFKA_SECURITY_PROTOCOL=SASL_SSL KAFKA_SASL_MECHANISM=PLAIN KAFKA_USERNAME=u KAFKA_PASSWORD=p
   S3_MODE=external S3_ENDPOINT=https://storage.googleapis.com S3_REGION=r S3_BUCKET=b S3_ACCESS_KEY=a S3_SECRET_KEY=s S3_PATH_STYLE=false
@@ -134,7 +134,7 @@ setup() {
   [ "$keys" = "access_key bootstrap_servers bucket endpoint password path_style region sasl_mechanism secret_key security_protocol username " ]
 }
 
-@test "конфигурация: сборка мусора образов — IMAGE_GC_LOW < IMAGE_GC_HIGH ≤ 100, возраст — длительность" {
+@test "configuration: image garbage collection: IMAGE_GC_LOW < IMAGE_GC_HIGH ≤ 100, the age is a duration" {
   IMAGE_GC_HIGH=80 IMAGE_GC_LOW=85
   run validate_config
   [ "$status" -eq 2 ]
@@ -145,13 +145,13 @@ setup() {
   [[ $output == *"IMAGE_GC_MAX_AGE"* ]]
 }
 
-@test "пробы: метка на Job и на поде, check_pods других запусков их пропускает" {
+@test "probes: a label on the Job and the pod, check_pods of other runs skips them" {
   run bash -c 'source "$1"; probe_job_manifest storage-probe check - - -' _ "$ROOT/lib/checks.sh"
   [ "$status" -eq 0 ]
   [ "$(grep -c 'app.kubernetes.io/managed-by: hammurapi-infra' <<<"$output")" -eq 2 ]
 }
 
-@test "FTR.INFRA.INST-0001 R8: все обращения к кластеру идут в KUBE_CONTEXT; по умолчанию — контекст профиля" {
+@test "FTR.INFRA.INST-0001 R8: all cluster access goes to KUBE_CONTEXT, by default the context of the profile" {
   stub kubectl 'exit 0'
   stub helm 'exit 0'
   kc get ns
@@ -165,6 +165,6 @@ setup() {
   called "helm --kube-context other status x"
 }
 
-@test "FTR.INFRA.INST-0001 R8: контекст задан только через kc и hm" {
+@test "FTR.INFRA.INST-0001 R8: the context is set only through kc and hm" {
   not_grep -nE '(kubectl|helm) +--(kube-)?context' "$ROOT"/lib/[a-bd-z]*.sh "$ROOT"/lib/cluster.sh "$ROOT"/lib/checks.sh
 }

@@ -1,6 +1,6 @@
 # shellcheck shell=bash
-# Релизы Helm в порядке архитектуры (п. 4): операторы → секреты → внешние
-# хранилища → хранилища → хранилища наблюдаемости → сборщики → Grafana и дашборды.
+# Helm releases in the order of the architecture (§4): operators → secrets → external
+# storages → storages → observability stores → collectors → Grafana and dashboards.
 
 declare -A HELM_REPOS=(
   [strimzi]=https://strimzi.io/charts/
@@ -14,53 +14,53 @@ declare -A HELM_REPOS=(
   [jetstack]=https://charts.jetstack.io
 )
 
-# Выведенные из конфигурации версии релизов — для сводки.
+# Release versions derived from the configuration, for the summary.
 RELEASES=()
 
 helm_repos() {
   local name
   for name in "${!HELM_REPOS[@]}"; do
     retry 3 10 helm repo add --force-update "$name" "${HELM_REPOS[$name]}" >/dev/null ||
-      die "$E_DEPLOY" "не удалось добавить репозиторий чартов $name"
+      die "$E_DEPLOY" "failed to add chart repository $name"
   done
-  retry 3 15 helm repo update >/dev/null || die "$E_DEPLOY" "helm repo update не выполнен"
+  retry 3 15 helm repo update >/dev/null || die "$E_DEPLOY" "helm repo update failed"
 }
 
-# release <релиз> <ns> <чарт> <версия|-> <файл значений|-> [аргументы helm…]
+# release <release> <ns> <chart> <version|-> <values file|-> [helm arguments…]
 release() {
   local name=$1 ns=$2 chart=$3 version=$4 values=$5
   shift 5
   local args=(upgrade --install "$name" "$chart" -n "$ns" --wait --timeout "$HELM_TIMEOUT")
   [[ $version != - ]] && args+=(--version "$version")
   [[ $values != - ]] && args+=(-f "$ROOT/values/$values")
-  if [[ $version == - ]]; then log "релиз $name (локальный чарт)"; else log "релиз $name ($chart $version)"; fi
+  if [[ $version == - ]]; then log "release $name (local chart)"; else log "release $name ($chart $version)"; fi
   if ! run_cmd hm "${args[@]}" "$@" >"$RUN_DIR/helm-$name.log" 2>&1; then
-    die "$E_DEPLOY" "релиз $name не развёрнут, см. $RUN_DIR/helm-$name.log"
+    die "$E_DEPLOY" "release $name was not deployed, see $RUN_DIR/helm-$name.log"
   fi
   RELEASES+=("$name $version")
 }
 
-# release_local <релиз> <ns> <каталог чарта> [аргументы helm…] — релиз
-# локального чарта; в сводке версия — «локальный».
+# release_local <release> <ns> <chart directory> [helm arguments…] — a release
+# of a local chart; the summary shows the version as "local".
 release_local() {
   local name=$1 ns=$2 chart=$3
   shift 3
   release "$name" "$ns" "$chart" - - "$@"
-  RELEASES[-1]="$name локальный"
+  RELEASES[-1]="$name local"
 }
 
-# uninstall_if_present <релиз> <ns> — для хранилищ, переведённых во внешний режим.
+# uninstall_if_present <release> <ns> — for storages switched to external mode.
 uninstall_if_present() {
   if hm status "$1" -n "$2" >/dev/null 2>&1; then
-    log "удаление релиза $1: хранилище во внешнем режиме"
+    log "removing release $1: the storage is in external mode"
     hm uninstall "$1" -n "$2" --wait --timeout "$HELM_TIMEOUT" >/dev/null ||
-      die "$E_DEPLOY" "не удалось удалить релиз $1"
+      die "$E_DEPLOY" "failed to remove release $1"
   fi
 }
 
 wait_crd() {
   kc wait --for=condition=Established "crd/$1" --timeout=120s >/dev/null ||
-    die "$E_DEPLOY" "CRD $1 не зарегистрирован"
+    die "$E_DEPLOY" "CRD $1 is not registered"
 }
 
 deploy_operators() {
@@ -97,29 +97,29 @@ deploy_storages() {
   fi
   mapfile -t args < <(storages_args)
   release storages "$ns" "$ROOT/charts/hammurapi-storages" - - "${args[@]}"
-  RELEASES[-1]="storages локальный"
+  RELEASES[-1]="storages local"
   if [[ $KAFKA_MODE == internal ]]; then
-    log "ожидание Kafka"
+    log "waiting for Kafka"
     kc -n "$ns" wait kafka/hammurapi --for=condition=Ready --timeout="$HELM_TIMEOUT" >/dev/null ||
-      die "$E_DEPLOY" "Kafka не перешла в Ready"
+      die "$E_DEPLOY" "Kafka did not become Ready"
   else
     uninstall_if_present strimzi "$ns"
   fi
   if [[ $POSTGRES_MODE == internal ]]; then
-    log "ожидание Postgres"
+    log "waiting for Postgres"
     kc -n "$ns" wait cluster.postgresql.cnpg.io/hammurapi-pg --for=condition=Ready --timeout="$HELM_TIMEOUT" >/dev/null ||
-      die "$E_DEPLOY" "Postgres не перешёл в Ready"
+      die "$E_DEPLOY" "Postgres did not become Ready"
   else
     uninstall_if_present cnpg "$ns"
   fi
 }
 
-# vmagent_scrape_values <файл> — задания сбора текущей конфигурации (R8).
+# vmagent_scrape_values <file> — scrape jobs of the current configuration (R8).
 vmagent_scrape_values() {
   {
     printf 'config:\n  scrape_configs:\n'
     cat "$ROOT/values/scrape/base.yaml"
-    # Hammurapi (FTR.HMR.INFRA-0002): не обязателен в проверках, пока не установлен.
+    # Hammurapi (FTR.HMR.INFRA-0002): not required by the checks until it is installed.
     cat "$ROOT/values/scrape/hammurapi.yaml"
     [[ $KAFKA_MODE == internal ]] && cat "$ROOT/values/scrape/kafka.yaml"
     [[ $POSTGRES_MODE == internal ]] && cat "$ROOT/values/scrape/postgres.yaml"
@@ -129,7 +129,7 @@ vmagent_scrape_values() {
   } >"$1"
 }
 
-# stage_dashboards <каталог> — копия чарта дашбордов с JSON из dashboards/.
+# stage_dashboards <directory> — a copy of the dashboards chart with JSON from dashboards/.
 stage_dashboards() {
   local dir=$1
   rm -rf "$dir"
@@ -137,7 +137,7 @@ stage_dashboards() {
   cp -r "$ROOT/charts/hammurapi-dashboards/." "$dir/"
   mkdir -p "$dir/files"
   cp "$ROOT"/dashboards/*.json "$dir/files/"
-  # Дашборд MCP-серверов едет в их чарте (репозиторий mcps).
+  # The MCP dashboard ships in their chart (repository mcps).
   if mcp_enabled; then
     mcp_load
     cp "$MCP_CHART_DIR/files/dashboard.json" "$dir/files/mcp.json"
@@ -155,7 +155,7 @@ deploy_observability() {
   vmagent_scrape_values "$RUN_DIR/vmagent-scrape.yaml"
   release vmagent "$ns" vm/victoria-metrics-agent "$VMAGENT_CHART_VERSION" vmagent.yaml -f "$RUN_DIR/vmagent-scrape.yaml"
   release vector "$ns" vector/vector "$VECTOR_CHART_VERSION" vector.yaml
-  # Публичный доступ: Ingress Grafana и вход через GitHub (FTR.HMR.INFRA-0002, R20).
+  # Public access: Ingress of Grafana and sign-in through GitHub (FTR.HMR.INFRA-0002, R20).
   local grafana_public=()
   if public_enabled; then
     grafana_public_values "$RUN_DIR/grafana-public.yaml"
@@ -170,7 +170,7 @@ deploy_observability() {
 
 deploy_all() {
   step deploy
-  # R3 FTR.NAB.CMN-0006: бюджет памяти MCP-серверов — до любых изменений стенда
+  # R3 FTR.NAB.CMN-0006: the memory budget of MCP servers, before any change to the stand
   mcp_preflight
   ensure_namespace "$NS_STATE"
   helm_repos
@@ -185,12 +185,12 @@ deploy_all() {
   deploy_public
   deploy_mcp
   step deploy
-  ok "все релизы развёрнуты"
+  ok "all releases are deployed"
 }
 
-# write_version — развёрнутый тег и коммит в ConfigMap (R18). На проде кода
-# из git нет (выгрузка тега от workflow) — тег и коммит приходят в INFRA_TAG и
-# INFRA_COMMIT; в рабочей копии git они берутся из неё.
+# write_version — the deployed tag and commit in a ConfigMap (R18). Prod has no
+# git checkout (the workflow unpacks the tag), so they come in INFRA_TAG and
+# INFRA_COMMIT; a git working copy provides them itself.
 write_version() {
   local tag commit
   tag=${INFRA_TAG:-$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null || echo dev)}

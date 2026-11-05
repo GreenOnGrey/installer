@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Нормализация дашборда перед добавлением в репозиторий (tech, п. 8):
-#   - ссылки на источник данных (переменные ${DS_…}, $ds и т. п.) → UID victoriametrics;
-#   - выражения Grafana (${DS_EXPRESSION}) → __expr__;
-#   - переменные шаблона типа datasource, __inputs, __requires, __elements, id удаляются;
-#   - uid дашборда — стабильный: hammurapi-<имя файла>.
-# Использование: dashboards/normalize.sh <исходный.json> <имя>  → dashboards/<имя>.json
+# Normalizes a dashboard before adding it to the repository (tech, §8):
+#   - data source references (variables ${DS_…}, $ds and so on) → UID victoriametrics;
+#   - Grafana expressions (${DS_EXPRESSION}) → __expr__;
+#   - template variables of type datasource, __inputs, __requires, __elements, id are removed;
+#   - the dashboard uid is stable: hammurapi-<file name>.
+# Usage: dashboards/normalize.sh <source.json> <name>  → dashboards/<name>.json
 set -euo pipefail
 
-src=${1:?исходный JSON}
-name=${2:?имя дашборда, например kafka}
+src=${1:?source JSON}
+name=${2:?dashboard name, such as kafka}
 dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 jq --arg uid "hammurapi-$name" '

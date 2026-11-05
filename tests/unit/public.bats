@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # shellcheck disable=SC2034,SC2016,SC2030,SC2031,SC2153,SC2329
-# FTR.HMR.INFRA-0002: публичный доступ стенда, проброс портов, проверка конфигурации выкатки.
+# FTR.HMR.INFRA-0002: public access, port forwarding, checks of the rollout configuration.
 
 load helpers
 
@@ -12,7 +12,7 @@ setup() {
 
 # --- ingress-forward (R17, PUB-07, PUB-08) ---
 
-# iptables-заглушка с состоянием: правила хранятся в файле, -S их печатает.
+# An iptables stub with state: rules live in a file, and -S prints them.
 iptables_stub() {
   export RULES=$BATS_TEST_TMPDIR/rules
   : >"$RULES"
@@ -28,7 +28,7 @@ esac'
   export IPTABLES=iptables
 }
 
-@test "PUB-01: apply — DNAT 80/443 на адрес Traefik и разрешение в DOCKER-USER" {
+@test "PUB-01: apply: DNAT of 80/443 to the Traefik address and an allow rule in DOCKER-USER" {
   iptables_stub
   LB_IP=192.168.49.200 EXT_IF=ens4 run bash "$FORWARD" apply
   [ "$status" -eq 0 ]
@@ -36,7 +36,7 @@ esac'
   grep -q "^filter DOCKER-USER -d 192.168.49.200 -p tcp -m multiport --dports 80,443 -m comment --comment hammurapi-ingress -j ACCEPT$" "$RULES"
 }
 
-@test "PUB-08: повторный apply (перезапуск Docker) не создаёт дублей" {
+@test "PUB-08: a repeated apply (a Docker restart) creates no duplicates" {
   iptables_stub
   LB_IP=192.168.49.200 EXT_IF=ens4 bash "$FORWARD" apply
   LB_IP=192.168.49.200 EXT_IF=ens4 bash "$FORWARD" apply
@@ -44,7 +44,7 @@ esac'
   [ "$(grep -c hammurapi-ingress "$RULES")" -eq 2 ]
 }
 
-@test "PUB-07: после перезагрузки адрес берётся из кэша up" {
+@test "PUB-07: after a reboot the address comes from the cache of up" {
   iptables_stub
   export FORWARD_STATE=$BATS_TEST_TMPDIR/state
   mkdir -p "$FORWARD_STATE"
@@ -54,7 +54,7 @@ esac'
   grep -q "to-destination 192.168.49.201" "$RULES"
 }
 
-@test "смена адреса Traefik: старые правила заменяются" {
+@test "a change of the Traefik address: old rules are replaced" {
   iptables_stub
   LB_IP=192.168.49.200 EXT_IF=ens4 bash "$FORWARD" apply
   LB_IP=192.168.49.205 EXT_IF=ens4 bash "$FORWARD" apply
@@ -62,7 +62,7 @@ esac'
   [ "$(grep -c 192.168.49.205 "$RULES")" -eq 2 ]
 }
 
-@test "remove снимает только свои правила" {
+@test "remove takes only its own rules" {
   iptables_stub
   echo "nat PREROUTING -i ens4 -p tcp --dport 22 -j ACCEPT" >>"$RULES"
   LB_IP=192.168.49.200 EXT_IF=ens4 bash "$FORWARD" apply
@@ -72,26 +72,26 @@ esac'
   grep -q -- "--dport 22" "$RULES"
 }
 
-@test "без адреса Traefik — ошибка, правила не трогаются" {
+@test "without a Traefik address: an error, rules stay" {
   iptables_stub
   FORWARD_STATE=$BATS_TEST_TMPDIR/none EXT_IF=ens4 run bash "$FORWARD" apply
   [ "$status" -eq 1 ]
   [ ! -s "$RULES" ]
 }
 
-# --- Пул MetalLB в профиле minikube: переживает minikube start (R16, R17) ---
+# --- The MetalLB pool in the minikube profile survives minikube start (R16, R17) ---
 
-# mk_profile <начало> <конец> — профиль minikube с пулом MetalLB.
+# mk_profile <start> <end> — a minikube profile with a MetalLB pool.
 mk_profile() {
   mkdir -p "$MINIKUBE_HOME/profiles/hammurapi"
   printf '{"KubernetesConfig":{"LoadBalancerStartIP":"%s","LoadBalancerEndIP":"%s"}}\n' "$1" "$2" \
     >"$MINIKUBE_HOME/profiles/hammurapi/config.json"
 }
 
-@test "AUTO-10: пул MetalLB сохраняется в профиле — ответы на вопросы minikube по одному" {
+@test "AUTO-10: the MetalLB pool is saved in the profile: answers to minikube prompts one by one" {
   load_script
   mk_profile "" ""
-  # Как minikube 1.39: каждый ответ читается отдельно; пул пишется в профиль.
+  # Like minikube 1.39: each answer is read separately; the pool goes to the profile.
   stub minikube 'case "$*" in
     *"addons configure metallb"*) read -r s; read -r e
       printf "{\"KubernetesConfig\":{\"LoadBalancerStartIP\":\"%s\",\"LoadBalancerEndIP\":\"%s\"}}" "$s" "$e" \
@@ -103,7 +103,7 @@ mk_profile() {
   [ "$(metallb_pool)" = 192.168.49.200-192.168.49.209 ]
 }
 
-@test "AUTO-10: пул уже в профиле — только включение дополнения" {
+@test "AUTO-10: the pool is already in the profile: only enabling the addon" {
   load_script
   mk_profile 192.168.49.200 192.168.49.209
   run metallb_addon 192.168.49.200 192.168.49.209
@@ -112,19 +112,19 @@ mk_profile() {
   not_called "addons configure"
 }
 
-@test "AUTO-10: пул не сохранился — ошибка шага public" {
+@test "AUTO-10: the pool was not saved: an error of the step public" {
   load_script
   mk_profile "" ""
   sleep() { :; }
   export -f sleep
   run metallb_addon 192.168.49.200 192.168.49.209
   [ "$status" -eq "$E_DEPLOY" ]
-  [[ $output == *"не удалось сохранить пул MetalLB 192.168.49.200-192.168.49.209"* ]]
+  [[ $output == *"failed to save the MetalLB pool 192.168.49.200-192.168.49.209"* ]]
 }
 
-# --- Конфигурация публичного доступа (R18, R21) ---
+# --- Public access configuration (R18, R21) ---
 
-@test "PUB-12: PUBLIC_ACCESS=false — шаг публичного доступа не выполняется" {
+@test "PUB-12: PUBLIC_ACCESS=false: the public access step does not run" {
   load_script
   PUBLIC_ACCESS=false
   run deploy_public
@@ -133,7 +133,7 @@ mk_profile() {
   not_called "upgrade --install traefik"
 }
 
-@test "PUB-13: PUBLIC_ACCESS=true без ACME_EMAIL — код 2 с именем параметра" {
+@test "PUB-13: PUBLIC_ACCESS=true without ACME_EMAIL: code 2 with the parameter name" {
   load_script
   PUBLIC_ACCESS=true ACME_EMAIL=""
   run validate_config
@@ -141,7 +141,7 @@ mk_profile() {
   [[ $output == *"ACME_EMAIL"* ]]
 }
 
-@test "PUB-13: вход в Grafana через GitHub без секрета — код 2" {
+@test "PUB-13: Grafana sign-in through GitHub without a secret: code 2" {
   load_script
   PUBLIC_ACCESS=true ACME_EMAIL=ops@example.org GRAFANA_GITHUB_CLIENT_ID=Iv1.x
   unset GRAFANA_GITHUB_CLIENT_SECRET GRAFANA_GITHUB_CLIENT_SECRET_FILE
@@ -150,7 +150,7 @@ mk_profile() {
   [[ $output == *"GRAFANA_GITHUB_CLIENT_SECRET"* ]]
 }
 
-@test "PUB-03: без PUBLIC_BASE_DOMAIN — <IP с дефисами>.sslip.io; с ним — заданный домен" {
+@test "PUB-03: without PUBLIC_BASE_DOMAIN: <IP with dashes>.sslip.io; with it: the set domain" {
   load_script
   PUBLIC_BASE_DOMAIN=""
   [ "$(public_domain 34.12.5.6)" = 34-12-5-6.sslip.io ]
@@ -158,7 +158,7 @@ mk_profile() {
   [ "$(public_domain 34.12.5.6)" = hammurapi.duckdns.org ]
 }
 
-@test "R20: значения Grafana — Ingress, root_url и вход участников организации с ролью Editor" {
+@test "R20: Grafana values: Ingress, root_url and sign-in of organization members with the role Editor" {
   load_script
   PUBLIC_DOMAIN=34-12-5-6.sslip.io GRAFANA_GITHUB_CLIENT_ID=Iv1.x GRAFANA_GITHUB_ORG=GreenOnGrey
   grafana_public_values "$BATS_TEST_TMPDIR/g.yaml"
@@ -170,7 +170,7 @@ mk_profile() {
   grep -q 'envFromSecret: grafana-github-oauth' "$BATS_TEST_TMPDIR/g.yaml"
 }
 
-@test "R20: смена client ID или секрета OAuth-приложения перезапускает Grafana" {
+@test "R20: a change of the client ID or secret of the OAuth app restarts Grafana" {
   load_script
   PUBLIC_DOMAIN=34-12-5-6.sslip.io GRAFANA_GITHUB_ORG=GreenOnGrey
   checksum() {
@@ -187,13 +187,13 @@ mk_profile() {
   not_grep -q s2 "$BATS_TEST_TMPDIR/g.yaml"
 }
 
-# --- deploy-component.yml: проверка конфигурации до подключения (INS-05) ---
-# Workflow лежит в публичном репозитории hammurapi (соседний каталог; в CI — DEPLOY_WORKFLOW).
+# --- deploy-component.yml: the configuration check before connecting (INS-05) ---
+# The workflow is in the public repository hammurapi (a sibling directory; in CI, DEPLOY_WORKFLOW).
 
 config_step() {
-  command -v yq >/dev/null || skip "нет yq"
+  command -v yq >/dev/null || skip "no yq"
   local wf=${DEPLOY_WORKFLOW:-$ROOT/../hammurapi/.github/workflows/deploy-component.yml}
-  [[ -f $wf ]] || skip "нет $wf"
+  [[ -f $wf ]] || skip "no $wf"
   yq -r '.jobs.deploy.steps[] | select(.id == "config") | .run' "$wf" >"$BATS_TEST_TMPDIR/config.sh"
   export GITHUB_OUTPUT=$BATS_TEST_TMPDIR/out COMPONENT=hammurapi-core DEPLOY_TRANSPORT=ssh CALLBACK_URL="" TAG=v1.8.0
   : >"$GITHUB_OUTPUT"
@@ -206,25 +206,26 @@ config_step() {
   echo CHART_VERSION=0.4.0 >"$BATS_TEST_TMPDIR/w/deploy/versions.env"
 }
 
-@test "INS-05: нет HAMMURAPI_WEBHOOK_SECRET — ошибка до подключения с именем секрета" {
+@test "INS-05: no HAMMURAPI_WEBHOOK_SECRET: an error before connecting, with the secret name" {
   config_step
   export HAS_HAMMURAPI_WEBHOOK_SECRET=false HAS_PROD_KNOWN_HOSTS=false
   cd "$BATS_TEST_TMPDIR/w"
   run bash -e "$BATS_TEST_TMPDIR/config.sh"
   [ "$status" -eq 1 ]
-  [[ $output == *"HAMMURAPI_WEBHOOK_SECRET (секрет)"* && $output == *"PROD_KNOWN_HOSTS (секрет)"* ]]
+  # Both languages until deploy-component.yml of every tag in use is in English.
+  [[ $output =~ HAMMURAPI_WEBHOOK_SECRET\ \((секрет|secret)\) && $output =~ PROD_KNOWN_HOSTS\ \((секрет|secret)\) ]]
 }
 
-@test "FTR.HMR.CMN-0007 R1: core без Nabu — ошибка до подключения с именами настроек" {
+@test "FTR.HMR.CMN-0007 R1: core without Nabu: an error before connecting, with the setting names" {
   config_step
   unset HAMMURAPI_NABU_URL HAMMURAPI_NABU_CLIENT_ID HAS_HAMMURAPI_NABU_CLIENT_SECRET
   cd "$BATS_TEST_TMPDIR/w"
   run bash -e "$BATS_TEST_TMPDIR/config.sh"
   [ "$status" -eq 1 ]
-  [[ $output == *"HAMMURAPI_NABU_URL (переменная)"* && $output == *"HAMMURAPI_NABU_CLIENT_ID (переменная)"* && $output == *"HAMMURAPI_NABU_CLIENT_SECRET (секрет)"* ]]
+  [[ $output =~ HAMMURAPI_NABU_URL\ \((переменная|variable)\) && $output =~ HAMMURAPI_NABU_CLIENT_ID\ \((переменная|variable)\) && $output =~ HAMMURAPI_NABU_CLIENT_SECRET\ \((секрет|secret)\) ]]
 }
 
-@test "INS-05: полная конфигурация core — версия чарта из deploy/versions.env" {
+@test "INS-05: a complete core configuration: the chart version from deploy/versions.env" {
   config_step
   cd "$BATS_TEST_TMPDIR/w"
   run bash -e "$BATS_TEST_TMPDIR/config.sh"
@@ -232,7 +233,7 @@ config_step() {
   grep -qx "chart=0.4.0" "$GITHUB_OUTPUT"
 }
 
-@test "INS-05: web не требует конфигурации core" {
+@test "INS-05: web needs no core configuration" {
   config_step
   export COMPONENT=hammurapi-web
   unset HAMMURAPI_GITHUB_APP_ID HAMMURAPI_SPEC_REPO HAS_HAMMURAPI_WEBHOOK_SECRET
@@ -241,7 +242,7 @@ config_step() {
   [ "$status" -eq 0 ]
 }
 
-@test "CTR: запуск по контракту требует секрет подписи вебхука результата" {
+@test "CTR: a run by contract requires the secret signing the result webhook" {
   config_step
   export CALLBACK_URL=https://api.example.org/hooks/v1/deploy HAS_HAMMURAPI_DEPLOY_CALLBACK_SECRET=false
   cd "$BATS_TEST_TMPDIR/w"
@@ -250,7 +251,7 @@ config_step() {
   [[ $output == *"HAMMURAPI_DEPLOY_CALLBACK_SECRET"* ]]
 }
 
-@test "QUAL-03: действия GitHub Actions зафиксированы по SHA" {
+@test "QUAL-03: GitHub Actions are pinned by SHA" {
   local bad wf=${DEPLOY_WORKFLOW:-$ROOT/../hammurapi/.github/workflows/deploy-component.yml} files=("$ROOT"/.github/workflows/*.yml)
   [[ -f $wf ]] && files+=("$wf")
   bad=$(grep -hE '^\s*(-\s*)?uses:\s*[^./]' "${files[@]}" | grep -vE '@[0-9a-f]{40}(\s|$)' || true)

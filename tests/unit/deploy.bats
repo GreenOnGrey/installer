@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # shellcheck disable=SC2034,SC2016,SC2030,SC2031,SC2153,SC2329
-# FTR.HMR.INFRA-0002: bin/hammurapi-deploy — порядок, коды выхода, секреты только в stdin.
+# FTR.HMR.INFRA-0002: bin/hammurapi-deploy: order, exit codes, secrets only on stdin.
 
 load helpers
 
@@ -11,19 +11,19 @@ setup() {
   export DEPLOY_LOCK_DIR=$BATS_TEST_TMPDIR/lock HAMMURAPI_INFRA_CONFIG=/dev/null
   export DEPLOY_LOGS=$BATS_TEST_TMPDIR/logs APPLIED=$BATS_TEST_TMPDIR/applied
   mkdir -p "$DEPLOY_LOCK_DIR" "$DEPLOY_LOGS" "$APPLIED"
-  # Пустой TMPDIR: после выкатки в нём не должно остаться файлов с секретами.
+  # An empty TMPDIR: no files with secrets may stay in it after a rollout.
   export TMPDIR=$BATS_TEST_TMPDIR/tmp
   mkdir -p "$TMPDIR"
   stub flock 'exit 0'
-  # status стенда: STAND_OK, PUBLIC — из окружения теста.
+  # status of the stand: STAND_OK, PUBLIC come from the test's environment.
   export STAND_OK=true PUBLIC=true
   cat >"$STUBS/status.sh" <<'EOF'
 jq -cn --argjson ok "$STAND_OK" --argjson pub "$PUBLIC" \
-  '{ok: $ok, checks: [{name: "logs", ok: $ok, message: "логи не поступают в VictoriaLogs"}],
+  '{ok: $ok, checks: [{name: "logs", ok: $ok, message: "logs do not reach VictoriaLogs"}],
     public: ({enabled: $pub} + (if $pub then {baseDomain: "34-12-5-6.sslip.io"} else {} end))}'
 EOF
   export STATUS_CMD=$STUBS/status.sh
-  # helm: CORE_INSTALLED — есть ли релиз hammurapi-core.
+  # helm: CORE_INSTALLED says whether the release hammurapi-core exists.
   export CORE_INSTALLED=false
   stub helm '
 case "$*" in
@@ -34,7 +34,7 @@ case "$*" in
   *"registry login"*) cat >/dev/null ;;
   *) exit 0 ;;
 esac'
-  # kubectl: манифесты из stdin сохраняются для проверок; FINGERPRINT — сохранённый хеш ключа.
+  # kubectl: manifests from stdin are kept for checks; FINGERPRINT is the stored key hash.
   export FINGERPRINT=""
   stub kubectl '
 case "$*" in
@@ -69,41 +69,41 @@ esac'
 
 deploy() { printf '%s' "$PAYLOAD" | bash "$DEPLOY" "$@"; }
 
-# Путь core подписывает JWT ключом через /dev/fd (process substitution): нативный
-# openssl в Git Bash на Windows его не читает. Цель — Debian стенда и CI на Linux.
-need_linux() { [[ $(uname -s) == Linux ]] || skip "подпись JWT через /dev/fd — только Linux"; }
+# The core path signs a JWT with the key through /dev/fd (process substitution): the native
+# openssl in Git Bash on Windows cannot read it. The target is Debian and CI on Linux.
+need_linux() { [[ $(uname -s) == Linux ]] || skip "JWT signing through /dev/fd is Linux only"; }
 last_json() { printf '%s\n' "$output" | tail -n 1; }
 
-@test "INS-03: стенд не готов — код 20 до изменений" {
+@test "INS-03: the stand is not ready: code 20 before any change" {
   STAND_OK=false
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 20 ]
-  last_json | jq -e '.status == "failure" and .code == 20 and (.error | contains("логи не поступают"))'
+  last_json | jq -e '.status == "failure" and .code == 20 and (.error | contains("logs do not reach"))'
   not_called "apply -f -"
   not_called "helm --kube-context hammurapi upgrade"
 }
 
-@test "INS-03: публичный доступ выключен — код 20" {
+@test "INS-03: public access is off: code 20" {
   PUBLIC=false
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 20 ]
-  [[ $output == *"публичный доступ стенда выключен"* ]]
+  [[ $output == *"public access of the stand is off"* ]]
 }
 
-@test "INS-02: web до core — код 21, «сначала выкатите hammurapi-core», сервер не изменён" {
+@test "INS-02: web before core: code 21, roll out hammurapi-core first, the server is unchanged" {
   run deploy hammurapi-web v2.3.0 0.4.0
   [ "$status" -eq 21 ]
-  [[ $output == *"сначала выкатите hammurapi-core"* ]]
+  [[ $output == *"roll out hammurapi-core first"* ]]
   not_called "create namespace"
   not_called "apply -f -"
 }
 
-@test "INS-01, CH-02: первая установка core — чарт нужной версии, секреты, настройка GitHub App" {
+@test "INS-01, CH-02: first install of core: the chart of the right version, secrets, GitHub App setup" {
   need_linux
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 0 ]
   last_json | jq -e '.status == "success" and .firstInstall == true and .publicBaseDomain == "34-12-5-6.sslip.io" and .revision == "3"'
-  # Поддомены Hammurapi рядом с Nabu: hammurapi. и hammurapi-api.
+  # Hammurapi subdomains next to Nabu: hammurapi. and hammurapi-api.
   last_json | jq -e '.webUrl == "https://hammurapi.34-12-5-6.sslip.io" and .apiUrl == "https://hammurapi-api.34-12-5-6.sslip.io"'
   called "hosts.api=hammurapi-api"
   called "upgrade --install hammurapi-core oci://ghcr.io/greenongrey/charts/hammurapi-core --version 0.4.0"
@@ -120,19 +120,19 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   not_grep -q "hammurapi-runner" "$APPLIED/manifests"
 }
 
-@test "INS-12, R14: секреты не попадают в аргументы команд и во временные файлы" {
+@test "INS-12, R14: secrets reach neither command arguments nor temporary files" {
   need_linux
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 0 ]
   local s
   for s in client-secret-XYZ webhook-secret-XYZ token-key-XYZ sk-deepseek-SECRET ghp_pulltokenXYZ "BEGIN PRIVATE KEY"; do
     not_called "$s"
-    [[ $output != *"$s"* ]] || { echo "в журнале: $s"; return 1; }
+    [[ $output != *"$s"* ]] || { echo "in the log: $s"; return 1; }
   done
   [ -z "$(find "$TMPDIR" -type f)" ]
 }
 
-@test "S3: копия s3-conn для core получает endpoint_host без схемы и use_ssl" {
+@test "S3: the copy of s3-conn for core gets endpoint_host without a scheme and use_ssl" {
   need_linux
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 0 ]
@@ -143,7 +143,7 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   [ "$(jq -r '.metadata.namespace' <<<"$s3")" = "hammurapi" ]
 }
 
-@test "FTR.HMR.CMN-0007 HN-08: токена оператора агента нет, ключ LLM первого запуска — в hammurapi-secrets" {
+@test "FTR.HMR.CMN-0007 HN-08: no agent operator token, the LLM key of the first run is in hammurapi-secrets" {
   need_linux
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 0 ]
@@ -153,16 +153,16 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
     and (.stringData | has("ACP_AGENT_ENV") | not)' <<<"$sec"
 }
 
-@test "INS-06: изменён ключ шифрования — код 24, релиз не обновлялся" {
+@test "INS-06: the encryption key changed: code 24, the release did not update" {
   FINGERPRINT=0000000000000000000000000000000000000000000000000000000000000000
   CORE_INSTALLED=true
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 24 ]
-  [[ $output == *"ключ шифрования изменён"* ]]
+  [[ $output == *"encryption key changed"* ]]
   not_called "upgrade --install"
 }
 
-@test "INS-06: с --allow-key-rotation выкатка проходит" {
+@test "INS-06: the rollout passes with --allow-key-rotation" {
   need_linux
   FINGERPRINT=0000000000000000000000000000000000000000000000000000000000000000
   CORE_INSTALLED=true
@@ -171,7 +171,7 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   called "upgrade --install hammurapi-core"
 }
 
-@test "INS-08: GitHub App не установлен на репозиторий спецификаций — код 26 и ссылка" {
+@test "INS-08: the GitHub App is not installed on the specifications repository: code 26 and a link" {
   need_linux
   export APP_INSTALLED=false
   run deploy hammurapi-core v1.8.0 0.4.0
@@ -179,7 +179,7 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   [[ $output == *"https://github.com/apps/hammurapi-demo/installations/new"* ]]
 }
 
-@test "R6: выкатка web не трогает core и не требует конфигурации core" {
+@test "R6: a web rollout leaves core alone and needs no core configuration" {
   CORE_INSTALLED=true
   PAYLOAD='{"image":"ghcr.io/greenongrey/hammurapi-web","ghcrPullToken":"ghp_x"}'
   run deploy hammurapi-web v2.3.0 0.4.0
@@ -190,15 +190,15 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   not_called "hammurapi-runner"
 }
 
-@test "неверный тег или компонент — код 2" {
+@test "a wrong tag or component: code 2" {
   run deploy hammurapi-core 1.8 0.4.0
   [ "$status" -eq 2 ]
   run deploy hammurapi-api v1.8.0 0.4.0
   [ "$status" -eq 2 ]
 }
 
-@test "R10: выкатка компонента уже идёт — код 17" {
-  command -v flock >/dev/null || skip "нет flock"
+@test "R10: a rollout of the component is running: code 17" {
+  command -v flock >/dev/null || skip "no flock"
   rm -f "$STUBS/flock"
   hash -r
   (flock "$DEPLOY_LOCK_DIR/hammurapi-deploy-hammurapi-core.lock" sleep 5) &

@@ -1,7 +1,7 @@
 {{- $folder := .Values.folder }}
 {{- $files := .Files.Glob "files/*.json" }}
 {{- if not $files }}
-{{- fail "нет files/*.json: скопируйте дашборды из dashboards/ (см. installer)" }}
+{{- fail "no files/*.json: copy dashboards from dashboards/ (see installer)" }}
 {{- end }}
 {{- range $path, $_ := $files }}
 {{- $name := base $path | trimSuffix ".json" }}

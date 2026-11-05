@@ -1,7 +1,7 @@
 {{- if or .Values.sandboxes.enabled .Values.agents.enabled }}
-# worker создаёт и удаляет поды личных песочниц и поды агентов — только в их
+# worker creates and deletes pods of personal sandboxes and agent pods, only in their
 # namespace (FTR.NAB.CMN-0001 arch §5.2, FTR.NAB.CMN-0004 arch §3.1). Namespace
-# создаёт nabu-deploy.
+# nabu-deploy creates them.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -21,7 +21,7 @@ rules:
   - apiGroups: [""]
     resources: [pods]
     verbs: [create, get, list, watch, delete]
-  # Предзагрузка образов назначенных профилей (FTR.NAB.CMN-0008 tech §5.6).
+  # Preloading images of assigned profiles (FTR.NAB.CMN-0008 tech §5.6).
   - apiGroups: [apps]
     resources: [daemonsets]
     verbs: [get, list, watch, create, update]

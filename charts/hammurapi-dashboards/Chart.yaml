@@ -1,6 +1,6 @@
 apiVersion: v2
 name: hammurapi-dashboards
-description: "Дашборды Grafana стенда Hammurapi: ConfigMap на каждый JSON из dashboards/"
+description: "Grafana dashboards of the stand: a ConfigMap for each JSON from dashboards/"
 type: application
 version: 1.0.0
 appVersion: "1.0.0"

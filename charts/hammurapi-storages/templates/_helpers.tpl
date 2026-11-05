@@ -5,9 +5,9 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 {{- end }}
 
 {{/*
-storages.service — стабильный сервис хранилища (R11).
-internal: ClusterIP с селектором на поды оператора или чарта;
-external: ExternalName для DNS-имени или сервис без селектора с EndpointSlice для IP.
+storages.service — the stable service of a storage (R11).
+internal: ClusterIP with a selector on pods of the operator or chart;
+external: ExternalName for a DNS name, or a service without a selector with an EndpointSlice for an IP.
 */}}
 {{- define "storages.service" -}}
 {{- $root := .root }}
@@ -46,7 +46,7 @@ addressType: IPv4
 ports:
   - { name: {{ .portName }}, port: {{ $v.external.port }}, protocol: TCP }
 endpoints:
-  - addresses: [{{ required (printf "%s.external.host обязателен" .name) $v.external.host | quote }}]
+  - addresses: [{{ required (printf "%s.external.host is required" .name) $v.external.host | quote }}]
 {{- else }}
 apiVersion: v1
 kind: Service
@@ -55,7 +55,7 @@ metadata:
   labels: {{- include "storages.labels" $root | nindent 4 }}
 spec:
   type: ExternalName
-  externalName: {{ required (printf "%s.external.host обязателен" .name) $v.external.host | quote }}
+  externalName: {{ required (printf "%s.external.host is required" .name) $v.external.host | quote }}
   ports:
     - { name: {{ .portName }}, port: {{ $v.external.port }}, protocol: TCP }
 {{- end }}

@@ -1,13 +1,13 @@
-# vmagent — сбор метрик (R8). Задания сбора (config.scrape_configs) собираются
-# installer из values/scrape/*.yaml: задания встроенных хранилищ
-# включаются только в режиме internal.
+# vmagent collects metrics (R8). installer assembles the scrape jobs (config.scrape_configs)
+# from values/scrape/*.yaml: jobs of built-in storages
+# are enabled only in internal mode.
 mode: deployment
 remoteWrite:
   - url: http://victoria-metrics-victoria-metrics-single-server:8428/api/v1/write
 extraArgs:
   envflag.enable: true
   envflag.prefix: VM_
-  # Метка кластера нужна дашборду «Kubernetes / Views / Global».
+  # The cluster label is needed by the dashboard Kubernetes / Views / Global.
   remoteWrite.label: cluster=hammurapi
   promscrape.dropOriginalLabels: true
 resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { cpu: 200m, memory: 256Mi } }

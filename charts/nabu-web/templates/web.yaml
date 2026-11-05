@@ -1,7 +1,7 @@
-{{- $d := required "publicBaseDomain обязателен" .Values.publicBaseDomain }}
+{{- $d := required "publicBaseDomain is required" .Values.publicBaseDomain }}
 {{- $web := printf "%s.%s" .Values.hosts.web $d }}
 {{- $api := printf "%s.%s" .Values.hosts.api $d }}
-{{- $tag := required "image.tag обязателен (задаёт выкатка)" .Values.image.tag }}
+{{- $tag := required "image.tag is required (set by the rollout)" .Values.image.tag }}
 {{- define "nabuweb.labels" -}}
 app.kubernetes.io/name: nabu
 app.kubernetes.io/instance: {{ .Release.Name }}
@@ -39,7 +39,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports: [{ name: http, containerPort: 8080 }]
           env:
-            # config.json → { apiBaseUrl }: один образ для любых доменов.
+            # config.json → { apiBaseUrl }: one image for any domain.
             - { name: API_BASE_URL, value: "https://{{ $api }}" }
           readinessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 5 }
           livenessProbe: { httpGet: { path: /healthz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }

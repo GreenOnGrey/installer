@@ -1,4 +1,4 @@
-# VictoriaMetrics single. Срок хранения — VM_RETENTION, размер тома — VM_STORAGE.
+# VictoriaMetrics single. Retention is VM_RETENTION, volume size is VM_STORAGE.
 server:
   retentionPeriod: 7d
   persistentVolume: { enabled: true, size: 10Gi }

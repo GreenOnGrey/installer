@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# End-to-end на временной машине Google Cloud (QA, уровень E). Запуск вручную:
-# перед релизом репозитория и при изменении config/versions.env, values/, charts/.
+# End-to-end on a temporary Google Cloud machine (QA, level E). Run manually
+# before a release of the repository and when config/versions.env, values/, charts/ change.
 #
 #   GCP_PROJECT=… GCP_ZONE=europe-west1-b tests/e2e/e2e.sh
 #
-# Создаёт машину e2-standard-4 с чистым Debian 13, копирует рабочую копию,
-# прогоняет сценарии и удаляет машину. Время этапов — в отчёте (метрики успеха).
+# Creates an e2-standard-4 machine with a clean Debian 13, copies the working copy,
+# runs the scenarios and deletes the machine. Stage times are in the report (success metrics).
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -21,19 +21,19 @@ mkdir -p "$(dirname "$REPORT")"
 {
   echo "# e2e installer — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo
-  echo "Машина: $MACHINE_TYPE, Debian 13, $GCP_ZONE. Коммит: $(git -C "$ROOT" rev-parse --short HEAD)."
+  echo "Machine: $MACHINE_TYPE, Debian 13, $GCP_ZONE. Commit: $(git -C "$ROOT" rev-parse --short HEAD)."
   echo
-  echo "| ID | Сценарий | Итог | Время, с |"
+  echo "| ID | Scenario | Result | Time, s |"
   echo "|---|---|---|---|"
 } >"$REPORT"
 
 g() { gcloud --project "$GCP_PROJECT" --quiet "$@"; }
-# E2E_IAP=1 — вход через IAP (порт 22 машины наружу закрыт).
+# E2E_IAP=1: sign in through IAP (port 22 of the machine is closed outside).
 IAP_ARGS=()
 [[ ${E2E_IAP:-0} == 1 ]] && IAP_ARGS=(--tunnel-through-iap)
 on_vm() { g compute ssh "$INSTANCE" --zone "$GCP_ZONE" "${IAP_ARGS[@]}" --command "cd $REMOTE_DIR && $1"; }
 
-# stage <ID> <описание> <команда на машине> [ожидаемый код]
+# stage <ID> <description> <command on the machine> [expected code]
 stage() {
   local id=$1 title=$2 cmd=$3 expect=${4:-0} start rc=0 took mark
   echo "=== $id: $title"
@@ -41,7 +41,7 @@ stage() {
   on_vm "$cmd" || rc=$?
   took=$((SECONDS - start))
   if [[ $rc == "$expect" ]]; then mark="✓"; else
-    mark="✗ (код $rc, ожидался $expect)"
+    mark="✗ (code $rc, expected $expect)"
     FAILED=$((FAILED + 1))
   fi
   echo "| $id | $title | $mark | $took |" >>"$REPORT"
@@ -54,7 +54,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "=== создание машины $INSTANCE"
+echo "=== creating machine $INSTANCE"
 g compute instances create "$INSTANCE" --zone "$GCP_ZONE" --machine-type "$MACHINE_TYPE" \
   --image-family debian-13 --image-project debian-cloud --boot-disk-size 100GB --boot-disk-type pd-balanced \
   --metadata enable-oslogin=TRUE >/dev/null
@@ -64,59 +64,59 @@ g compute scp "$ROOT/.work/e2e.tar.gz" "$INSTANCE:e2e.tar.gz" --zone "$GCP_ZONE"
 g compute ssh "$INSTANCE" --zone "$GCP_ZONE" "${IAP_ARGS[@]}" --command "tar -xzf e2e.tar.gz && rm e2e.tar.gz"
 
 H="bash ./installer"
-stage UP-01 "up на чистой машине (цель ≤ 20 мин)" "$H up --no-color"
+stage UP-01 "up on a clean machine (target ≤ 20 min)" "$H up --no-color"
 stage CMD-01 "status --json" "$H status --json --no-color | jq -e '.ok and (.checks | length) >= 6'"
-stage CMD-02 "creds: адреса и пароли всех хранилищ и Grafana" \
+stage CMD-02 "creds: addresses and passwords of all storages and Grafana" \
   "$H creds --json | jq -e '.postgres.password != \"\" and .s3.secret_key != \"\" and .grafana.password != \"\" and .kafka.bootstrap_servers != \"\"'"
-stage OBS-04 "семь дашбордов в папке Hammurapi Infra" \
+stage OBS-04 "seven dashboards in the folder Hammurapi Infra" \
   "kubectl --context hammurapi -n observability get cm -l grafana_dashboard=1 -o name | wc -l | grep -qx 7"
-stage OBS-05 "вход в Grafana без пароля запрещён" \
+stage OBS-05 "sign-in to Grafana without a password is forbidden" \
   "kubectl --context hammurapi -n observability run gf-anon --rm -i --restart=Never --image=curlimages/curl:8.22.0 -- \
      curl -s -o /dev/null -w '%{http_code}' http://grafana/api/dashboards/uid/hammurapi-kafka | grep -qx 401"
 
-# UP-02, SEC-02: повторный up — ни один под не перезапущен, пароли прежние.
+# UP-02, SEC-02: a repeated up restarts no pod and keeps passwords.
 on_vm "kubectl --context hammurapi get pods -A -o json | jq -S '[.items[] | {n: .metadata.name, uid: .metadata.uid, r: [.status.containerStatuses[]?.restartCount]}]' >/tmp/pods-before.json;
   kubectl --context hammurapi get secret -A -l app.kubernetes.io/managed-by=hammurapi-infra -o json | jq -S '[.items[] | {n: .metadata.name, d: .data}]' >/tmp/secrets-before.json" || true
-stage UP-02 "повторный up без изменений (цель ≤ 3 мин)" "$H up --no-color"
-stage SEC-02 "повторный up не меняет пароли и поды" \
+stage UP-02 "a repeated up without changes (target ≤ 3 min)" "$H up --no-color"
+stage SEC-02 "a repeated up changes no passwords or pods" \
   "kubectl --context hammurapi get secret -A -l app.kubernetes.io/managed-by=hammurapi-infra -o json | jq -S '[.items[] | {n: .metadata.name, d: .data}]' | diff -q - /tmp/secrets-before.json &&
    kubectl --context hammurapi get pods -A -o json | jq -S '[.items[] | {n: .metadata.name, uid: .metadata.uid, r: [.status.containerStatuses[]?.restartCount]}]' | diff -q - /tmp/pods-before.json"
 
-# PERS: данные переживают minikube stop/start и перезагрузку машины.
+# PERS: data survive minikube stop/start and a machine reboot.
 PG="kubectl --context hammurapi -n storages exec hammurapi-pg-1 -c postgres --"
-stage PERS-01a "запись данных в Postgres" "$PG psql -U postgres -d hammurapi -c 'create table if not exists e2e(v text); insert into e2e values (\$\$persist\$\$)'"
-stage PERS-01 "minikube stop и up — данные на месте" \
+stage PERS-01a "writing data to Postgres" "$PG psql -U postgres -d hammurapi -c 'create table if not exists e2e(v text); insert into e2e values (\$\$persist\$\$)'"
+stage PERS-01 "minikube stop and up: data are in place" \
   "minikube stop -p hammurapi && $H up --no-color && $PG psql -U postgres -d hammurapi -tAc 'select v from e2e' | grep -qx persist"
-echo "=== перезагрузка машины"
+echo "=== rebooting the machine"
 g compute instances reset "$INSTANCE" --zone "$GCP_ZONE" >/dev/null
 sleep 60
 for _ in $(seq 1 30); do on_vm true 2>/dev/null && break || sleep 10; done 2>/dev/null || true
-stage PERS-04 "после перезагрузки кластер и компоненты поднялись сами, без up" \
+stage PERS-04 "after a reboot the cluster and components came back without up" \
   "timeout 1800 bash -c 'until systemctl is-active --quiet hammurapi-stand; do sleep 10; done' &&
    $H status --no-color && $PG psql -U postgres -d hammurapi -tAc 'select v from e2e' | grep -qx persist"
-stage PERS-02 "перезагрузка и up — данные и пароли прежние" \
+stage PERS-02 "a reboot and up: data and passwords are the same" \
   "$H up --no-color && $PG psql -U postgres -d hammurapi -tAc 'select v from e2e' | grep -qx persist &&
    kubectl --context hammurapi get secret -A -l app.kubernetes.io/managed-by=hammurapi-infra -o json | jq -S '[.items[] | {n: .metadata.name, d: .data}]' | diff -q - /tmp/secrets-before.json"
 
-# CHK: проверки ловят реальные отказы.
-stage CHK-01 "VictoriaLogs в 0 — status код 15 «логи не поступают»" \
+# CHK: the checks catch real failures.
+stage CHK-01 "VictoriaLogs at 0: status code 15, logs do not reach it" \
   "kubectl --context hammurapi -n observability scale statefulset victoria-logs-victoria-logs-single-server --replicas=0 &&
-   { $H status --no-color >/tmp/chk01.txt 2>&1; rc=\$?; }; grep -q 'логи не поступают в VictoriaLogs' /tmp/chk01.txt && exit \$rc; exit 99" 15
-stage CHK-03 "неверный пароль в postgres-conn — «Postgres: ошибка аутентификации»" \
+   { $H status --no-color >/tmp/chk01.txt 2>&1; rc=\$?; }; grep -q 'logs do not reach VictoriaLogs' /tmp/chk01.txt && exit \$rc; exit 99" 15
+stage CHK-03 "a wrong password in postgres-conn: Postgres authentication failed" \
   "kubectl --context hammurapi -n observability scale statefulset victoria-logs-victoria-logs-single-server --replicas=1 &&
    kubectl --context hammurapi -n storages patch secret postgres-conn -p '{\"data\":{\"password\":\"d3Jvbmc=\"}}' &&
-   { $H status --no-color >/tmp/chk03.txt 2>&1; rc=\$?; }; grep -q 'Postgres: ошибка аутентификации' /tmp/chk03.txt && exit \$rc; exit 99" 15
-stage CHK-04 "после проверок пробные поды и Job удалены" \
+   { $H status --no-color >/tmp/chk03.txt 2>&1; rc=\$?; }; grep -q 'Postgres: authentication failed' /tmp/chk03.txt && exit \$rc; exit 99" 15
+stage CHK-04 "after the checks probe pods and Jobs are gone" \
   "sleep 15; ! kubectl --context hammurapi get pods -A -l app.kubernetes.io/managed-by=hammurapi-infra --no-headers 2>/dev/null | grep -q ."
-stage UP-04 "up восстанавливает стенд после сбоев" "$H up --no-color"
+stage UP-04 "up restores the stand after failures" "$H up --no-color"
 
-stage CMD-04 "down --yes — профиль удалён" "$H down --yes --no-color && ! minikube profile list 2>/dev/null | grep -q hammurapi"
-stage PERS-03 "down и up — чистый стенд, новые пароли" \
+stage CMD-04 "down --yes: the profile is deleted" "$H down --yes --no-color && ! minikube profile list 2>/dev/null | grep -q hammurapi"
+stage PERS-03 "down and up: a clean stand, new passwords" \
   "$H up --no-color && kubectl --context hammurapi get secret -A -l app.kubernetes.io/managed-by=hammurapi-infra -o json | jq -S '[.items[] | {n: .metadata.name, d: .data}]' | ! diff -q - /tmp/secrets-before.json >/dev/null"
 
 {
   echo
-  echo "Не прошло: $FAILED."
+  echo "Failed: $FAILED."
 } >>"$REPORT"
 cat "$REPORT"
 ((FAILED == 0))

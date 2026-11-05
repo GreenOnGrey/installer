@@ -1,16 +1,16 @@
-# Traefik (FTR.HMR.INFRA-0002, R17, R19): ingress-контроллер, сервис LoadBalancer
-# (адрес выдаёт MetalLB; конкретный — service.spec.loadBalancerIP из up).
-# Маршрутизация — стандартные Ingress с классом traefik.
+# Traefik (FTR.HMR.INFRA-0002, R17, R19): ingress controller, service LoadBalancer
+# (MetalLB gives the address; the specific one is service.spec.loadBalancerIP from up).
+# Routing uses standard Ingress objects with the class traefik.
 deployment:
   replicas: 1
   podAnnotations: { prometheus.io/scrape: "true", prometheus.io/port: "9100" }
 ingressClass: { enabled: true, isDefaultClass: false, name: traefik }
 providers:
   kubernetesIngress: { enabled: true }
-  kubernetesCRD: { enabled: true }   # нужен для TLSStore
+  kubernetesCRD: { enabled: true }   # required for TLSStore
 ports:
   web:
-    # Проверки HTTP-01 cert-manager проходят мимо перенаправления.
+    # cert-manager HTTP-01 checks bypass the redirect.
     allowACMEByPass: true
     http:
       redirections:
@@ -18,14 +18,14 @@ ports:
   websecure:
     http:
       tls: { enabled: true }
-# Один сертификат на web., api., grafana. — сертификат по умолчанию: Ingress в
-# других namespace включают TLS без собственных секретов.
+# One certificate for web., api., grafana. is the default one: Ingress objects in
+# other namespaces turn TLS on without secrets of their own.
 tlsStore:
   default:
     defaultCertificate: { secretName: hammurapi-public }
 service:
   spec:
     type: LoadBalancer
-    externalTrafficPolicy: Local   # сохраняет адрес клиента
+    externalTrafficPolicy: Local   # keeps the client address
 accessLog: { enabled: true }
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
