@@ -306,6 +306,13 @@ config_step() {
 
 # --- INGRESS_MODE (FTR.INFRA.INST-0001 R17, RES-06) ---
 
+# validate_public_strict — as validate_config reports: missing parameters give code 2.
+validate_public_strict() {
+  CONFIG_MISSING=()
+  validate_public_config
+  die_if_missing
+}
+
 external_ingress() {
   INGRESS_MODE=external INGRESS_CLASS=nginx ACME_ISSUER=corp PUBLIC_ACCESS=true PUBLIC_BASE_DOMAIN=x.example
   CONFIG_EXPLICIT[INGRESS_CLASS]=1 CONFIG_EXPLICIT[ACME_ISSUER]=1
@@ -315,15 +322,15 @@ external_ingress() {
   load_script
   external_ingress
   ACME_EMAIL=
-  run validate_public_config
+  run validate_public_strict
   [ "$status" -eq 0 ]
   unset 'CONFIG_EXPLICIT[INGRESS_CLASS]'
-  run validate_public_config
+  run validate_public_strict
   [ "$status" -eq 2 ]
   [[ $output == *INGRESS_CLASS* ]]
   external_ingress
   PUBLIC_BASE_DOMAIN=
-  run validate_public_config
+  run validate_public_strict
   [ "$status" -eq 2 ]
   [[ $output == *PUBLIC_BASE_DOMAIN* ]]
 }
@@ -331,10 +338,10 @@ external_ingress() {
 @test "RES-06 (U): internal installs Traefik: another class or mode is an error" {
   load_script
   PUBLIC_ACCESS=true ACME_EMAIL=a@b.example INGRESS_CLASS=nginx
-  run validate_public_config
+  run validate_public_strict
   [ "$status" -eq 2 ]
   INGRESS_CLASS=traefik INGRESS_MODE=other
-  run validate_public_config
+  run validate_public_strict
   [ "$status" -eq 2 ]
   [[ $output == *INGRESS_MODE* ]]
 }

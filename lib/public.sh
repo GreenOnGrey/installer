@@ -244,6 +244,19 @@ EOF
     die "$E_DEPLOY" "failed to apply the forwarding rules, see journalctl -u $unit"
 }
 
+# remove_forward — the unit stops, so its rules go (ingress-forward remove), then its files.
+remove_forward() {
+  local unit=$UNIT_PREFIX-ingress-forward
+  [[ -f $UNIT_DIR/$unit.service ]] || return 0
+  as_root systemctl disable --now "$unit.service" >/dev/null 2>&1 ||
+    warn "failed to stop $unit: check iptables and firewalld for rules to $(cat "$FORWARD_STATE/lb-ip" 2>/dev/null)"
+  as_root rm -f "$UNIT_DIR/$unit.service" "$FORWARD_BIN"
+  as_root rm -f "$FORWARD_STATE/lb-ip" "$FORWARD_STATE/unit-prefix" "$FORWARD_STATE/applied-ip"
+  as_root rmdir --ignore-fail-on-non-empty "$FORWARD_STATE" 2>/dev/null || true
+  as_root systemctl daemon-reload
+  log "forwarding of 80/443 is removed"
+}
+
 # deploy_public_external — nothing to install: the cluster has the controller and the issuer (R17).
 deploy_public_external() {
   public_state_manifest | apply_stdin
@@ -277,8 +290,8 @@ deploy_public() {
     metallb_config "$range" | apply_stdin
     lb_args=(--set-string "service.spec.loadBalancerIP=$first")
   fi
-  kc create namespace "$NS_INGRESS" --dry-run=client -o yaml | apply_stdin
-  kc create namespace "$NS_CERT_MANAGER" --dry-run=client -o yaml | apply_stdin
+  ensure_namespace "$NS_INGRESS"
+  ensure_namespace "$NS_CERT_MANAGER"
 
   release cert-manager "$NS_CERT_MANAGER" jetstack/cert-manager "$CERT_MANAGER_CHART_VERSION" cert-manager.yaml
   wait_crd clusterissuers.cert-manager.io

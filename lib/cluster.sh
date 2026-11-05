@@ -164,8 +164,14 @@ ensure_stand_namespaces() {
   for ns in $(stand_namespaces); do ensure_namespace "$ns"; done
 }
 
+# ensure_namespace <name> — a new namespace gets the label by which uninstall finds it; an existing one
+# stays as it is, as it may hold what the installer did not create.
 ensure_namespace() {
-  kc create namespace "$1" --dry-run=client -o yaml | apply_stdin
+  local out
+  out=$(kc get namespace "$1" --ignore-not-found -o name) || die "$E_CLUSTER" "failed to read namespace $1"
+  [[ -z $out ]] || return 0
+  kc create namespace "$1" --dry-run=client -o json |
+    jq '.metadata.labels["app.kubernetes.io/part-of"] = "installer"' | apply_stdin
 }
 
 cluster_delete() {

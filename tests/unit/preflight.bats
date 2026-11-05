@@ -206,7 +206,7 @@ esac'
 @test "R18: the external target with public access needs a domain" {
   CONFIG_EXPLICIT[KUBE_CONTEXT]=1
   PUBLIC_ACCESS=true PUBLIC_BASE_DOMAIN='' ACME_EMAIL=a@b.example
-  run validate_public_config
+  run validate_config
   [ "$status" -eq 2 ]
   [[ $output == *PUBLIC_BASE_DOMAIN* ]]
 }
@@ -221,11 +221,42 @@ esac'
   called "upgrade --install traefik"
 }
 
-@test "R8: down refuses the external target and deletes nothing" {
-  ASSUME_YES=1
-  run cmd_down
-  [ "$status" -eq 2 ]
+@test "CLI-08 (U): uninstall of the external target: releases, then namespaces of the installer, no minikube" {
+  RUN_DIR=$BATS_TEST_TMPDIR
+  kc() {
+    echo "kubectl $*" >>"$CALLS"
+    case "$*" in
+      "get namespaces"*) echo '{"items":[
+        {"metadata":{"name":"installer","labels":{"app.kubernetes.io/part-of":"installer"}}},
+        {"metadata":{"name":"storages","labels":{"app.kubernetes.io/part-of":"installer"}}},
+        {"metadata":{"name":"mcp","labels":{"app.kubernetes.io/part-of":"installer"}}},
+        {"metadata":{"name":"nabu","labels":{"app.kubernetes.io/part-of":"nabu"}}}]}' ;;
+    esac
+  }
+  hm() {
+    echo "helm $*" >>"$CALLS"
+    [[ "$*" == "list -n storages -q" ]] && printf 'cnpg\nstorages\nstrimzi\nseaweedfs\n'
+    [[ "$*" == "list -n nabu -q" ]] && echo nabu-core
+    return 0
+  }
+  run uninstall_external
+  [ "$status" -eq 0 ]
   not_called "minikube"
+  # Products first, the stand next, storages with their operators last, the state at the end.
+  [ "$(grep -o 'uninstall [a-z-]* -n [a-z]*' "$CALLS" | tr '\n' ' ')" = \
+    "uninstall nabu-core -n nabu uninstall storages -n storages uninstall seaweedfs -n storages uninstall cnpg -n storages uninstall strimzi -n storages " ]
+  [ "$(grep -o 'delete namespace [a-z]*' "$CALLS" | tr '\n' ' ')" = \
+    "delete namespace nabu delete namespace mcp delete namespace storages delete namespace installer " ]
+  # The label selector covers the namespaces of bin/*-deploy too.
+  called "part-of in (nabu,hammurapi,landing,installer)"
+}
+
+@test "CLI-08 (U): uninstall of an external target without anything of the installer changes nothing" {
+  kc() { echo "kubectl $*" >>"$CALLS"; [[ "$*" == "get namespaces"* ]] && echo '{"items":[]}'; return 0; }
+  run uninstall_external
+  [ "$status" -eq 0 ]
+  not_called "delete"
+  not_called "uninstall"
 }
 
 @test "R8: status of the external target asks the context, not minikube" {
@@ -247,4 +278,47 @@ esac'
   run target_external
   [ "$status" -ne 0 ]
   [ "$(cluster_label)" = "minikube greenongrey" ]
+}
+
+@test "CLI-08 (U): a failed list of releases stops uninstall before any namespace goes" {
+  kc() {
+    echo "kubectl $*" >>"$CALLS"
+    [[ "$*" == "get namespaces"* ]] && echo '{"items":[{"metadata":{"name":"storages","labels":{"app.kubernetes.io/part-of":"installer"}}}]}'
+    return 0
+  }
+  hm() { echo "helm $*" >>"$CALLS"; [[ "$*" != list* ]]; }
+  run uninstall_external
+  [ "$status" -eq 13 ]
+  not_called "delete namespace"
+}
+
+@test "CLI-08 (U): uninstall names stand namespaces without the label and leaves them" {
+  kc() {
+    echo "kubectl $*" >>"$CALLS"
+    case "$*" in
+      "get namespaces"*) echo '{"items":[]}' ;;
+      "get namespace installer"* | "get namespace storages"*) echo "namespace/${3}" ;;
+    esac
+    return 0
+  }
+  run uninstall_external
+  [ "$status" -eq 0 ]
+  [[ $output == *"left alone"*"installer storages"* ]]
+  not_called "delete"
+}
+
+@test "R5: uninstall of the external target without KUBE_CONTEXT: code 2, nothing deleted" {
+  run env -u KUBE_CONTEXT INSTALL_TARGET=external LOGS_DIR="$BATS_TEST_TMPDIR" bash "$ROOT/installer" uninstall --yes --no-color
+  [ "$status" -eq 2 ]
+  [[ $output == *KUBE_CONTEXT* ]]
+  not_called "delete"
+}
+
+@test "R5: ensure_namespace labels a namespace it creates and leaves an existing one alone" {
+  kc() { echo "kubectl $*" >>"$CALLS"; [[ "$*" == "get namespace old"* ]] && echo namespace/old; [[ "$*" == "create"* ]] && echo '{"metadata":{"name":"new"}}'; return 0; }
+  apply_stdin() { cat >>"$BATS_TEST_TMPDIR/applied"; }
+  ensure_namespace old
+  not_called "create namespace old"
+  ensure_namespace new
+  jq -e '.metadata.labels["app.kubernetes.io/part-of"] == "installer"' "$BATS_TEST_TMPDIR/applied"
 }

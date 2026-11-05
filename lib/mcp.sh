@@ -291,8 +291,7 @@ deploy_mcp() {
     return
   fi
   mcp_load
-  kc create ns "$NS_MCP" --dry-run=client -o json |
-    jq '.metadata.labels["app.kubernetes.io/part-of"] = "installer"' | apply_stdin
+  ensure_namespace "$NS_MCP"
   ensure_mcp_secrets
   copy_pull_secret
   local args=()

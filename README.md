@@ -41,10 +41,10 @@ The script checks all of this before installing and exits without changing anyth
 ```sh
 git clone https://github.com/GreenOnGrey/installer.git
 cd installer
-./installer up
+./installer install
 ```
 
-`up` installs Docker Engine, kubectl, Helm and minikube at the required versions (leaving installed ones alone), starts the cluster, generates passwords, deploys the components, checks the stand and prints a summary. On a clean machine this takes about 15–20 minutes, a repeated run takes a couple of minutes.
+`install` installs Docker Engine, kubectl, Helm and minikube at the required versions (leaving installed ones alone), starts the cluster, generates passwords, deploys the components, checks the stand and prints a summary. On a clean machine this takes about 15–20 minutes, a repeated run takes a couple of minutes.
 
 Grafana opens through an SSH tunnel, since nothing is published outside:
 
@@ -60,24 +60,32 @@ kubectl --context greenongrey -n observability port-forward svc/grafana 3000:80
 
 | Command | What it does |
 |---|---|
-| `./installer up` | Installs and deploys. A repeated run is safe: it brings the stand to the described state, keeps data and passwords, and applies changed versions |
+| `./installer install` | Installs and deploys, asking nothing. A repeated run is safe: it brings the stand to the described state, keeps data and passwords, and applies changed versions. `up` is its old name |
 | `./installer status [--json]` | State of the cluster, releases and pods, the deployed version, checks, requested memory |
 | `./installer creds [--json]` | Service addresses, secret names, usernames and passwords of storages and Grafana |
-| `./installer down [--yes]` | Deletes the minikube profile with all its data, after a confirmation |
+| `./installer uninstall [--yes]` | Removes what the installer installed, after a confirmation (without a terminal `--yes` is required): on minikube the profile with all its data and the units; on an existing cluster the releases and namespaces of the installer and of the products, with the data of built-in storages. External Postgres, Kafka, S3 and their data stay. `down` is its old name |
 
 Flags: `--config <file>` (default: `config/local.env`), `--verbose`, `--no-color`.
 
-Exit codes: `0` success, `2` wrong call or configuration, `10` unsuitable machine, `11` a dependency is not installed or its checksum does not match, `12` the cluster did not start, `13` a release was not deployed, `14` an external storage is unreachable, `15` checks failed, `16` cancelled, `17` another `up` is running.
+Exit codes: `0` success, `2` wrong call or configuration, `10` unsuitable machine, `11` a dependency is not installed or its checksum does not match, `12` the cluster did not start, `13` a release was not deployed, `14` an external storage is unreachable, `15` checks failed, `16` cancelled, `17` another run is changing the installation, `18` the external cluster does not fit. A missing parameter does not stop at the first one: code `2` names them all.
 
-**Machine reboots.** `up` installs the systemd unit `greenongrey-stand`. At boot it starts the minikube profile (its container has no restart policy) and waits for the pods. Components come back on their own, since their objects and volumes live in the profile. At shutdown the unit stops the cluster cleanly. See the outcome with `journalctl -u greenongrey-stand`. The unit `hammurapi-ingress-forward` restores port forwarding for public access. To turn autostart off, set `STAND_AUTOSTART=false` and run `up`. `down` removes the unit.
+`install` and `uninstall` end stdout with one line of JSON, on success and on failure:
 
-**Old images.** minikube turns off image garbage collection in kubelet, so old tags of Nabu and Hammurapi pile up on the node's disk. `up` and the unit `greenongrey-stand` turn it back on in the kubelet configuration after every cluster start. When image disk usage goes above `IMAGE_GC_HIGH` % (85), unused images are removed down to `IMAGE_GC_LOW` % (80), and an unused image older than `IMAGE_GC_MAX_AGE` (`336h`, 14 days) is removed in any case. Images of running pods stay, including those preloaded by DaemonSets. Kubelet restarts only if the setting changed, and pods keep running.
+```json
+{"status":"ok","command":"install","code":0,"durationSeconds":412,"installerVersion":"v0.4.0","updated":[],"failed":[],"skipped":[],"diagnostics":null}
+```
 
-The log of each `up` is `logs/<time>/run.log`. On failure `diagnostics/` sits next to it, with events, `describe` of failing pods and `helm status` of releases.
+The configuration file is `--config`, else `$INSTALLER_CONFIG`, else `/etc/greenongrey/installer.env` if it exists, else `config/local.env`.
+
+**Machine reboots.** `install` installs the systemd unit `greenongrey-stand`. At boot it starts the minikube profile (its container has no restart policy) and waits for the pods. Components come back on their own, since their objects and volumes live in the profile. At shutdown the unit stops the cluster cleanly. See the outcome with `journalctl -u greenongrey-stand`. The unit `hammurapi-ingress-forward` restores port forwarding for public access. To turn autostart off, set `STAND_AUTOSTART=false` and run `install`. `uninstall` removes it and the forwarding unit.
+
+**Old images.** minikube turns off image garbage collection in kubelet, so old tags of Nabu and Hammurapi pile up on the node's disk. `install` and the unit `greenongrey-stand` turn it back on in the kubelet configuration after every cluster start. When image disk usage goes above `IMAGE_GC_HIGH` % (85), unused images are removed down to `IMAGE_GC_LOW` % (80), and an unused image older than `IMAGE_GC_MAX_AGE` (`336h`, 14 days) is removed in any case. Images of running pods stay, including those preloaded by DaemonSets. Kubelet restarts only if the setting changed, and pods keep running.
+
+The log of each `install` is `logs/<time>/run.log`. On failure `diagnostics/` sits next to it, with events, `describe` of failing pods and `helm status` of releases.
 
 ## Checks
 
-At the end of `up` and in `status`, these are checked:
+At the end of `install` and in `status`, these are checked:
 
 - all pods in `storages` and `observability` (if it is on) are ready;
 - Grafana and both data sources answer;
@@ -98,7 +106,7 @@ Consumers use only stable addresses and secrets in the namespace `storages`, the
 | `kafka-conn` | `bootstrap_servers`, `security_protocol` (`PLAINTEXT` / `SASL_SSL`), `sasl_mechanism`, `username`, `password` |
 | `s3-conn` | `endpoint`, `region`, `bucket`, `access_key`, `secret_key`, `path_style` |
 
-Passwords of built-in storages are generated on the first `up` and kept only in Kubernetes secrets, never in the repository, values files or logs.
+Passwords of built-in storages are generated on the first `install` and kept only in Kubernetes secrets, never in the repository, values files or logs.
 
 ## Configuration
 
@@ -110,25 +118,25 @@ The main settings are minikube resources (`MK_CPUS`, `MK_MEMORY`, `MK_DISK`, app
 
 `INSTALL_TARGET=external` with `KUBE_CONTEXT` installs into an existing cluster. The machine does not change: no packages, no systemd units, no minikube. It needs `kubectl`, `helm` and `jq`.
 
-Before anything changes, `up` checks the cluster and reports all reasons together with code 18: Kubernetes from 1.35 (a version newer than the tested 1.37 gives only a warning), `kubectl` within one minor version of the server, cluster-admin rights and a default `StorageClass` when something is built in, the `INGRESS_CLASS` and `ACME_ISSUER` of an external ingress, and a real test of `NetworkPolicy` in both directions, on which the isolation of Nabu sandboxes rests. The test uses a temporary namespace `installer-preflight`.
+Before anything changes, `install` checks the cluster and reports all reasons together with code 18: Kubernetes from 1.35 (a version newer than the tested 1.37 gives only a warning), `kubectl` within one minor version of the server, cluster-admin rights and a default `StorageClass` when something is built in, the `INGRESS_CLASS` and `ACME_ISSUER` of an external ingress, and a real test of `NetworkPolicy` in both directions, on which the isolation of Nabu sandboxes rests. The test uses a temporary namespace `installer-preflight`.
 
-`PUBLIC_BASE_DOMAIN` is required with public access. With the built-in ingress the cluster needs a provider of `LoadBalancer` services. On a new cluster the address appears only during `up`, so the first run stops at the certificate: point `*.<domain>` to the printed address and run `up` again. `down` is not available: remove the releases with `helm`. A default `StorageClass` is required, as there is no option to choose another one yet.
+`PUBLIC_BASE_DOMAIN` is required with public access. With the built-in ingress the cluster needs a provider of `LoadBalancer` services. On a new cluster the address appears only during `install`, so the first run stops at the certificate: point `*.<domain>` to the printed address and run `install` again. `uninstall` removes the releases and the namespaces the installer and `bin/*-deploy` labelled with `app.kubernetes.io/part-of` (`installer`, `nabu`, `hammurapi`, `landing`), and the `ClusterIssuer`s of the built-in ingress; CRDs stay. A namespace that existed before the installer, or that an older tag created, has no label: `uninstall` names it and leaves it. A default `StorageClass` is required, as there is no option to choose another one yet.
 
 ### Ingress
 
 `INGRESS_MODE=internal` (the default) installs Traefik and cert-manager, and MetalLB and port forwarding on minikube.
 
-`INGRESS_MODE=external` installs none of them, and uses what the cluster has. Set `INGRESS_CLASS`, `ACME_ISSUER` (a `ClusterIssuer` of cert-manager) and `PUBLIC_BASE_DOMAIN`. Each Ingress gets a certificate of its own in its namespace. Switching an existing stand to this mode does not remove its Traefik and cert-manager. Product Ingresses move on their next release, so release each product after switching. Set these keys in the config file: the keys passed from GitHub reach only `up`, not `status`. The site (`bin/landing-deploy`) needs the built-in Traefik.
+`INGRESS_MODE=external` installs none of them, and uses what the cluster has. Set `INGRESS_CLASS`, `ACME_ISSUER` (a `ClusterIssuer` of cert-manager) and `PUBLIC_BASE_DOMAIN`. Each Ingress gets a certificate of its own in its namespace. Switching an existing stand to this mode does not remove its Traefik and cert-manager. Product Ingresses move on their next release, so release each product after switching. Set these keys in the config file: the keys passed from GitHub reach only `install`, not `status`. The site (`bin/landing-deploy`) needs the built-in Traefik.
 
 ### Observability
 
-`OBSERVABILITY=false` installs no VictoriaMetrics, VictoriaLogs, collectors or Grafana: `up` removes them if they are installed. The volumes of metrics and logs stay, the data of Grafana is deleted, and the checks of Grafana, metrics and logs are skipped.
+`OBSERVABILITY=false` installs no VictoriaMetrics, VictoriaLogs, collectors or Grafana: `install` removes them if they are installed. The volumes of metrics and logs stay, the data of Grafana is deleted, and the checks of Grafana, metrics and logs are skipped.
 
 ### External (managed) storages
 
 Set `POSTGRES_MODE`, `KAFKA_MODE` or `S3_MODE` to `external`, separately for each storage. The built-in storage is then not deployed, the service `postgres`/`kafka`/`s3` points to the external host (`ExternalName` for a DNS name, a service with an `EndpointSlice` for an IP), and the `*-conn` secret is filled from the configuration.
 
-Before the deploy, the Job `external-check` checks them from the cluster, and a failure stops `up` with code 14 and deploys no storages. Postgres needs the `vector` extension, and its owner needs `CREATEROLE` and `CREATEDB` (without `CREATEDB`, create the database of Nabu in advance). Kafka needs an answer to a metadata request. S3 needs the buckets `S3_BUCKET` and `S3_BUCKET_NABU` created in advance: the check writes, reads and deletes an object `.installer-check/<id>` in each.
+Before the deploy, the Job `external-check` checks them from the cluster, and a failure stops `install` with code 14 and deploys no storages. Postgres needs the `vector` extension, and its owner needs `CREATEROLE` and `CREATEDB` (without `CREATEDB`, create the database of Nabu in advance). Kafka needs an answer to a metadata request. S3 needs the buckets `S3_BUCKET` and `S3_BUCKET_NABU` created in advance: the check writes, reads and deletes an object `.installer-check/<id>` in each.
 
 Passwords and keys go only through files (`POSTGRES_PASSWORD_FILE=/secure/pg-password`) or environment variables. A password written directly in `local.env` stops the script with code 2.
 
@@ -149,11 +157,11 @@ Servers are installed by the release `mcp-servers` in the namespace `mcp` and ar
 | `MCP_YANDEX_MAIL=true` | Read-only Yandex Mail: our own server `imap-mcp` | ~0.06 / 0.25 GiB | ~0.1 GB |
 | `MCP_DOCGEN=true` | Creating, editing and converting documents (`FTR.NAB.CHAT-0003`): our own server `docgen-mcp` and `doc-convert` (Gotenberg, which is LibreOffice and Chromium without network, and the `legacy` sidecar); it also turns on the DOCX/XLSX/PPTX preview in Nabu | ~0.9 / 4 GiB | ~2.5 GB |
 
-**Disabling a server.** `up` stores the MCP settings in the ConfigMap `installer/installer-config`, so a later `up` without them keeps the servers. Removing an option from the file does not turn a server off. Set `MCP_<NAME>=false` explicitly, and the next `up` removes the server.
+**Disabling a server.** `install` stores the MCP settings in the ConfigMap `installer/installer-config`, so a later `install` without them keeps the servers. Removing an option from the file does not turn a server off. Set `MCP_<NAME>=false` explicitly, and the next `install` removes the server.
 
-Before the deploy, `up` checks the memory budget (two thirds of the node memory, like the `resources` check). If the servers do not fit, it exits with code 2 and says which `MK_MEMORY` is needed. The minikube profile with new memory is created anew (`down`, then `up`). With document conversion on the default stand (12 GB), `MK_MEMORY=16g` is recommended.
+Before the deploy, `install` checks the memory budget (two thirds of the node memory, like the `resources` check). If the servers do not fit, it exits with code 2 and says which `MK_MEMORY` is needed. The minikube profile with new memory is created anew (`uninstall`, then `install`). With document conversion on the default stand (12 GB), `MK_MEMORY=16g` is recommended.
 
-Other parameters: `MCP_DOCLING_MAX_MB` is the document size limit of `docling-serve`, and `MCP_SEARCH_ENGINES` lists the SearXNG engines. Access keys are generated on the first `up` and kept in secrets of the namespace `mcp`. With `MCP_DOCGEN=true`, `up` creates the secret `nabu-docs-preview` in the namespace `nabu` (addresses and keys of `doc-convert` and `docgen`) and restarts the Nabu `api` if the secret changed. Without it the office file preview is off.
+Other parameters: `MCP_DOCLING_MAX_MB` is the document size limit of `docling-serve`, and `MCP_SEARCH_ENGINES` lists the SearXNG engines. Access keys are generated on the first `install` and kept in secrets of the namespace `mcp`. With `MCP_DOCGEN=true`, `install` creates the secret `nabu-docs-preview` in the namespace `nabu` (addresses and keys of `doc-convert` and `docgen`) and restarts the Nabu `api` if the secret changed. Without it the office file preview is off.
 
 **Adding to the Nabu catalog.** `./installer creds` prints addresses and keys. In the Nabu admin area → Catalog → MCP server:
 
@@ -185,9 +193,9 @@ While access is off, the tools answer with an error saying what to turn on.
 Production is a stand in Google Cloud. The workflow [`deploy-prod`](.github/workflows/deploy-prod.yml) rolls out a release tag:
 
 - it runs on a push of a tag `vX.Y.Z`. A manual run from a tag repeats a rollout or returns to an earlier version (there is no automatic rollback), and `production` accepts only tags, so choose the tag under **Use workflow from**;
-- it hands the production machine an export of the tag (`git archive`) over the same SSH, unpacks it into `/opt/installer/releases/<tag>` and runs `up`. After a success `current` points to that tag, and the last 5 exports are kept. The production machine needs no access to GitHub, because deploy keys are forbidden by the organization's policy;
-- `/opt/installer/local.env` and secret files stay on the machine and are not passed through the workflow. The exceptions are public access, Grafana sign-in through GitHub and MCP servers (below): their parameters reach `up` through the stdin of the SSH session and are not written to disk. Logs of all runs are in `/opt/installer/logs`;
-- rollouts run one at a time (`concurrency`), and `/var/lock/installer.lock` blocks a parallel `up` on the machine (code 17);
+- it hands the production machine an export of the tag (`git archive`) over the same SSH, unpacks it into `/opt/installer/releases/<tag>` and runs `up` (the old name of `install`, which older tags know too, for a rollback). After a success `current` points to that tag, and the last 5 exports are kept. The production machine needs no access to GitHub, because deploy keys are forbidden by the organization's policy;
+- `/opt/installer/local.env` and secret files stay on the machine and are not passed through the workflow. The exceptions are public access, Grafana sign-in through GitHub and MCP servers (below): their parameters reach `install` through the stdin of the SSH session and are not written to disk. Logs of all runs are in `/opt/installer/logs`;
+- rollouts run one at a time (`concurrency`), and `/var/lock/installer.lock` blocks a parallel `install` on the machine (code 17);
 - the outcome is the `status` summary in the run's report. The deployed tag shows in `status` (ConfigMap `installer/installer-version`). The log of each run stays on the machine: the repository is public, so logs are not uploaded as artifacts.
 
 Settings of the GitHub environment `production`:
@@ -219,7 +227,7 @@ The firewall, the OAuth app for Grafana, the GitHub App, organization secrets, f
 ## Development
 
 ```text
-installer                 entry point: up | status | creds | down
+installer                 entry point: install | status | creds | uninstall
 lib/                      common, host, prereqs, cluster, secrets, state, deploy, external, checks, public, mcp
 config/                   versions.env (versions), defaults.env, local.env.example
 values/                   chart values; values/scrape/ holds vmagent scrape jobs
@@ -238,4 +246,4 @@ bats tests/unit             # bats-core ≥ 1.5
 tests/manifests.sh          # helm ≥ 3.17, kubeconform, jq, yq
 ```
 
-The e2e workflow (`.github/workflows/e2e.yml`, run manually) creates an `e2-standard-4` machine with a clean Debian 13, runs `up`, a repeated `up`, a reboot, failure scenarios and `down`, writes stage times to a report and deletes the machine. Run it before a release of this repository and when `config/versions.env`, `values/` or `charts/` change.
+The e2e workflow (`.github/workflows/e2e.yml`, run manually) creates an `e2-standard-4` machine with a clean Debian 13, runs `install`, a repeated `install`, a reboot, failure scenarios and `uninstall`, writes stage times to a report and deletes the machine. Run it before a release of this repository and when `config/versions.env`, `values/` or `charts/` change.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Installs GreenOnGrey products on minikube (FTR.HMR.INFRA-0001, FTR.INFRA.INST-0001): storages and observability.
-#   ./installer up | status | creds | down | help
+# Installs GreenOnGrey products on minikube or an existing cluster (FTR.HMR.INFRA-0001, FTR.INFRA.INST-0001).
+#   ./installer install | status | creds | uninstall | help
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -28,24 +28,32 @@ source "$ROOT/lib/deploy.sh"
 source "$ROOT/lib/public.sh"
 # shellcheck source=lib/mcp.sh
 source "$ROOT/lib/mcp.sh"
+# shellcheck source=lib/uninstall.sh
+source "$ROOT/lib/uninstall.sh"
 
 usage() {
   cat <<'EOF'
 Usage: ./installer <command> [flags]
 
 Commands:
-  up       check the machine, install dependencies, start the cluster, deploy, verify, print a summary
-  status   show the state of the cluster and components, run the checks, show resources
-  creds    print addresses, secret names and passwords from Kubernetes secrets
-  down     delete the minikube profile with all its data (asks for confirmation)
-  help     show this help
+  install    check the machine or the cluster, install dependencies, deploy, verify, print a summary;
+             no questions, safe to repeat
+  status     show the state of the cluster and components, run the checks, show resources
+  creds      print addresses, secret names and passwords from Kubernetes secrets
+  uninstall  remove what the installer installed: on minikube the profile with all its data, on an
+             existing cluster its releases and namespaces; external storages and their data stay
+  help       show this help
 
 Flags:
-  --config <file>  file with overrides (default: config/local.env)
-  --yes            down: do not ask for confirmation
+  --config <file>  configuration file (default: $INSTALLER_CONFIG, then /etc/greenongrey/installer.env
+                   if it exists, then config/local.env)
+  --yes            uninstall: do not ask for confirmation; required without a terminal
   --json           status, creds: print JSON
   --verbose        print the commands being run
   --no-color       disable color (automatic when the output is not a terminal)
+
+install and uninstall end stdout with one line of JSON: status, command, code, durationSeconds,
+installerVersion, updated, failed, skipped, diagnostics.
 EOF
 }
 
@@ -56,13 +64,33 @@ usage_error() {
 }
 
 COMMAND="" CONFIG_FILE="" ASSUME_YES=0 JSON=0
+SYSTEM_CONFIG=${SYSTEM_CONFIG:-/etc/greenongrey/installer.env}
+
+# default_config — INSTALLER_CONFIG, the system file, then the file of the checkout.
+default_config() {
+  if [[ -n ${INSTALLER_CONFIG:-} ]]; then
+    [[ -f $INSTALLER_CONFIG ]] || usage_error "INSTALLER_CONFIG: file not found: $INSTALLER_CONFIG"
+    echo "$INSTALLER_CONFIG"
+  elif [[ -f $SYSTEM_CONFIG ]]; then
+    echo "$SYSTEM_CONFIG"
+  else
+    echo "$ROOT/config/local.env"
+  fi
+}
 
 parse_args() {
+  local arg
   while (($#)); do
-    case $1 in
-      up | status | creds | down | help)
+    arg=$1
+    # Hidden synonyms: deploy-remote.sh of older tags runs up.
+    case $arg in
+      up) arg=install ;;
+      down) arg=uninstall ;;
+    esac
+    case $arg in
+      install | status | creds | uninstall | help)
         [[ -n $COMMAND ]] && usage_error "unexpected extra command: $1"
-        COMMAND=$1
+        COMMAND=$arg
         ;;
       --config)
         [[ $# -ge 2 ]] || usage_error "--config needs a file path"
@@ -79,15 +107,45 @@ parse_args() {
     esac
     shift
   done
+  # The wizard comes with a later release (FTR.INFRA.INST-0001 R3); until then no command is a usage error.
   [[ -n $COMMAND ]] || usage_error "no command given"
-  [[ $ASSUME_YES == 1 && $COMMAND != down ]] && usage_error "--yes is only valid for down"
+  [[ $ASSUME_YES == 1 && $COMMAND != uninstall ]] && usage_error "--yes is only valid for uninstall"
   [[ $JSON == 1 && $COMMAND != status && $COMMAND != creds ]] && usage_error "--json is only valid for status and creds"
   if [[ -n $CONFIG_FILE && ! -f $CONFIG_FILE ]]; then usage_error "config file not found: $CONFIG_FILE"; fi
-  CONFIG_FILE=${CONFIG_FILE:-$ROOT/config/local.env}
+  CONFIG_FILE=${CONFIG_FILE:-$(default_config)}
   return 0
 }
 
-# --- up ---
+# interactive — input and output are a terminal: questions are allowed.
+interactive() { [[ -t 0 && -t 1 ]]; }
+
+# --- JSON result (FTR.INFRA.INST-0001 tech §2.2) ---
+
+RESULT_UPDATED=() RESULT_FAILED=() RESULT_SKIPPED=() RESULT_DIAGNOSTICS=""
+COMMAND_STARTED=$SECONDS
+
+# json_array <items…> — a JSON array of strings.
+json_array() { if (($#)); then printf '%s\n' "$@" | jq -R . | jq -cs .; else echo '[]'; fi; }
+
+# print_result <code> — the last line of stdout of a command that changes the system. Without jq
+# (a failed check of a clean machine comes before the dependencies) the lists are empty.
+print_result() {
+  local code=$1
+  if ! have jq; then
+    printf '{"status":"%s","command":"%s","code":%d,"durationSeconds":%d,"installerVersion":"%s","updated":[],"failed":[],"skipped":[],"diagnostics":null}\n' \
+      "$(if ((code == 0)); then echo ok; else echo failed; fi)" "$COMMAND" "$code" $((SECONDS - COMMAND_STARTED)) "$(installer_version | tr -cd 'A-Za-z0-9._-')"
+    return
+  fi
+  jq -cn --arg command "$COMMAND" --argjson code "$code" --argjson took $((SECONDS - COMMAND_STARTED)) \
+    --arg version "$(installer_version)" --argjson updated "$(json_array "${RESULT_UPDATED[@]}")" \
+    --argjson failed "$(json_array "${RESULT_FAILED[@]}")" --argjson skipped "$(json_array "${RESULT_SKIPPED[@]}")" \
+    --arg diagnostics "$RESULT_DIAGNOSTICS" \
+    '{status: (if $code == 0 then "ok" else "failed" end), command: $command, code: $code, durationSeconds: $took,
+      installerVersion: $version, updated: $updated, failed: $failed, skipped: $skipped,
+      diagnostics: (if $diagnostics == "" then null else $diagnostics end)}'
+}
+
+# --- install ---
 
 OLD_LOCK_FILE=${OLD_LOCK_FILE:-/var/lock/hammurapi-infra.lock}
 
@@ -100,11 +158,11 @@ acquire_lock() {
     as_root chmod 0666 "$LOCK_FILE"
   fi
   exec 9>>"$LOCK_FILE"
-  flock -n 9 || die "$E_LOCKED" "another up is already running on this machine ($LOCK_FILE)"
+  flock -n 9 || die "$E_LOCKED" "another run of the installer is already running ($LOCK_FILE)"
   # An up of a tag before the rename holds the old file (FTR.INFRA.INST-0001 tech §9).
   if [[ -w $OLD_LOCK_FILE ]]; then
     exec 8>>"$OLD_LOCK_FILE"
-    flock -n 8 || die "$E_LOCKED" "another up is already running on this machine ($OLD_LOCK_FILE)"
+    flock -n 8 || die "$E_LOCKED" "another run of the installer is already running ($OLD_LOCK_FILE)"
   fi
 }
 
@@ -128,21 +186,32 @@ collect_diagnostics() {
   while read -r rel ns; do
     [[ -n $rel ]] && hm status "$rel" -n "$ns" >"$dir/helm-status-$rel.txt" 2>&1 || true
   done < <(hm list -A -o json 2>/dev/null | jq -r '.[] | "\(.name) \(.namespace)"' 2>/dev/null)
+  RESULT_DIAGNOSTICS=$dir
   warn "diagnostics saved to $dir"
 }
 
-on_up_exit() {
+on_install_exit() {
   local code=$1
   preflight_cleanup
   if ((code != 0)); then
     STEP=main
     collect_diagnostics
-    warn "up failed with code $code; log: $RUN_DIR/run.log"
+    [[ -n $RESULT_DIAGNOSTICS ]] || RESULT_DIAGNOSTICS=$RUN_DIR/run.log
+    warn "$COMMAND failed with code $code; log: $RUN_DIR/run.log"
   fi
+  print_result "$code"
+}
+
+# start_run_log — logs/<time>/run.log gets all output of the command.
+start_run_log() {
+  RUN_DIR="${LOGS_DIR:-$ROOT/logs}/$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$RUN_DIR"
+  exec > >(tee -a "$RUN_DIR/run.log") 2>&1
+  log "run log: $RUN_DIR/run.log"
 }
 
 print_summary() {
-  local took=$((SECONDS - UP_STARTED)) mode r name ver
+  local took=$((SECONDS - COMMAND_STARTED)) mode r name ver
   mode="Postgres: $(mode_label "$POSTGRES_MODE"), Kafka: $(mode_label "$KAFKA_MODE"), S3: $(mode_label "$S3_MODE")"
   local ns=$NS_STORAGES res
   res=$(resources_line)
@@ -188,13 +257,9 @@ resources_line() {
   echo "requested $(gib "$MEM_REQUESTED") GiB of $(gib "$MEM_ALLOCATABLE") GiB ($pct%)"
 }
 
-cmd_up() {
-  UP_STARTED=$SECONDS
-  RUN_DIR="$ROOT/logs/$(date -u +%Y%m%dT%H%M%SZ)"
-  mkdir -p "$RUN_DIR"
-  exec > >(tee -a "$RUN_DIR/run.log") 2>&1
-  trap 'on_up_exit $?' EXIT
-  log "run log: $RUN_DIR/run.log"
+cmd_install() {
+  start_run_log
+  trap 'on_install_exit $?' EXIT
   if target_external; then
     acquire_lock
     preflight
@@ -389,22 +454,37 @@ EOF
   mcp_creds_text
 }
 
-# --- down ---
+# --- uninstall ---
 
-cmd_down() {
-  # Nothing here would remove releases from a cluster that is not ours to delete.
-  if target_external; then die "$E_USAGE" "down deletes a minikube profile: with INSTALL_TARGET=external remove the releases with helm"; fi
+cmd_uninstall() {
+  local question
+  if target_external; then
+    question="Remove the releases and namespaces of the installer from context \"$KUBE_CONTEXT\" with the data of built-in storages? External storages stay."
+  else
+    question="Delete the minikube profile \"$MK_PROFILE\" with all data of storages and observability?"
+  fi
   if [[ $ASSUME_YES != 1 ]]; then
-    printf 'Delete the minikube profile "%s" with all data of storages and observability? Type yes: ' "$MK_PROFILE" >&2
+    interactive || die "$E_USAGE" "uninstall without a terminal needs --yes"
+    printf '%s Type yes: ' "$question" >&2
     local answer=""
     read -r answer || true
     [[ $answer == yes ]] || die "$E_CANCELLED" "cancelled: nothing was deleted"
   fi
-  step cluster
-  have minikube || die "$E_CLUSTER" "minikube is not installed"
-  cluster_delete >/dev/null || die "$E_CLUSTER" "minikube delete failed"
-  remove_autostart
-  ok "profile $MK_PROFILE deleted"
+  start_run_log
+  trap 'on_uninstall_exit $?' EXIT
+  if target_external; then
+    acquire_lock
+    uninstall_external
+  else
+    acquire_lock
+    uninstall_minikube
+  fi
+}
+
+on_uninstall_exit() {
+  local code=$1
+  ((code == 0)) || RESULT_DIAGNOSTICS=$RUN_DIR/run.log
+  print_result "$code"
 }
 
 main() {
@@ -414,22 +494,29 @@ main() {
     usage
     return
   fi
+  # Commands that change the system end with the JSON result whatever stops them (R6).
+  case $COMMAND in
+    install | uninstall) trap 'print_result $?' EXIT ;;
+  esac
   load_config "$ROOT" "$CONFIG_FILE"
   WORK_DIR="$ROOT/.work"
   mkdir -p "$WORK_DIR"
   case $COMMAND in
-    up)
+    install)
       validate_config
-      cmd_up
+      cmd_install
       ;;
     status)
       validate_config
       cmd_status
       ;;
     creds) cmd_creds ;;
-    down)
+    uninstall)
       validate_names
-      cmd_down
+      CONFIG_MISSING=()
+      validate_target
+      die_if_missing
+      cmd_uninstall
       ;;
   esac
 }

@@ -24,9 +24,11 @@ setup() {
   [[ $output == *"--force"* ]]
 }
 
-@test "CMD-05: no command: code 2" {
-  run bash "$SCRIPT"
+@test "CLI-01: no command without a terminal: code 2, help, no question" {
+  run bash -c "bash '$SCRIPT' </dev/null"
   [ "$status" -eq 2 ]
+  [[ $output == *"Usage"* ]]
+  [[ $output != *"?"* ]]
 }
 
 @test "CMD-05: --json outside status/creds: code 2" {
@@ -34,33 +36,116 @@ setup() {
   [ "$status" -eq 2 ]
 }
 
-@test "CMD-05: --yes outside down: code 2" {
-  run bash "$SCRIPT" up --yes
+@test "CMD-05: --yes outside uninstall: code 2" {
+  run bash "$SCRIPT" install --yes
   [ "$status" -eq 2 ]
 }
 
 @test "help: code 0 and the command list" {
   run bash "$SCRIPT" help
   [ "$status" -eq 0 ]
-  [[ $output == *"up"* && $output == *"status"* && $output == *"creds"* && $output == *"down"* ]]
+  [[ $output == *"install"* && $output == *"status"* && $output == *"creds"* && $output == *"uninstall"* ]]
 }
 
-@test "CMD-03: down, answer no: code 16, the profile stays" {
-  run bash -c "echo no | bash '$SCRIPT' down --no-color"
+@test "R5: up and down stay hidden synonyms of install and uninstall" {
+  load_script
+  parse_args up
+  [ "$COMMAND" = install ]
+  COMMAND="" CONFIG_FILE=""
+  parse_args down --yes
+  [ "$COMMAND" = uninstall ]
+  run usage
+  [[ $output != *" up "* && $output != *" down "* ]]
+}
+
+@test "R5: the config file: --config, INSTALLER_CONFIG, the system file, then config/local.env" {
+  load_script
+  SYSTEM_CONFIG=$BATS_TEST_TMPDIR/installer.env
+  [ "$(INSTALLER_CONFIG='' default_config)" = "$ROOT/config/local.env" ]
+  touch "$SYSTEM_CONFIG"
+  [ "$(INSTALLER_CONFIG='' default_config)" = "$SYSTEM_CONFIG" ]
+  touch "$BATS_TEST_TMPDIR/x.env"
+  [ "$(INSTALLER_CONFIG=$BATS_TEST_TMPDIR/x.env default_config)" = "$BATS_TEST_TMPDIR/x.env" ]
+}
+
+@test "CMD-03: uninstall in a terminal, answer no: code 16, the profile stays" {
+  run bash -c "echo no | script -qec \"bash '$SCRIPT' uninstall --no-color\" /dev/null"
   [ "$status" -eq 16 ]
-  [[ $output == *"nothing was deleted"* ]]
+  [[ $output == *"Type yes"* && $output == *"nothing was deleted"* ]]
   not_called "minikube delete"
 }
 
-@test "CMD-04 (U): down --yes: minikube delete without a question" {
-  run bash "$SCRIPT" down --yes --no-color
+@test "R5: uninstall without a terminal and without --yes: code 2, nothing deleted" {
+  run bash -c "echo yes | bash '$SCRIPT' uninstall --no-color"
+  [ "$status" -eq 2 ]
+  [[ $output == *"--yes"* ]]
+  not_called "minikube delete"
+}
+
+@test "CMD-04 (U): uninstall --yes: forwarding, profile, autostart; the last line is the JSON result" {
+  export UNIT_DIR=$BATS_TEST_TMPDIR/units LOGS_DIR=$BATS_TEST_TMPDIR/logs
+  export LOCK_FILE=$BATS_TEST_TMPDIR/lock OLD_LOCK_FILE=$BATS_TEST_TMPDIR/old-lock
+  mkdir -p "$UNIT_DIR"
+  touch "$UNIT_DIR/greenongrey-ingress-forward.service"
+  run bash "$SCRIPT" uninstall --yes --no-color
   [ "$status" -eq 0 ]
+  called "systemctl disable --now greenongrey-ingress-forward.service"
   called "minikube delete -p greenongrey"
+  [ "$(grep -n 'ingress-forward' "$CALLS" | head -1 | cut -d: -f1)" -lt "$(grep -n 'minikube delete' "$CALLS" | cut -d: -f1)" ]
+  echo "${lines[-1]}" | jq -e '.status == "ok" and .command == "uninstall" and .code == 0 and .diagnostics == null'
+}
+
+@test "CLI-09: install without a terminal, three parameters missing: code 2, all three named" {
+  run env POSTGRES_MODE=external POSTGRES_HOST=db.example POSTGRES_PORT=5432 POSTGRES_DATABASE=h POSTGRES_SSLMODE=require \
+    S3_MODE=external S3_ENDPOINT=https://s3.example S3_REGION=r S3_BUCKET=b S3_PATH_STYLE=true S3_ACCESS_KEY=k \
+    bash "$SCRIPT" install --no-color </dev/null
+  [ "$status" -eq 2 ]
+  [[ $output == *"POSTGRES_USER"* && $output == *"POSTGRES_PASSWORD"* && $output == *"S3_SECRET_KEY"* ]]
+  [[ $output != *"S3_ACCESS_KEY"* ]]
+  not_called "apt-get"
+  not_called "minikube"
+}
+
+@test "R5: INSTALLER_CONFIG names a missing file: code 2" {
+  run env INSTALLER_CONFIG=/nonexistent/installer.env bash "$SCRIPT" status --no-color
+  [ "$status" -eq 2 ]
+  [[ $output == *"/nonexistent/installer.env"* ]]
+}
+
+@test "CLI-09: external Kafka without the protocol: code 2 with the parameter, not an unbound variable" {
+  run env KAFKA_MODE=external KAFKA_BOOTSTRAP=k:9092 bash "$SCRIPT" install --no-color </dev/null
+  [ "$status" -eq 2 ]
+  [[ $output == *KAFKA_SECURITY_PROTOCOL* && $output != *unbound* ]]
+}
+
+@test "CLI-10: the result without jq still ends stdout with JSON" {
+  load_script
+  COMMAND=install
+  have() { [[ $1 != jq ]]; }
+  run print_result 10
+  [ "$status" -eq 0 ]
+  [[ $output == '{"status":"failed","command":"install","code":10,'* ]]
+}
+
+@test "CLI-10: the result of install: the last line of stdout is JSON, on success and on failure" {
+  load_script
+  COMMAND=install COMMAND_STARTED=$((SECONDS - 5)) INFRA_TAG=v1.2.0
+  run print_result 0
+  echo "$output" | jq -e '.status == "ok" and .command == "install" and .code == 0 and .durationSeconds >= 5
+    and .installerVersion == "v1.2.0" and .updated == [] and .failed == [] and .skipped == [] and .diagnostics == null'
+  RESULT_FAILED=(nabu-web) RESULT_UPDATED=(nabu-core) RESULT_DIAGNOSTICS=/logs/x
+  run print_result 13
+  echo "$output" | jq -e '.status == "failed" and .code == 13 and .updated == ["nabu-core"] and .failed == ["nabu-web"]
+    and .diagnostics == "/logs/x"'
+  # A failed install ends with it too, a refused configuration included.
+  run env POSTGRES_MODE=bogus bash "$SCRIPT" install --no-color </dev/null
+  [ "$status" -ne 0 ]
+  echo "${lines[-1]}" | jq -e '.status == "failed" and .command == "install" and .code != 0'
 }
 
 @test "CMD-06: the summary of up: versions, addresses, tunnel, port-forward, creds" {
   load_script
-  UP_STARTED=$((SECONDS - 872))
+  COMMAND_STARTED=$((SECONDS - 872))
   DEPLOYED_TAG=v1.4.0
   RELEASES=("strimzi 1.2.0" "grafana 13.2.7")
   MEM_REQUESTED=$((3 * 1024 * 1024 * 1024)) MEM_ALLOCATABLE=$((12 * 1024 * 1024 * 1024))
