@@ -398,6 +398,15 @@ check_storages() {
   fi
 }
 
+# cluster_allocatable_memory — bytes of all nodes: an external cluster may have many.
+cluster_allocatable_memory() {
+  local q total=0
+  while read -r q; do
+    [[ -n $q ]] && total=$((total + $(to_bytes "$q")))
+  done < <(kc get nodes -o jsonpath='{range .items[*]}{.status.allocatable.memory}{"\n"}{end}')
+  echo "$total"
+}
+
 # collect_resources — total memory requests and containers without requests or limits.
 check_resources() {
   local pods missing ns
@@ -415,7 +424,7 @@ check_resources() {
     MEM_REQUESTED=$((MEM_REQUESTED + $(to_bytes "$q")))
   done < <(jq -rs '.[].items[] | select(.status.phase == "Running" or .status.phase == "Pending")
       | .spec.containers[] | .resources.requests.memory // empty' <<<"$pods")
-  MEM_ALLOCATABLE=$(to_bytes "$(kc get nodes -o jsonpath='{.items[0].status.allocatable.memory}')")
+  MEM_ALLOCATABLE=$(cluster_allocatable_memory)
   local pct=0
   ((MEM_ALLOCATABLE > 0)) && pct=$((MEM_REQUESTED * 100 / MEM_ALLOCATABLE))
   local summary
@@ -423,7 +432,7 @@ check_resources() {
   if [[ -n $missing ]]; then
     record resources fail "no requests or limits: $missing"
   elif ((MEM_REQUESTED * 3 > MEM_ALLOCATABLE * 2)); then
-    record resources fail "$summary, more than two thirds of the node memory"
+    record resources fail "$summary, more than two thirds of the memory of nodes"
   else
     record resources ok "$summary"
   fi

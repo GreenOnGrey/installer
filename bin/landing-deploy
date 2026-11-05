@@ -113,7 +113,10 @@ check_stand() {
   [[ $(jq -r '.public.enabled' <<<"$st") == true ]] || fail "$E_STAND" "public access of the stand is off (PUBLIC_ACCESS=true)"
   ingress_from_status "$st"
   # The chart redirects www. through a Middleware of Traefik.
-  if ingress_external; then fail "$E_STAND" "the site needs Traefik of the stand: INGRESS_MODE=internal"; fi
+  # Its own domain is checked against the public address of a minikube machine.
+  if ingress_external || [[ $(jq -r '.target // "minikube"' <<<"$st") == external ]]; then
+    fail "$E_STAND" "the site needs Traefik of the stand on minikube: INSTALL_TARGET=minikube, INGRESS_MODE=internal"
+  fi
   BASE_DOMAIN=$(jq -r '.public.baseDomain // empty' <<<"$st")
   [[ -n $BASE_DOMAIN ]] || fail "$E_STAND" "the stand did not report a base domain"
   PUBLIC_IP_STAND=$(jq -r '.public.publicIp // empty' <<<"$st")

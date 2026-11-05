@@ -24,6 +24,16 @@ cluster_running() {
   [[ $host == Running && $apiserver == Running ]]
 }
 
+# cluster_reachable — the cluster of the configured target answers.
+cluster_reachable() {
+  if target_external; then kc version >/dev/null 2>&1; else have minikube && cluster_running; fi
+}
+
+# cluster_label — the cluster in messages.
+cluster_label() {
+  if target_external; then echo "context $KUBE_CONTEXT"; else echo "minikube $MK_PROFILE"; fi
+}
+
 cluster_k8s_version() {
   kc version -o json 2>/dev/null | jq -r '.serverVersion.gitVersion' 2>/dev/null || true
 }
@@ -49,8 +59,7 @@ cluster_up() {
   kc wait --for=condition=Ready node --all --timeout=5m >/dev/null ||
     die "$E_CLUSTER" "the cluster node is not ready"
   kubelet_gc
-  ensure_namespace "$NS_STORAGES"
-  if observability_enabled; then ensure_namespace "$NS_OBSERVABILITY"; fi
+  ensure_stand_namespaces
   if [[ ${STAND_AUTOSTART:-true} == true ]]; then
     install_autostart
   else
@@ -148,6 +157,11 @@ check_single_profile() {
   done
   ((${#others[@]} == 0)) ||
     die "$E_USAGE" "minikube already has the profile ${others[*]}, while MK_PROFILE=$MK_PROFILE. To keep that stand, set MK_PROFILE, UNIT_PREFIX and CERT_NAME to its names in the config; otherwise delete the profile"
+}
+
+ensure_stand_namespaces() {
+  local ns
+  for ns in $(stand_namespaces); do ensure_namespace "$ns"; done
 }
 
 ensure_namespace() {

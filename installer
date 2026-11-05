@@ -18,6 +18,8 @@ source "$ROOT/lib/secrets.sh"
 source "$ROOT/lib/external.sh"
 # shellcheck source=lib/checks.sh
 source "$ROOT/lib/checks.sh"
+# shellcheck source=lib/preflight.sh
+source "$ROOT/lib/preflight.sh"
 # shellcheck source=lib/state.sh
 source "$ROOT/lib/state.sh"
 # shellcheck source=lib/deploy.sh
@@ -90,7 +92,10 @@ parse_args() {
 OLD_LOCK_FILE=${OLD_LOCK_FILE:-/var/lock/hammurapi-infra.lock}
 
 acquire_lock() {
-  if [[ ! -w $LOCK_FILE ]]; then
+  # An external target changes nothing on the machine, /var/lock included.
+  if target_external; then
+    LOCK_FILE=$WORK_DIR/installer.lock
+  elif [[ ! -w $LOCK_FILE ]]; then
     as_root touch "$LOCK_FILE"
     as_root chmod 0666 "$LOCK_FILE"
   fi
@@ -128,6 +133,7 @@ collect_diagnostics() {
 
 on_up_exit() {
   local code=$1
+  preflight_cleanup
   if ((code != 0)); then
     STEP=main
     collect_diagnostics
@@ -144,7 +150,7 @@ print_summary() {
 
 Ready in $(human_duration "$took"). Version: ${DEPLOYED_TAG:-dev}.
 
-Cluster       minikube $MK_PROFILE (Kubernetes $K8S_VERSION), $MK_CPUS CPU / ${MK_MEMORY^^}
+Cluster       $(if target_external; then echo "context $KUBE_CONTEXT (Kubernetes $(cluster_k8s_version))"; else echo "minikube $MK_PROFILE (Kubernetes $K8S_VERSION), $MK_CPUS CPU / ${MK_MEMORY^^}"; fi)
 Storages      postgres.$ns.svc:5432  kafka.$ns.svc:9092  s3.$ns.svc:9000
               ($mode)
 Observability $(if observability_enabled; then echo "Grafana, VictoriaMetrics, VictoriaLogs in namespace $NS_OBSERVABILITY"; else echo off; fi)
@@ -169,7 +175,7 @@ EOF
 
 Public access (certificate ${ACME_ISSUER:-letsencrypt}):
   $(if observability_enabled; then echo "https://grafana.$PUBLIC_DOMAIN   "; fi)https://${HAMMURAPI_WEB_HOST:-hammurapi}.$PUBLIC_DOMAIN   https://${HAMMURAPI_API_HOST:-hammurapi-api}.$PUBLIC_DOMAIN
-  $(if ingress_external; then echo "ingress class $INGRESS_CLASS; point the hosts to its load balancer"; else echo "ports 80/443 of this machine → Traefik $LB_IP; open them in your cloud firewall"; fi)
+  $(if ingress_external; then echo "ingress class $INGRESS_CLASS; point the hosts to its load balancer"; elif target_external; then echo "point the hosts to the load balancer $LB_IP"; else echo "ports 80/443 of this machine → Traefik $LB_IP; open them in your cloud firewall"; fi)
 EOF
   fi
 }
@@ -189,11 +195,17 @@ cmd_up() {
   exec > >(tee -a "$RUN_DIR/run.log") 2>&1
   trap 'on_up_exit $?' EXIT
   log "run log: $RUN_DIR/run.log"
-  check_single_profile
-  check_host
-  acquire_lock
-  install_prereqs
-  cluster_up
+  if target_external; then
+    acquire_lock
+    preflight
+    ensure_stand_namespaces
+  else
+    check_single_profile
+    check_host
+    acquire_lock
+    install_prereqs
+    cluster_up
+  fi
   migrate_names
   restore_config strict
   validate_config
@@ -229,7 +241,7 @@ deployed_version() {
 cmd_status() {
   RUN_DIR=$WORK_DIR
   local running=0 profile_status
-  if have minikube && cluster_running; then running=1; fi
+  if cluster_reachable; then running=1; fi
   profile_status=$([[ $running == 1 ]] && echo Running || echo Stopped)
   if [[ $running == 1 ]]; then
     # Component rollouts check only the stand: a failing MCP server or external search
@@ -237,7 +249,7 @@ cmd_status() {
     [[ ${INSTALLER_STAND_ONLY:-} == 1 ]] || restore_config
     run_checks || true
   else
-    CHECK_RESULTS=("cluster|fail|cluster $MK_PROFILE is not running")
+    CHECK_RESULTS=("cluster|fail|cluster $(cluster_label) is not running")
   fi
   local failed=0 r
   for r in "${CHECK_RESULTS[@]}"; do [[ $r == *"|fail|"* ]] && failed=1; done
@@ -267,13 +279,18 @@ status_json() {
     version=$(deployed_version)
     public=$(public_status_json)
   fi
-  jq -n --arg profile "$MK_PROFILE" --arg st "$profile_status" --arg k8s "$K8S_VERSION" \
+  local name=$MK_PROFILE k8s=$K8S_VERSION
+  if target_external; then
+    name=$KUBE_CONTEXT
+    k8s=$(cluster_k8s_version)
+  fi
+  jq -n --arg profile "$name" --arg st "$profile_status" --arg k8s "$k8s" --arg target "${INSTALL_TARGET:-minikube}" \
     --argjson version "$version" --argjson releases "$releases" --argjson pods "$pods" --argjson public "$public" \
     --argjson checks "$(checks_json)" --argjson req "$MEM_REQUESTED" --argjson alloc "$MEM_ALLOCATABLE" \
     --argjson mcp "$(mcp_status_json)" \
     --arg pg "$POSTGRES_MODE" --arg kafka "$KAFKA_MODE" --arg s3 "$S3_MODE" \
     --argjson observability "$(if observability_enabled; then echo true; else echo false; fi)" \
-    '{profile: {name: $profile, status: $st, kubernetes: $k8s}, version: $version,
+    '{target: $target, profile: {name: $profile, status: $st, kubernetes: $k8s}, version: $version,
       storages: {postgres: $pg, kafka: $kafka, s3: $s3}, observability: $observability, public: $public, mcp: $mcp,
       releases: $releases, pods: $pods, checks: $checks,
       resources: {requestedMemoryBytes: $req, allocatableMemoryBytes: $alloc,
@@ -283,7 +300,7 @@ status_json() {
 
 status_text() {
   local profile_status=$1 running=$2 r name state msg
-  printf '\nCluster    minikube %s — %s\n' "$MK_PROFILE" "$profile_status"
+  printf '\nCluster    %s — %s\n' "$(cluster_label)" "$profile_status"
   if [[ $running == 1 ]]; then
     printf 'Version    %s\n' "$(deployed_version | jq -r 'if . == null then "not recorded" else "\(.tag) (\(.commit)), \(.deployedAt), \(.deployedBy)" end')"
     printf '\nHelm releases\n'
@@ -375,6 +392,8 @@ EOF
 # --- down ---
 
 cmd_down() {
+  # Nothing here would remove releases from a cluster that is not ours to delete.
+  if target_external; then die "$E_USAGE" "down deletes a minikube profile: with INSTALL_TARGET=external remove the releases with helm"; fi
   if [[ $ASSUME_YES != 1 ]]; then
     printf 'Delete the minikube profile "%s" with all data of storages and observability? Type yes: ' "$MK_PROFILE" >&2
     local answer=""

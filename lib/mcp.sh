@@ -246,6 +246,10 @@ mcp_budget() {
     echo ok
     return
   fi
+  if target_external; then
+    printf 'MCP servers lack %s GiB of memory: add nodes to the cluster or turn servers off\n' "$(gib $((need - limit)))"
+    return
+  fi
   local system=$((capacity - alloc))
   # node memory where need is two thirds of allocatable, plus the system part
   local want_gib=$(((need * 3 / 2 + system + 1073741823) / 1073741824))
@@ -266,7 +270,7 @@ mcp_preflight() {
     jq -rs '.[].items[] | select(.status.phase == "Running" or .status.phase == "Pending")
       | .spec.containers[] | .resources.requests.memory // empty')
   servers=$(mcp_rendered_memory) || die "$E_DEPLOY" "failed to count the memory of MCP servers"
-  alloc=$(to_bytes "$(kc get nodes -o jsonpath='{.items[0].status.allocatable.memory}')")
+  alloc=$(cluster_allocatable_memory)
   capacity=$(to_bytes "$(kc get nodes -o jsonpath='{.items[0].status.capacity.memory}')")
   verdict=$(mcp_budget "$others" "$servers" "$alloc" "$capacity")
   [[ $verdict == ok ]] || die "$E_USAGE" "$verdict"

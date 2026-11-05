@@ -106,6 +106,14 @@ Overrides go in `config/local.env` (ignored by git), with an example in [`config
 
 The main settings are minikube resources (`MK_CPUS`, `MK_MEMORY`, `MK_DISK`, applied when the profile is created), retention (`VM_RETENTION`, `VL_RETENTION`), volume sizes and storage modes.
 
+### An existing cluster
+
+`INSTALL_TARGET=external` with `KUBE_CONTEXT` installs into an existing cluster. The machine does not change: no packages, no systemd units, no minikube. It needs `kubectl`, `helm` and `jq`.
+
+Before anything changes, `up` checks the cluster and reports all reasons together with code 18: Kubernetes from 1.35 (a version newer than the tested 1.37 gives only a warning), `kubectl` within one minor version of the server, cluster-admin rights and a default `StorageClass` when something is built in, the `INGRESS_CLASS` and `ACME_ISSUER` of an external ingress, and a real test of `NetworkPolicy` in both directions, on which the isolation of Nabu sandboxes rests. The test uses a temporary namespace `installer-preflight`.
+
+`PUBLIC_BASE_DOMAIN` is required with public access. With the built-in ingress the cluster needs a provider of `LoadBalancer` services. On a new cluster the address appears only during `up`, so the first run stops at the certificate: point `*.<domain>` to the printed address and run `up` again. `down` is not available: remove the releases with `helm`. A default `StorageClass` is required, as there is no option to choose another one yet.
+
 ### Ingress
 
 `INGRESS_MODE=internal` (the default) installs Traefik and cert-manager, and MetalLB and port forwarding on minikube.

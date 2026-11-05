@@ -55,9 +55,9 @@ metallb_range() {
 public_prepare() {
   public_enabled || return 0
   step public
-  if ingress_external; then
+  if ingress_external || target_external; then
     PUBLIC_DOMAIN=$PUBLIC_BASE_DOMAIN
-    log "base domain: $PUBLIC_DOMAIN (ingress class $INGRESS_CLASS, issuer $ACME_ISSUER)"
+    log "base domain: $PUBLIC_DOMAIN (ingress class ${INGRESS_CLASS:-traefik}, issuer ${ACME_ISSUER:-letsencrypt})"
     return 0
   fi
   PUBLIC_IP_RESOLVED=$(detect_public_ip) || die "$E_DEPLOY" "failed to detect the external IP of the machine; set PUBLIC_IP"
@@ -268,12 +268,15 @@ deploy_public() {
     deploy_public_external
     return 0
   fi
-  local range first
-  range=$(metallb_range) || die "$E_DEPLOY" "failed to detect the minikube subnet for MetalLB"
-  first=${range%-*}
-  log "MetalLB: pool $range"
-  metallb_addon "$first" "${range#*-}"
-  metallb_config "$range" | apply_stdin
+  local range first lb_args=()
+  if ! target_external; then
+    range=$(metallb_range) || die "$E_DEPLOY" "failed to detect the minikube subnet for MetalLB"
+    first=${range%-*}
+    log "MetalLB: pool $range"
+    metallb_addon "$first" "${range#*-}"
+    metallb_config "$range" | apply_stdin
+    lb_args=(--set-string "service.spec.loadBalancerIP=$first")
+  fi
   kc create namespace "$NS_INGRESS" --dry-run=client -o yaml | apply_stdin
   kc create namespace "$NS_CERT_MANAGER" --dry-run=client -o yaml | apply_stdin
 
@@ -283,12 +286,13 @@ deploy_public() {
   cluster_issuers | apply_stdin
 
   release traefik "$NS_INGRESS" traefik/traefik "$TRAEFIK_CHART_VERSION" traefik.yaml \
-    --set-string "service.spec.loadBalancerIP=$first" \
+    "${lb_args[@]}" \
     --set-string "tlsStore.default.defaultCertificate.secretName=$CERT_NAME"
-  LB_IP=$(kc -n "$NS_INGRESS" get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
-  [[ -n $LB_IP ]] || die "$E_DEPLOY" "MetalLB gave no address to the traefik service"
+  LB_IP=$(kc -n "$NS_INGRESS" get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+  [[ -n $LB_IP ]] || die "$E_DEPLOY" "the traefik service has no load balancer address"
   log "Traefik: $LB_IP"
-  install_forward
+  # On an external target the load balancer of the cluster takes the traffic.
+  if ! target_external; then install_forward; fi
 
   public_certificate | apply_stdin
   public_state_manifest | apply_stdin
@@ -298,6 +302,10 @@ deploy_public() {
   if ! kc -n "$NS_INGRESS" wait "certificate/$CERT_NAME" --for=condition=Ready --timeout=5m >/dev/null 2>&1; then
     kc -n "$NS_INGRESS" describe certificate "$CERT_NAME" >"$RUN_DIR/certificate.txt" 2>&1 || true
     kc get challenges -A -o wide >>"$RUN_DIR/certificate.txt" 2>&1 || true
+    # The address appears only during this run, so on a new cluster DNS cannot point to it yet.
+    if target_external; then
+      die "$E_DEPLOY" "the certificate was not issued in 5 minutes: point *.$PUBLIC_DOMAIN to the load balancer $LB_IP and run up again (see $RUN_DIR/certificate.txt)"
+    fi
     die "$E_DEPLOY" "the certificate was not issued in 5 minutes: check that ports 80/443 of the machine are open from outside and *.$PUBLIC_DOMAIN points to $PUBLIC_IP_RESOLVED (see $RUN_DIR/certificate.txt)"
   fi
   ok "public access: https://{${hosts// /,}}.$PUBLIC_DOMAIN"
@@ -335,10 +343,26 @@ check_public_external() {
   record public ok "ingress class $INGRESS_CLASS, ClusterIssuer $ACME_ISSUER"
 }
 
+# check_public_certificate — Traefik of the stand in an external cluster: DNS and the load balancer are
+# not the stand's, so no request goes to a host.
+check_public_certificate() {
+  local ready
+  ready=$(resource_ready -n "$NS_INGRESS" certificate "$CERT_NAME")
+  if [[ $ready == True ]]; then
+    record public ok "certificate $CERT_NAME is ready"
+  else
+    record public fail "certificate $NS_INGRESS/$CERT_NAME is not ready ('${ready:-no status}', ${ACME_ISSUER:-letsencrypt})"
+  fi
+}
+
 check_public() {
   public_enabled || return 0
   if ingress_external; then
     check_public_external
+    return 0
+  fi
+  if target_external; then
+    check_public_certificate
     return 0
   fi
   local host code insecure=() redirect hosts
