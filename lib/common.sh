@@ -79,6 +79,9 @@ env_keys() {
 load_config() {
   local root=$1 local_file=$2 key
   local -A from_env=()
+  # Ключи, заданные этим запуском: файлом или окружением (restore_config их не трогает).
+  declare -gA CONFIG_EXPLICIT=()
+  CONFIG_LOADED_FILE=$local_file
   local files=("$root/config/versions.env" "$root/config/defaults.env")
   [[ -f $local_file ]] && files+=("$local_file")
   for f in "${files[@]}"; do
@@ -104,7 +107,11 @@ load_config() {
   for key in "${!from_env[@]}"; do
     printf -v "$key" '%s' "${from_env[$key]}"
     export "${key?}"
+    CONFIG_EXPLICIT[$key]=1
   done
+  if [[ -f $local_file ]]; then
+    while read -r key; do CONFIG_EXPLICIT[$key]=1; done < <(env_keys "$local_file")
+  fi
   # Опции MCP-серверов — ключи MCP_*=true|false файлов конфигурации: в окружении бывают
   # чужие MCP_*, а в конфигурации — параметры с другими значениями.
   MCP_OPTIONS=()

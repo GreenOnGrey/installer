@@ -106,7 +106,7 @@ check_stand() {
   step stand
   local st cfg=()
   [[ -f ${HAMMURAPI_INFRA_CONFIG:-} ]] && cfg=(--config "$HAMMURAPI_INFRA_CONFIG")
-  st=$(bash "$STATUS_CMD" status --json --no-color "${cfg[@]}" 2>/dev/null) || true
+  st=$(INSTALLER_STAND_ONLY=1 bash "$STATUS_CMD" status --json --no-color "${cfg[@]}" 2>/dev/null) || true
   jq -e . >/dev/null 2>&1 <<<"$st" || fail "$E_STAND" "стенд не отвечает: installer status --json"
   if [[ $(jq -r '.ok' <<<"$st") != true ]]; then
     fail "$E_STAND" "стенд не готов: $(jq -r '[.checks[] | select(.ok | not) | "\(.name): \(.message)"] | join("; ")' <<<"$st")"

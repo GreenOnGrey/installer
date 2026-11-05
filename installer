@@ -18,6 +18,8 @@ source "$ROOT/lib/secrets.sh"
 source "$ROOT/lib/external.sh"
 # shellcheck source=lib/checks.sh
 source "$ROOT/lib/checks.sh"
+# shellcheck source=lib/state.sh
+source "$ROOT/lib/state.sh"
 # shellcheck source=lib/deploy.sh
 source "$ROOT/lib/deploy.sh"
 # shellcheck source=lib/public.sh
@@ -185,7 +187,11 @@ cmd_up() {
   acquire_lock
   install_prereqs
   cluster_up
+  restore_config strict
+  validate_config
   deploy_all
+  # Сразу после развёртывания: что применено, то и записано, даже если проверки не пройдут.
+  write_config
   if ! run_checks; then
     die "$E_CHECKS" "проверки стенда не прошли: $(first_failure)"
   fi
@@ -198,7 +204,7 @@ cmd_up() {
 # public_status_json — публичный доступ по данным кластера (ConfigMap стенда).
 public_status_json() {
   local data
-  data=$(kc -n ingress get configmap hammurapi-infra-public -o json 2>/dev/null | jq -c '.data // {}' 2>/dev/null || true)
+  data=$(state_public)
   if [[ -z $data || $data == "{}" ]]; then
     echo '{"enabled":false}'
   else
@@ -207,7 +213,9 @@ public_status_json() {
 }
 
 deployed_version() {
-  kc -n "$NS_OBSERVABILITY" get configmap hammurapi-infra-version -o json 2>/dev/null | jq -c '.data' 2>/dev/null || echo null
+  local data
+  data=$(state_version)
+  echo "${data:-null}"
 }
 
 cmd_status() {
@@ -216,6 +224,9 @@ cmd_status() {
   if have minikube && cluster_running; then running=1; fi
   profile_status=$([[ $running == 1 ]] && echo Running || echo Stopped)
   if [[ $running == 1 ]]; then
+    # Выкатки компонентов проверяют только стенд: сбой MCP-сервера или внешнего поиска
+    # не должен останавливать релиз продукта.
+    [[ ${INSTALLER_STAND_ONLY:-} == 1 ]] || restore_config
     run_checks || true
   else
     CHECK_RESULTS=("cluster|fail|кластер $MK_PROFILE не запущен")
@@ -289,6 +300,7 @@ status_text() {
 
 cmd_creds() {
   if ! have kubectl || ! kc get ns "$NS_STORAGES" >/dev/null 2>&1; then die "$E_CHECKS" "кластер $MK_PROFILE не запущен или стенд не развёрнут"; fi
+  restore_config
   local ns=$NS_STORAGES
   local -A pg kafka s3
   local k

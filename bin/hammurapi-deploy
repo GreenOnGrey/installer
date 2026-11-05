@@ -98,7 +98,7 @@ check_stand() {
   local st cfg=()
   # Конфигурация стенда на проде — вне выгрузки релиза (/opt/hammurapi-infra/local.env).
   [[ -f ${HAMMURAPI_INFRA_CONFIG:-} ]] && cfg=(--config "$HAMMURAPI_INFRA_CONFIG")
-  st=$(bash "$STATUS_CMD" status --json --no-color "${cfg[@]}" 2>/dev/null) || true
+  st=$(INSTALLER_STAND_ONLY=1 bash "$STATUS_CMD" status --json --no-color "${cfg[@]}" 2>/dev/null) || true
   if ! jq -e . >/dev/null 2>&1 <<<"$st"; then
     fail "$E_STAND" "стенд не отвечает: installer status --json"
   fi
