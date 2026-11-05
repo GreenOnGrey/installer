@@ -1,48 +1,42 @@
 # installer
 
-Демо-стенд для запуска и отладки [Hammurapi](../hammurapi) одной командой на чистой машине
-с Debian 13: кластер minikube с хранилищами (Kafka, Postgres, S3-совместимое хранилище) и
-наблюдаемостью (VictoriaMetrics, VictoriaLogs, Grafana). Спецификация — `FTR.HMR.INFRA-0001`.
+Runs GreenOnGrey products with one command on a clean Debian 13 machine: a minikube cluster with storages (Kafka, Postgres, S3-compatible storage) and observability (VictoriaMetrics, VictoriaLogs, Grafana). Specifications: `FTR.HMR.INFRA-0001`, `FTR.INFRA.INST-0001`.
 
-Стенд не зависит от облака. Любое хранилище можно заменить на managed-сервис облака:
-адрес сервиса и секрет подключения остаются теми же, потребители ничего не меняют.
+The stand does not depend on a cloud. Any storage can be replaced with a managed cloud service: the service address and connection secret stay the same, so consumers change nothing.
 
-> Это демо-стенд, а не продакшен: одна нода, без отказоустойчивости и резервного копирования,
-> наружу ничего не публикуется.
+> This is a single-node stand without high availability or backups, not a production setup. Nothing is published outside by default.
 
-## Что разворачивается
+## What gets deployed
 
 ```text
-машина Debian 13 ─ Docker ─ minikube (профиль hammurapi, драйвер docker, 3 CPU / 12 ГБ)
-  namespace storages       Kafka 4.3 (Strimzi, KRaft, 1 брокер)      kafka.storages.svc:9092
-                           Postgres 18 (CloudNativePG, 1 экземпляр)  postgres.storages.svc:5432
-                           SeaweedFS (S3, один под)                  s3.storages.svc:9000
-                           секреты postgres-conn, kafka-conn, s3-conn
-  namespace observability  VictoriaMetrics (метрики, 7 дней)  VictoriaLogs (логи, 3 дня)
-                           vmagent + kube-state-metrics + node-exporter   Vector (логи всех подов)
-                           Grafana: 2 источника данных и 7 дашбордов в папке «Hammurapi Infra»
+Debian 13 machine ─ Docker ─ minikube (profile hammurapi, docker driver, 3 CPU / 12 GB)
+  namespace storages       Kafka 4.3 (Strimzi, KRaft, 1 broker)      kafka.storages.svc:9092
+                           Postgres 18 (CloudNativePG, 1 instance)   postgres.storages.svc:5432
+                           SeaweedFS (S3, one pod)                   s3.storages.svc:9000
+                           secrets postgres-conn, kafka-conn, s3-conn
+  namespace observability  VictoriaMetrics (metrics, 7 days)  VictoriaLogs (logs, 3 days)
+                           vmagent + kube-state-metrics + node-exporter   Vector (logs of all pods)
+                           Grafana: 2 data sources and dashboards in the folder "Hammurapi Infra"
+  namespace installer      state of the install: version, public access, MCP settings
 ```
 
-Объектное хранилище — SeaweedFS, а не MinIO, как в архитектуре: образы MinIO community больше
-не публикуются (Docker Hub `minio/minio` удалён, quay.io требует авторизации). Это запасной
-вариант, предусмотренный архитектурой (п. 17); интерфейс `s3-conn` и адрес `s3.storages.svc:9000`
-не меняются.
+The object storage is SeaweedFS, not MinIO: MinIO community images are no longer published (Docker Hub `minio/minio` is gone, quay.io requires authorization). The `s3-conn` interface and the address `s3.storages.svc:9000` are the same. MinIO or any other S3-compatible storage can be connected as an external one.
 
-Версии всех компонентов и чартов — в [`config/versions.env`](config/versions.env).
+Versions of all components and charts are in [`config/versions.env`](config/versions.env).
 
-## Требования к машине
+## Machine requirements
 
-| | Минимум |
+| | Minimum |
 |---|---|
-| ОС | Debian 13 (trixie), x86_64 |
-| CPU / память | 4 vCPU, 16 ГБ (профиль по умолчанию: minikube 3 CPU / 12 ГБ) |
-| Диск | 80 ГБ свободно (рекомендуется диск 100 ГБ) |
-| Права | обычный пользователь с `sudo` без пароля; запускать **не** от root — minikube с драйвером docker не работает от root |
-| Сеть | доступ в интернет: пакеты, образы, чарты, плагин Grafana |
+| OS | Debian 13 (trixie), x86_64 |
+| CPU / memory | 4 vCPU, 16 GB (default profile: minikube 3 CPU / 12 GB) |
+| Disk | 80 GB free (a 100 GB disk is recommended) |
+| Permissions | a regular user with passwordless `sudo`; do **not** run as root: minikube with the docker driver does not work as root |
+| Network | internet access: packages, images, charts, the Grafana plugin |
 
-Скрипт проверяет всё это перед установкой и при несоответствии завершается, ничего не меняя.
+The script checks all of this before installing and exits without changing anything if a check fails.
 
-## Быстрый старт
+## Quick start
 
 ```sh
 git clone https://github.com/GreenOnGrey/installer.git
@@ -50,255 +44,172 @@ cd installer
 ./installer up
 ```
 
-`up` ставит Docker Engine, kubectl, Helm и minikube нужных версий (уже установленные не
-трогает), запускает кластер, генерирует пароли, разворачивает компоненты, проверяет стенд и
-выводит сводку. На чистой машине это занимает около 15–20 минут, повторный запуск — пару минут.
+`up` installs Docker Engine, kubectl, Helm and minikube at the required versions (leaving installed ones alone), starts the cluster, generates passwords, deploys the components, checks the stand and prints a summary. On a clean machine this takes about 15–20 minutes, a repeated run takes a couple of minutes.
 
-Grafana открывается через SSH-туннель — наружу ничего не публикуется:
+Grafana opens through an SSH tunnel, since nothing is published outside:
 
 ```sh
-# на своей машине
-ssh -L 3000:localhost:3000 <пользователь>@<адрес машины>
-# на машине стенда, в этой сессии
+# on your computer
+ssh -L 3000:localhost:3000 <user>@<machine address>
+# on the machine, in this session
 kubectl --context hammurapi -n observability port-forward svc/grafana 3000:80
-# затем откройте http://localhost:3000; логин и пароль — ./installer creds
+# then open http://localhost:3000; the username and password are in ./installer creds
 ```
 
-## Команды
+## Commands
 
-| Команда | Что делает |
+| Command | What it does |
 |---|---|
-| `./installer up` | Установка и развёртывание. Повторный запуск безопасен: доводит стенд до описанного состояния, не теряет данные и не меняет пароли; применяет изменённые версии |
-| `./installer status [--json]` | Состояние кластера, релизов и подов, развёрнутая версия, проверки стенда, запрошенная память |
-| `./installer creds [--json]` | Адреса сервисов, имена секретов, логины и пароли хранилищ и Grafana |
-| `./installer down [--yes]` | Удаление профиля minikube со всеми данными — с подтверждением |
+| `./installer up` | Installs and deploys. A repeated run is safe: it brings the stand to the described state, keeps data and passwords, and applies changed versions |
+| `./installer status [--json]` | State of the cluster, releases and pods, the deployed version, checks, requested memory |
+| `./installer creds [--json]` | Service addresses, secret names, usernames and passwords of storages and Grafana |
+| `./installer down [--yes]` | Deletes the minikube profile with all its data, after a confirmation |
 
-Флаги: `--config <файл>` (по умолчанию `config/local.env`), `--verbose`, `--no-color`.
+Flags: `--config <file>` (default: `config/local.env`), `--verbose`, `--no-color`.
 
-Коды выхода: `0` успех, `2` неверный вызов или конфигурация, `10` машина не подходит,
-`11` зависимость не установлена или не сошлась контрольная сумма, `12` кластер не запустился,
-`13` релиз не развёрнут, `14` внешнее хранилище недоступно, `15` проверки стенда не прошли,
-`16` отменено, `17` уже выполняется другой `up`.
+Exit codes: `0` success, `2` wrong call or configuration, `10` unsuitable machine, `11` a dependency is not installed or its checksum does not match, `12` the cluster did not start, `13` a release was not deployed, `14` an external storage is unreachable, `15` checks failed, `16` cancelled, `17` another `up` is running.
 
-**Перезагрузка машины.** `up` ставит systemd-юнит `hammurapi-stand`: при загрузке машины он
-запускает профиль minikube (у его контейнера нет политики перезапуска) и ждёт готовности подов —
-компоненты стенда поднимаются сами, их объекты и тома хранятся в профиле. При выключении машины
-юнит останавливает кластер штатно. Итог — `journalctl -u hammurapi-stand`. Проброс портов
-публичного доступа восстанавливает свой юнит `hammurapi-ingress-forward`. Отключить автозапуск —
-`STAND_AUTOSTART=false` и `up`; `down` снимает юнит.
+**Machine reboots.** `up` installs the systemd unit `hammurapi-stand`. At boot it starts the minikube profile (its container has no restart policy) and waits for the pods. Components come back on their own, since their objects and volumes live in the profile. At shutdown the unit stops the cluster cleanly. See the outcome with `journalctl -u hammurapi-stand`. The unit `hammurapi-ingress-forward` restores port forwarding for public access. To turn autostart off, set `STAND_AUTOSTART=false` and run `up`. `down` removes the unit.
 
-**Старые образы.** minikube выключает сборку мусора образов в kubelet, и старые теги Nabu и
-Hammurapi копятся на диске ноды. `up` и юнит `hammurapi-stand` после каждого запуска кластера
-включают её в конфигурации kubelet: при заполнении диска образов выше `IMAGE_GC_HIGH` % (85)
-неиспользуемые образы удаляются до `IMAGE_GC_LOW` % (80), а неиспользуемый образ старше
-`IMAGE_GC_MAX_AGE` (`336h`, 14 дней) удаляется в любом случае. Образы работающих подов, в том
-числе предзагруженные DaemonSet'ами, не удаляются. Kubelet перезапускается, только если
-настройка изменилась; поды при этом продолжают работать.
+**Old images.** minikube turns off image garbage collection in kubelet, so old tags of Nabu and Hammurapi pile up on the node's disk. `up` and the unit `hammurapi-stand` turn it back on in the kubelet configuration after every cluster start. When image disk usage goes above `IMAGE_GC_HIGH` % (85), unused images are removed down to `IMAGE_GC_LOW` % (80), and an unused image older than `IMAGE_GC_MAX_AGE` (`336h`, 14 days) is removed in any case. Images of running pods stay, including those preloaded by DaemonSets. Kubelet restarts only if the setting changed, and pods keep running.
 
-Журнал каждого `up` — `logs/<время>/run.log`; при ошибке рядом — `diagnostics/` (события,
-`describe` проблемных подов, `helm status` релизов).
+The log of each `up` is `logs/<time>/run.log`. On failure `diagnostics/` sits next to it, with events, `describe` of failing pods and `helm status` of releases.
 
-## Проверки стенда
+## Checks
 
-В конце `up` и в `status` проверяются:
+At the end of `up` and in `status`, these are checked:
 
-- все поды в `storages` и `observability` готовы;
-- Grafana и оба источника данных отвечают;
-- все задания сбора метрик активны (`up == 0` пуст);
-- тестовая строка лога доходит до VictoriaLogs с полями namespace, pod, container, node;
-- хранилища принимают подключение по секретам `*-conn`: `select 1` в Postgres, запись и чтение
-  сообщения в Kafka, запись, чтение и удаление объекта в S3;
-- у каждого контейнера заданы запросы и лимиты, а сумма запросов памяти не больше двух третей
-  памяти ноды.
+- all pods in `storages` and `observability` are ready;
+- Grafana and both data sources answer;
+- all metric scrape jobs are active (`up == 0` is empty);
+- a test log line reaches VictoriaLogs with the fields namespace, pod, container, node;
+- storages accept connections with the `*-conn` secrets: `select 1` in Postgres, writing and reading a message in Kafka, writing, reading and deleting an object in S3;
+- every container has requests and limits, and total memory requests are at most two thirds of the node memory.
 
-Если что-то не прошло, команда завершается с кодом 15 и пишет, что именно.
+If something fails, the command exits with code 15 and says what failed.
 
-## Подключение приложений
+## Connecting applications
 
-Потребители (в том числе Hammurapi в следующих фичах) используют только стабильные адреса и
-секреты в namespace `storages` — одинаковые для встроенного и внешнего хранилища:
+Consumers use only stable addresses and secrets in the namespace `storages`, the same for built-in and external storages:
 
-| Секрет | Ключи |
+| Secret | Keys |
 |---|---|
 | `postgres-conn` | `host`, `port`, `database`, `username`, `password`, `sslmode`, `uri` |
 | `kafka-conn` | `bootstrap_servers`, `security_protocol` (`PLAINTEXT` / `SASL_SSL`), `sasl_mechanism`, `username`, `password` |
 | `s3-conn` | `endpoint`, `region`, `bucket`, `access_key`, `secret_key`, `path_style` |
 
-Пароли встроенных хранилищ генерируются при первом `up` и хранятся только в секретах
-Kubernetes; в репозитории, файлах значений и журналах их нет.
+Passwords of built-in storages are generated on the first `up` and kept only in Kubernetes secrets, never in the repository, values files or logs.
 
-## Настройка
+## Configuration
 
-Переопределения — в `config/local.env` (в `.gitignore`), пример —
-[`config/local.env.example`](config/local.env.example). Приоритет:
-`config/defaults.env` → `config/local.env` → переменные окружения → флаги.
+Overrides go in `config/local.env` (ignored by git), with an example in [`config/local.env.example`](config/local.env.example). Priority: `config/defaults.env` → `config/local.env` → environment variables → flags.
 
-Основное: ресурсы minikube (`MK_CPUS`, `MK_MEMORY`, `MK_DISK` — применяются при создании
-профиля), сроки хранения (`VM_RETENTION`, `VL_RETENTION`), размеры томов, режимы хранилищ.
+The main settings are minikube resources (`MK_CPUS`, `MK_MEMORY`, `MK_DISK`, applied when the profile is created), retention (`VM_RETENTION`, `VL_RETENTION`), volume sizes and storage modes.
 
-### Внешние (managed) хранилища
+### External (managed) storages
 
-Для каждого хранилища отдельно — `POSTGRES_MODE`, `KAFKA_MODE`, `S3_MODE` = `external`.
-Встроенное хранилище тогда не разворачивается, сервис `postgres`/`kafka`/`s3` указывает на
-внешний хост (`ExternalName` для DNS-имени, сервис с `EndpointSlice` для IP), а секрет `*-conn`
-заполняется из конфигурации. Перед развёртыванием Job `external-check` проверяет доступность
-(`pg_isready`, метаданные Kafka, `HEAD` бакета); если хост недоступен, `up` останавливается
-с кодом 14.
+Set `POSTGRES_MODE`, `KAFKA_MODE` or `S3_MODE` to `external`, separately for each storage. The built-in storage is then not deployed, the service `postgres`/`kafka`/`s3` points to the external host (`ExternalName` for a DNS name, a service with an `EndpointSlice` for an IP), and the `*-conn` secret is filled from the configuration. Before the deploy, the Job `external-check` verifies access (`pg_isready`, Kafka metadata, `HEAD` of the bucket). If a host is unreachable, `up` stops with code 14.
 
-Пароли и ключи — только через файлы (`POSTGRES_PASSWORD_FILE=/secure/pg-password`) или
-переменные окружения; пароль, записанный прямо в `local.env`, останавливает скрипт с кодом 2.
+Passwords and keys go only through files (`POSTGRES_PASSWORD_FILE=/secure/pg-password`) or environment variables. A password written directly in `local.env` stops the script with code 2.
 
-Для внешней Kafka проверка записи и чтения использует топик `hammurapi-infra-probe` — создайте
-его заранее, если автосоздание топиков выключено. С `OAUTHBEARER` проба проверяет только
-TCP-подключение: токен получает само приложение.
+For an external Kafka, the write and read check uses the topic `hammurapi-infra-probe`. Create it in advance if automatic topic creation is off. With `OAUTHBEARER` the probe checks only the TCP connection, because the application obtains the token itself.
 
-Пример для Google Cloud (Cloud SQL, Managed Service for Apache Kafka, Cloud Storage) —
-[docs/gcp.md](docs/gcp.md).
+An example for Google Cloud (Cloud SQL, Managed Service for Apache Kafka, Cloud Storage) is in [docs/gcp.md](docs/gcp.md).
 
-## MCP-серверы
+## MCP servers
 
-Необязательные MCP-серверы для агентов Nabu (`FTR.NAB.CMN-0006`). Каждый включается своей опцией в
-`config/local.env`, по умолчанию все выключены; выключенный сервер удаляется при следующем `up`.
-Серверы ставятся релизом `mcp-servers` в namespace `mcp` и доступны только `api` Nabu (сетевые политики,
-их применяет kindnet стенда) — наружу ничего не публикуется.
+Optional MCP servers for Nabu agents (`FTR.NAB.CMN-0006`). Each one is enabled by its own option in `config/local.env`, and all are off by default. The chart, images and server descriptions are released by the repository [mcps](https://github.com/GreenOnGrey/mcps), and `MCP_CHART_VERSION` in `config/versions.env` pins the version.
 
-| Опция | Сервер | Память (запрос / лимит) | Образ, диск |
+Servers are installed by the release `mcp-servers` in the namespace `mcp` and are available only to the Nabu `api` (through network policies, enforced by the stand's kindnet). Nothing is published outside.
+
+| Option | Server | Memory (request / limit) | Image, disk |
 |---|---|---|---|
-| `MCP_DOCLING=true` | Разбор документов: `docling-serve` (CPU, OCR `ru`, `en`) и `docling-mcp` | ~1,5 / 5 ГиБ | ~4,4 ГБ |
-| `MCP_SEARCH=true` | Веб-поиск: SearXNG и `mcp-searxng` | ~0,4 / 0,8 ГиБ | ~0,3 ГБ |
-| `MCP_YANDEX_MAIL=true` | Яндекс Почта только для чтения: собственный сервер `imap-mcp` | ~0,06 / 0,25 ГиБ | ~0,1 ГБ |
-| `MCP_DOCGEN=true` | Создание, правка и конвертация документов (`FTR.NAB.CHAT-0003`): собственный сервер `docgen-mcp` и `doc-convert` (Gotenberg — LibreOffice и Chromium без сети — и сайдкар `legacy`); заодно включает предпросмотр DOCX/XLSX/PPTX в Nabu | ~0,9 / 4 ГиБ | ~2,5 ГБ |
+| `MCP_DOCLING=true` | Document conversion: `docling-serve` (CPU, OCR `ru`, `en`) and `docling-mcp` | ~1.5 / 5 GiB | ~4.4 GB |
+| `MCP_SEARCH=true` | Web search: SearXNG and `mcp-searxng` | ~0.4 / 0.8 GiB | ~0.3 GB |
+| `MCP_YANDEX_MAIL=true` | Read-only Yandex Mail: our own server `imap-mcp` | ~0.06 / 0.25 GiB | ~0.1 GB |
+| `MCP_DOCGEN=true` | Creating, editing and converting documents (`FTR.NAB.CHAT-0003`): our own server `docgen-mcp` and `doc-convert` (Gotenberg, which is LibreOffice and Chromium without network, and the `legacy` sidecar); it also turns on the DOCX/XLSX/PPTX preview in Nabu | ~0.9 / 4 GiB | ~2.5 GB |
 
-Перед развёртыванием `up` проверяет бюджет памяти (две трети памяти ноды, как проверка `resources`) и,
-если серверы не помещаются, завершается с кодом 2 и пишет, какой `MK_MEMORY` нужен; профиль minikube с
-новой памятью создаётся заново (`down`, затем `up`). С разбором документов на стенде по умолчанию (12 ГБ)
-рекомендуется `MK_MEMORY=16g`.
+**Disabling a server.** `up` stores the MCP settings in the ConfigMap `installer/installer-config`, so a later `up` without them keeps the servers. Removing an option from the file does not turn a server off. Set `MCP_<NAME>=false` explicitly, and the next `up` removes the server.
 
-Другие параметры: `MCP_DOCLING_MAX_MB` — предельный размер документа для `docling-serve`;
-`MCP_SEARCH_ENGINES` — поисковые системы SearXNG. Ключи доступа генерируются при первом `up` и хранятся
-в секретах namespace `mcp`. Чарт, образы и описания серверов выпускает репозиторий [mcps](https://github.com/GreenOnGrey/mcps); версию закрепляет `MCP_CHART_VERSION` в `config/versions.env`. Образы `docling-mcp`, `imap-mcp`, `docgen-mcp` и `doc-convert` берутся из
-`ghcr.io/greenongrey` с секретом `ghcr-pull`, который `up` копирует из namespace `nabu`. С `MCP_DOCGEN=true`
-`up` создаёт в namespace `nabu` секрет `nabu-docs-preview` (адреса и ключи `doc-convert` и `docgen`) и
-перезапускает `api` Nabu, если секрет изменился: без него предпросмотр офисных файлов выключен.
+Before the deploy, `up` checks the memory budget (two thirds of the node memory, like the `resources` check). If the servers do not fit, it exits with code 2 and says which `MK_MEMORY` is needed. The minikube profile with new memory is created anew (`down`, then `up`). With document conversion on the default stand (12 GB), `MK_MEMORY=16g` is recommended.
 
-**Внесение в каталог Nabu.** `./installer creds` выводит адреса и ключи. В админке Nabu →
-«Каталог» → «MCP-сервер»:
+Other parameters: `MCP_DOCLING_MAX_MB` is the document size limit of `docling-serve`, and `MCP_SEARCH_ENGINES` lists the SearXNG engines. Access keys are generated on the first `up` and kept in secrets of the namespace `mcp`. With `MCP_DOCGEN=true`, `up` creates the secret `nabu-docs-preview` in the namespace `nabu` (addresses and keys of `doc-convert` and `docgen`) and restarts the Nabu `api` if the secret changed. Without it the office file preview is off.
 
-- **Документы** — адрес `http://docling-mcp.mcp.svc:8080/mcp`, платформенный, заголовок
-  `Authorization: Bearer <ключ>`. После проверки разрешите `convert_document_into_docling_document`,
-  `export_docling_document_to_markdown`, `get_overview_of_document_anchors`,
-  `search_for_text_in_document_anchors`, `get_text_of_document_item_at_anchor` и отметьте аргумент
-  `source` конвертации как «Файл пространства». Остальные инструменты (список и изменение кэша,
-  работа с диском сервера) не разрешайте.
-- **Документы: создание** — `http://docgen.mcp.svc:8000/mcp`, платформенный, `Authorization: Bearer <ключ>`.
-  После проверки разрешите все шесть инструментов и отметьте аргументы (`creds` выводит их готовым списком):
+**Adding to the Nabu catalog.** `./installer creds` prints addresses and keys. In the Nabu admin area → Catalog → MCP server:
 
-  | Инструмент | Что делает | Файл пространства | Путь результата |
+- **Documents**: address `http://docling-mcp.mcp.svc:8080/mcp`, platform, header `Authorization: Bearer <key>`. After the check, allow `convert_document_into_docling_document`, `export_docling_document_to_markdown`, `get_overview_of_document_anchors`, `search_for_text_in_document_anchors`, `get_text_of_document_item_at_anchor`, and mark the conversion argument `source` as a space file. Do not allow the other tools (listing and changing the cache, working with the server's disk).
+- **Documents: creation**: `http://docgen.mcp.svc:8000/mcp`, platform, `Authorization: Bearer <key>`. After the check, allow all six tools and mark the arguments (`creds` prints them as a ready list):
+
+  | Tool | What it does | Space file | Result path |
   |---|---|---|---|
-  | `render_document` | Markdown → DOCX, PDF или PPTX; оформление по образцу DOCX | `reference`, `images` (список) | `dest` |
-  | `render_spreadsheet` | XLSX из описания листов: типы, формулы, закрепление, графики | `template` | `dest` |
-  | `fill_template` | Заполнение шаблона DOCX или XLSX данными (`{{ … }}`, циклы `{%tr … %}`) | `template` | `dest` |
-  | `edit_document` | Правка DOCX и PPTX (замена текста с сохранением оформления) и XLSX (ячейки, строки, листы) | `source` | `dest` |
-  | `convert` | DOCX/XLSX/PPTX → PDF, DOC/XLS/PPT → OOXML, HTML или `.zip` с `index.html` → PDF | `source` | `dest` |
-  | `pdf_tools` | PDF: склейка, разбиение на части (`.zip`), поворот и извлечение страниц | `sources` (список) | `dest` |
+  | `render_document` | Markdown → DOCX, PDF or PPTX; styled after a sample DOCX | `reference`, `images` (list) | `dest` |
+  | `render_spreadsheet` | XLSX from a description of sheets: types, formulas, frozen panes, charts | `template` | `dest` |
+  | `fill_template` | Fills a DOCX or XLSX template with data (`{{ … }}`, loops `{%tr … %}`) | `template` | `dest` |
+  | `edit_document` | Edits DOCX and PPTX (replaces text and keeps the styling) and XLSX (cells, rows, sheets) | `source` | `dest` |
+  | `convert` | DOCX/XLSX/PPTX → PDF, DOC/XLS/PPT → OOXML, HTML or a `.zip` with `index.html` → PDF | `source` | `dest` |
+  | `pdf_tools` | PDF: merging, splitting into parts (`.zip`), rotating and extracting pages | `sources` (list) | `dest` |
 
-  Лимит файла — 25 МБ, лимит результата — 50 МБ; все шесть инструментов отметьте «Пишет только в
-  пространство»: в почтовых темах они вызываются без подтверждения (перезапись файла — с подтверждением).
-- **Веб-поиск** — `http://search.mcp.svc:3000/mcp`, платформенный, `Authorization: Bearer <ключ>`.
-- **Яндекс Почта** — `http://yandex-mail.mcp.svc:8000/mcp`, персональный, OAuth: authorize
-  `https://oauth.yandex.ru/authorize`, token `https://oauth.yandex.ru/token`, ClientID и Client secret
-  приложения Яндекса, scopes `mail:imap_ro login:email`. Все инструменты сервера только читают. Проверка
-  позиции идёт с личным доступом администратора — сначала подключите её в «Подключениях». Чтобы
-  Яндекс Почта стала источником памяти коммуникаций, в админке Nabu → «Память коммуникаций» выберите
-  для позиции адаптер `mail` и включите «Источник»; у позиции должны быть разрешены `list_folders`,
-  `search_messages` и `read_thread`. Адаптер `mail` общий для почты по IMAP: другой провайдер с OAuth
-  для IMAP — это ещё одно развёртывание `imap-mcp` со своими `IMAP_HOST`, `USERINFO_*` и `WEB_LINK`.
+  The file limit is 25 MB and the result limit is 50 MB. Mark all six tools as writing only to the space: in mail threads they run without a confirmation (overwriting a file asks for one).
+- **Web search**: `http://search.mcp.svc:3000/mcp`, platform, `Authorization: Bearer <key>`.
+- **Yandex Mail**: `http://yandex-mail.mcp.svc:8000/mcp`, personal, OAuth: authorize `https://oauth.yandex.ru/authorize`, token `https://oauth.yandex.ru/token`, the ClientID and Client secret of the Yandex app, scopes `mail:imap_ro login:email`. All tools of this server only read. The entry is checked with the administrator's personal access, so connect it under Connections first. To make Yandex Mail a source of the communications memory, in the Nabu admin area → Communications memory, choose the adapter `mail` for the entry and turn on Source. The entry must allow `list_folders`, `search_messages` and `read_thread`. The `mail` adapter is common for IMAP mail: another provider with OAuth for IMAP is another deployment of `imap-mcp` with its own `IMAP_HOST`, `USERINFO_*` and `WEB_LINK`.
 
-**OAuth-приложение Яндекса для Яндекс Почты.** На [oauth.yandex.ru](https://oauth.yandex.ru) создайте
-приложение типа **«Для авторизации пользователей»** (не «Для доступа к API или отладки»: у того
-Redirect URI всегда `https://oauth.yandex.ru/verification_code` и не меняется, код показывается на
-странице Яндекса и до Nabu не доходит; тип приложения после создания не меняется). Платформа —
-«Веб-сервисы», Redirect URI — OAuth callback позиции из формы каталога Nabu
-(`https://<api Nabu>/api/v1/oauth/callback/<id позиции>`). Доступ к данным — «Доступ к адресу
-электронной почты» (`login:email`) и в «других разрешениях» — «Чтение писем в почтовом ящике по IMAP»
-(`mail:imap_ro`). С `mail:imap_ro` Яндекс сам запрещает изменять ящик; сервер ещё и открывает папки только
-на чтение и не помечает письма прочитанными. Доступ к почте по IMAP должен быть включён:
+**The Yandex OAuth app for Yandex Mail.** At [oauth.yandex.ru](https://oauth.yandex.ru), create an app of the type **For user authorization**. Do not use the type for API access or debugging: its Redirect URI is always `https://oauth.yandex.ru/verification_code` and cannot change, so the code shows on the Yandex page and never reaches Nabu. The app type cannot change after creation. The platform is Web services, and the Redirect URI is the OAuth callback of the entry from the Nabu catalog form (`https://<Nabu api>/api/v1/oauth/callback/<entry id>`). For data access, choose access to the email address (`login:email`) and, under other permissions, reading mail over IMAP (`mail:imap_ro`). With `mail:imap_ro`, Yandex itself forbids changing the mailbox. The server also opens folders read-only and does not mark messages as read. IMAP access to the mail must be on:
 
-- *в ящике* (личном и в Яндекс 360) — пользователь в настройках Яндекс Почты, раздел «Почтовые
-  программы», блок «Разрешить доступ к почтовому ящику с помощью почтовых клиентов»: «С сервера
-  imap.yandex.ru по протоколу IMAP» и «Пароли приложений и OAuth-токены»;
-- *в организации Яндекс 360* — администратор может запретить сотрудникам почтовые программы или
-  сторонние приложения политиками безопасности в [admin.yandex.ru](https://admin.yandex.ru); тогда он
-  должен разрешить их (или приложение Nabu). Названия пунктов зависят от тарифа и версии кабинета —
-  сверяйтесь со справкой Яндекс 360 для бизнеса.
+- *in the mailbox* (personal and in Yandex 360): the user opens the Yandex Mail settings, section Mail clients, block on allowing access to the mailbox through mail clients, and turns on access from the server imap.yandex.ru over IMAP and app passwords and OAuth tokens;
+- *in a Yandex 360 organization*: an administrator can forbid employees mail clients or third-party apps through security policies at [admin.yandex.ru](https://admin.yandex.ru), and then must allow them (or the Nabu app). Item names depend on the plan and the console version, so check the Yandex 360 for Business help.
 
-Пока доступ выключен, инструменты отвечают ошибкой с тем, что включить.
+While access is off, the tools answer with an error saying what to turn on.
 
-## Выкатка на прод
+## Rollout to production
 
-Прод — демо-стенд в Google Cloud. Workflow [`deploy-prod`](.github/workflows/deploy-prod.yml)
-выкатывает тег релиза:
+Production is a stand in Google Cloud. The workflow [`deploy-prod`](.github/workflows/deploy-prod.yml) rolls out a release tag:
 
-- срабатывает на push тега `vX.Y.Z`; ручной запуск с тегом — для повторной выкатки или возврата
-  на прежнюю версию (автоматического отката нет);
-- передаёт машине прода выгрузку тега (`git archive`) по тому же SSH, раскладывает её в
-  `/opt/hammurapi-infra/releases/<тег>` и выполняет `up`; после успеха `current` указывает на этот
-  тег, хранятся последние 5 выгрузок. Машине прода не нужен доступ к GitHub — deploy keys
-  запрещены политикой организации;
-- `/opt/hammurapi-infra/local.env` и файлы секретов остаются на машине и в workflow не
-  передаются; исключение — публичный доступ, вход в Grafana через GitHub и MCP-серверы (ниже): их параметры идут в
-  `up` через stdin SSH-сессии и на диск не пишутся. Журналы всех запусков — в `/opt/hammurapi-infra/logs`;
-- выкатки идут по одной (`concurrency`), параллельный `up` на машине блокирует
-  `/var/lock/hammurapi-infra.lock` (код 17);
-- итог — сводка `status` в отчёте запуска; развёрнутый тег виден в `status`
-  (ConfigMap `hammurapi-infra-version`); журнал каждого запуска — на машине, в `/opt/hammurapi-infra/logs`: репозиторий публичный, поэтому артефактами он не загружается;
+- it runs on a push of a tag `vX.Y.Z`. A manual run from a tag repeats a rollout or returns to an earlier version (there is no automatic rollback), and `production` accepts only tags, so choose the tag under **Use workflow from**;
+- it hands the production machine an export of the tag (`git archive`) over the same SSH, unpacks it into `/opt/hammurapi-infra/releases/<tag>` and runs `up`. After a success `current` points to that tag, and the last 5 exports are kept. The production machine needs no access to GitHub, because deploy keys are forbidden by the organization's policy;
+- `/opt/hammurapi-infra/local.env` and secret files stay on the machine and are not passed through the workflow. The exceptions are public access, Grafana sign-in through GitHub and MCP servers (below): their parameters reach `up` through the stdin of the SSH session and are not written to disk. Logs of all runs are in `/opt/hammurapi-infra/logs`;
+- rollouts run one at a time (`concurrency`), and `/var/lock/hammurapi-infra.lock` blocks a parallel `up` on the machine (code 17);
+- the outcome is the `status` summary in the run's report. The deployed tag shows in `status` (ConfigMap `installer/installer-version`). The log of each run stays on the machine: the repository is public, so logs are not uploaded as artifacts.
 
-Настройки окружения GitHub `production`:
+Settings of the GitHub environment `production`:
 
-| Имя | Тип | Когда | Назначение |
+| Name | Type | When | Purpose |
 |---|---|---|---|
-| `DEPLOY_TRANSPORT` | переменная | всегда | `ssh` (по умолчанию) или `gcp-iap` |
-| `PROD_HOST` | секрет | `ssh` | Адрес машины (секрет — чтобы не попадал в публичные журналы) |
-| `PROD_USER` | переменная | `ssh` | Пользователь машины |
-| `PROD_SSH_KEY` | секрет | `ssh` | Закрытый ключ пользователя выкатки |
-| `PROD_KNOWN_HOSTS` | секрет | `ssh` | Отпечаток хоста (`ssh-keyscan -t ed25519 <адрес>`); проверка хоста не отключается |
-| `GCP_PROJECT`, `GCP_ZONE`, `GCP_INSTANCE` | переменные | `gcp-iap` | Машина прода |
-| `GCP_WIF_PROVIDER`, `GCP_SERVICE_ACCOUNT` | переменные | `gcp-iap` | Workload Identity Federation |
-| `PUBLIC_ACCESS` | переменная | публичный доступ | `true` |
-| `ACME_EMAIL` | секрет | публичный доступ | Адрес для Let's Encrypt |
-| `GRAFANA_GITHUB_CLIENT_ID`, `GRAFANA_GITHUB_ORG` | переменные | вход в Grafana через GitHub | OAuth-приложение организации; организация по умолчанию — `GreenOnGrey` ([docs/hammurapi.md](docs/hammurapi.md#12-oauth-приложение-github-для-grafana)) |
-| `GRAFANA_GITHUB_CLIENT_SECRET` | секрет | вход в Grafana через GitHub | Client secret OAuth-приложения |
-| `MCP_DOCLING`, `MCP_SEARCH`, `MCP_YANDEX_MAIL`, `MCP_DOCGEN` | переменные | MCP-серверы | `true` включает сервер (раздел «MCP-серверы»); незаданная переменная — значение из `local.env` |
-| `MCP_DOCLING_MAX_MB`, `MCP_SEARCH_ENGINES` | переменные | MCP-серверы | Параметры серверов |
+| `DEPLOY_TRANSPORT` | variable | always | `ssh` (default) or `gcp-iap` |
+| `PROD_HOST` | secret | `ssh` | Machine address (a secret, so it stays out of public logs) |
+| `PROD_USER` | variable | `ssh` | Machine user |
+| `PROD_SSH_KEY` | secret | `ssh` | Private key of the rollout user |
+| `PROD_KNOWN_HOSTS` | secret | `ssh` | Host fingerprint (`ssh-keyscan -t ed25519 <address>`); host checking stays on |
+| `GCP_PROJECT`, `GCP_ZONE`, `GCP_INSTANCE` | variables | `gcp-iap` | The production machine |
+| `GCP_WIF_PROVIDER`, `GCP_SERVICE_ACCOUNT` | variables | `gcp-iap` | Workload Identity Federation |
+| `PUBLIC_ACCESS` | variable | public access | `true` |
+| `ACME_EMAIL` | secret | public access | Address for Let's Encrypt |
+| `GRAFANA_GITHUB_CLIENT_ID`, `GRAFANA_GITHUB_ORG` | variables | Grafana sign-in through GitHub | The organization's OAuth app; the default organization is `GreenOnGrey` ([docs/hammurapi.md](docs/hammurapi.md#12-github-oauth-app-for-grafana)) |
+| `GRAFANA_GITHUB_CLIENT_SECRET` | secret | Grafana sign-in through GitHub | Client secret of the OAuth app |
+| `MCP_DOCLING`, `MCP_SEARCH`, `MCP_YANDEX_MAIL`, `MCP_DOCGEN` | variables | MCP servers | `true` enables a server, `false` disables it; an unset variable keeps the value from `local.env` or the cluster |
+| `MCP_DOCLING_MAX_MB`, `MCP_SEARCH_ENGINES` | variables | MCP servers | Server parameters |
 
-Подготовка машины прода — в [docs/gcp.md](docs/gcp.md#машина-прода).
+Preparing the production machine is described in [docs/gcp.md](docs/gcp.md#production-machine).
 
-## Hammurapi: публичный доступ и выкатка
+## Hammurapi: public access and rollout
 
-С `PUBLIC_ACCESS=true` стенд публикует по HTTPS `web.`, `api.` и `grafana.<базовый домен>`
-(MetalLB, Traefik, сертификаты Let's Encrypt, по умолчанию домен `<IP>.sslip.io`); вход в
-Grafana — через GitHub для участников организации. `hammurapi-core` и `hammurapi-web`
-выкатываются на стенд своими пайплайнами через переиспользуемый workflow
-`deploy-component.yml` (в публичном репозитории `hammurapi`) и скрипт `bin/hammurapi-deploy`; чарты — `charts/hammurapi-core` и
-`charts/hammurapi-web`, публикуются по тегу релиза `vX.Y.Z` с версией `X.Y.Z`.
+With `PUBLIC_ACCESS=true`, the stand publishes `web.`, `api.` and `grafana.<base domain>` over HTTPS (MetalLB, Traefik, Let's Encrypt certificates, with the domain `<IP>.sslip.io` by default). Organization members sign in to Grafana through GitHub. `hammurapi-core` and `hammurapi-web` roll out to the stand through their own pipelines, using the reusable workflow `deploy-component.yml` (in the public repository `hammurapi`) and the script `bin/hammurapi-deploy`. The charts `charts/hammurapi-core` and `charts/hammurapi-web` are published by a release tag `vX.Y.Z` with the version `X.Y.Z`.
 
-Настройка — межсетевой экран, OAuth-приложение для Grafana, GitHub App, секреты организации,
-первая установка и коды выкатки — в [docs/hammurapi.md](docs/hammurapi.md).
+The firewall, the OAuth app for Grafana, the GitHub App, organization secrets, first install and rollout codes are described in [docs/hammurapi.md](docs/hammurapi.md).
 
-## Разработка
+## Development
 
 ```text
-installer        точка входа: up | status | creds | down
-lib/                      common, host, prereqs, cluster, secrets, deploy, external, checks
-config/                   versions.env (версии), defaults.env, local.env.example
-values/                   значения чартов; values/scrape/ — задания сбора метрик vmagent
-charts/hammurapi-storages CR Kafka и Postgres, стабильные сервисы postgres, kafka, s3
-charts/hammurapi-dashboards ConfigMap дашбордов
-dashboards/               JSON дашбордов, normalize.sh, README с источниками
-tests/unit/               bats: функции скрипта с подменой внешних команд
-tests/manifests.sh        рендер релизов для 8 комбинаций режимов, kubeconform, ресурсы
-tests/e2e/e2e.sh          e2e на временной машине Google Cloud
-.github/workflows/        checks (каждый PR), e2e (вручную), deploy-prod (теги)
+installer                 entry point: up | status | creds | down
+lib/                      common, host, prereqs, cluster, secrets, state, deploy, external, checks, public, mcp
+config/                   versions.env (versions), defaults.env, local.env.example
+values/                   chart values; values/scrape/ holds vmagent scrape jobs
+charts/hammurapi-storages CRs of Kafka and Postgres, stable services postgres, kafka, s3
+charts/hammurapi-dashboards ConfigMaps of dashboards
+dashboards/               dashboard JSON, normalize.sh, README with sources
+tests/unit/               bats: script functions with external commands stubbed
+tests/manifests.sh        renders releases for 8 combinations of modes, kubeconform, resources
+tests/e2e/e2e.sh          e2e on a temporary Google Cloud machine
+.github/workflows/        checks (every PR), e2e (manual), deploy-prod (tags)
 ```
 
 ```sh
@@ -307,7 +218,4 @@ bats tests/unit             # bats-core ≥ 1.5
 tests/manifests.sh          # helm ≥ 3.17, kubeconform, jq, yq
 ```
 
-e2e (`.github/workflows/e2e.yml`, запуск вручную) создаёт машину `e2-standard-4` с чистым
-Debian 13, прогоняет `up`, повторный `up`, перезагрузку, отказные сценарии и `down`, пишет время
-этапов в отчёт и удаляет машину. Его запускают перед релизом репозитория и при изменении
-`config/versions.env`, `values/` или `charts/`.
+The e2e workflow (`.github/workflows/e2e.yml`, run manually) creates an `e2-standard-4` machine with a clean Debian 13, runs `up`, a repeated `up`, a reboot, failure scenarios and `down`, writes stage times to a report and deletes the machine. Run it before a release of this repository and when `config/versions.env`, `values/` or `charts/` change.

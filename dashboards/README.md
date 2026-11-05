@@ -1,42 +1,35 @@
-# Дашборды Grafana
+# Grafana dashboards
 
-JSON дашбордов хранится здесь и загружается в Grafana как ConfigMap (чарт
-`charts/hammurapi-dashboards`, sidecar Grafana, папка «Hammurapi Infra»). Grafana
-ничего не скачивает при запуске.
+Dashboard JSON is kept here and loaded into Grafana as ConfigMaps (the chart `charts/hammurapi-dashboards`, the Grafana sidecar, the folder "Hammurapi Infra"). Grafana downloads nothing at start.
 
-| Файл | Дашборд | Источник | Версия | Загружен |
+| File | Dashboard | Source | Version | Loaded |
 |---|---|---|---|---|
 | `kubernetes-cluster.json` | Kubernetes / Views / Global | [dotdc/grafana-dashboards-kubernetes](https://github.com/dotdc/grafana-dashboards-kubernetes), `dashboards/k8s-views-global.json` | v3.0.8 | 2026-09-29 |
-| `node-exporter.json` | Node Exporter Full | [grafana.com/dashboards/1860](https://grafana.com/grafana/dashboards/1860) | ревизия 45 | 2026-09-29 |
+| `node-exporter.json` | Node Exporter Full | [grafana.com/dashboards/1860](https://grafana.com/grafana/dashboards/1860) | revision 45 | 2026-09-29 |
 | `victoriametrics.json` | VictoriaMetrics — single-node | [VictoriaMetrics](https://github.com/VictoriaMetrics/VictoriaMetrics), `dashboards/victoriametrics.json` | v1.153.0 | 2026-09-29 |
-| `kafka.json` | Strimzi Kafka | чарт `strimzi-kafka-operator`, `files/grafana-dashboards/strimzi-kafka.json` | 1.2.0 | 2026-09-29 |
+| `kafka.json` | Strimzi Kafka | chart `strimzi-kafka-operator`, `files/grafana-dashboards/strimzi-kafka.json` | 1.2.0 | 2026-09-29 |
 | `postgres.json` | CloudNativePG | [cloudnative-pg/grafana-dashboards](https://github.com/cloudnative-pg/grafana-dashboards), `charts/cluster/grafana-dashboard.json` | cluster-v0.0.5 | 2026-09-29 |
-| `s3.json` | SeaweedFS | чарт `seaweedfs`, `dashboards/seaweedfs-grafana-dashboard.json` | 4.48.0 | 2026-09-29 |
-| `nabu-agents.json` | Агенты Nabu | собственный: ходы и время до первого ответа, очередь за подом, модели (запросы, ошибки, токены, стоимость), вызовы MCP и операции песочниц, поды агентов, служебные агенты и задания, память, CPU, перезапуски и OOM namespace `nabu` и `nabu-agents` | — | 2026-10-25 |
-| `nabu-sandboxes.json` | Песочницы Nabu | собственный (FTR.NAB.CMN-0008 R20): старт и сбои по профилям, загрузка образов на узлы, проверки собственных образов, сигналы недостающих библиотек. Алерт `NabuSandboxCustomStartFailing` — в `values/grafana.yaml` | — | 2026-10-24 |
+| `s3.json` | SeaweedFS | chart `seaweedfs`, `dashboards/seaweedfs-grafana-dashboard.json` | 4.48.0 | 2026-09-29 |
+| `nabu-agents.json` | Nabu agents | our own: turns and time to the first answer, the queue for a pod, models (requests, errors, tokens, cost), MCP calls and sandbox operations, agent pods, service agents and jobs, memory, CPU, restarts and OOM of the namespaces `nabu` and `nabu-agents` | — | 2026-10-25 |
+| `nabu-sandboxes.json` | Nabu sandboxes | our own (FTR.NAB.CMN-0008 R20): starts and failures by profile, image loading on nodes, checks of custom images, signals of missing libraries. The alert `NabuSandboxCustomStartFailing` is in `values/grafana.yaml` | — | 2026-10-24 |
 
-Объектное хранилище стенда — SeaweedFS, а не MinIO: образы MinIO community больше не
-публикуются (Docker Hub `minio/minio` удалён, quay.io требует авторизации). Поэтому вместо
-дашборда MinIO — дашборд SeaweedFS.
+The MCP server dashboard ships in the chart `mcp-servers` of the repository [mcps](https://github.com/GreenOnGrey/mcps) and appears when a server is enabled.
 
-## Добавление или обновление
+The stand's object storage is SeaweedFS, not MinIO: MinIO community images are no longer published (Docker Hub `minio/minio` is gone, quay.io requires authorization). That is why there is a SeaweedFS dashboard instead of a MinIO one.
+
+## Adding or updating
 
 ```sh
-curl -fsSL <адрес исходного JSON> -o /tmp/src.json
-dashboards/normalize.sh /tmp/src.json <имя>      # → dashboards/<имя>.json
+curl -fsSL <address of the source JSON> -o /tmp/src.json
+dashboards/normalize.sh /tmp/src.json <name>      # → dashboards/<name>.json
 ```
 
 `normalize.sh`:
 
-- заменяет ссылки на источник данных (`${DS_PROMETHEUS}`, `$ds`, `${datasource}` и т. п.)
-  на UID `victoriametrics`, а выражения — на `__expr__`;
-- удаляет переменные шаблона типа `datasource`, а также `__inputs`, `__requires`,
-  `__elements` и `id`;
-- задаёт стабильный `uid`: `hammurapi-<имя>`.
+- replaces data source references (`${DS_PROMETHEUS}`, `$ds`, `${datasource}` and so on) with the UID `victoriametrics`, and those of expressions with `__expr__`;
+- removes template variables of the type `datasource`, as well as `__inputs`, `__requires`, `__elements` and `id`;
+- sets a stable `uid`: `hammurapi-<name>`.
 
-После обновления поправьте строку таблицы выше. Тест `tests/unit/dashboards.bats`
-(OBS-06) проверяет, что в JSON нет других ссылок на источники и нет `__inputs`.
+After an update, fix the table row above. The test OBS-06 in `tests/unit/repo.bats` checks that the JSON has no other data source references and no `__inputs`.
 
-Метки, на которые опираются дашборды, добавляют задания сбора в `values/scrape/`:
-`namespace`, `pod`, `strimzi_io_*`, `kubernetes_pod_name`, а метку `cluster=hammurapi`
-vmagent ставит всем рядам при записи.
+The scrape jobs in `values/scrape/` add the labels dashboards rely on: `namespace`, `pod`, `strimzi_io_*`, `kubernetes_pod_name`. vmagent puts the label `cluster=hammurapi` on all series when writing.
