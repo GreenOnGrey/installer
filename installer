@@ -151,7 +151,7 @@ EOF
 
 Grafana:
   на своей машине:  ssh -L $GRAFANA_LOCAL_PORT:localhost:$GRAFANA_LOCAL_PORT $(id -un)@<адрес машины>
-  на машине стенда: kubectl --context $MK_PROFILE -n $NS_OBSERVABILITY port-forward svc/grafana $GRAFANA_LOCAL_PORT:80
+  на машине стенда: kubectl --context $(kube_context) -n $NS_OBSERVABILITY port-forward svc/grafana $GRAFANA_LOCAL_PORT:80
   затем откройте http://localhost:$GRAFANA_LOCAL_PORT
 
 Пароли: ./installer creds
