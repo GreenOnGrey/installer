@@ -5,7 +5,6 @@
 # Включается PUBLIC_ACCESS=true; без него стенд работает как в FTR.HMR.INFRA-0001.
 
 readonly NS_INGRESS=ingress NS_CERT_MANAGER=cert-manager
-readonly PUBLIC_CM=hammurapi-infra-public
 FORWARD_BIN=${FORWARD_BIN:-/usr/local/lib/hammurapi-infra/ingress-forward}
 FORWARD_UNIT=${FORWARD_UNIT:-/etc/systemd/system/hammurapi-ingress-forward.service}
 FORWARD_STATE=${FORWARD_STATE:-/var/lib/hammurapi-infra}
@@ -192,7 +191,7 @@ EOF
 }
 
 public_state_manifest() {
-  kc -n "$NS_INGRESS" create configmap "$PUBLIC_CM" \
+  kc -n "$NS_STATE" create configmap "$STATE_PUBLIC_CM" \
     --from-literal="baseDomain=$PUBLIC_DOMAIN" --from-literal="publicIp=$PUBLIC_IP_RESOLVED" \
     --from-literal="lbIp=$LB_IP" --from-literal="issuer=${ACME_ISSUER:-letsencrypt}" \
     --dry-run=client -o yaml
@@ -231,7 +230,12 @@ EOF
 }
 
 deploy_public() {
-  public_enabled || return 0
+  if ! public_enabled; then
+    # Иначе status нашёл бы прежний ConfigMap и сообщил о старом домене.
+    kc -n "$NS_STATE" delete configmap "$STATE_PUBLIC_CM" --ignore-not-found >/dev/null || true
+    kc -n "$NS_INGRESS" delete configmap hammurapi-infra-public --ignore-not-found >/dev/null || true
+    return 0
+  fi
   step public
   local range first
   range=$(metallb_range) || die "$E_DEPLOY" "не удалось определить подсеть minikube для MetalLB"
@@ -280,7 +284,7 @@ check_public() {
   public_enabled || return 0
   local host="grafana.$PUBLIC_DOMAIN" code insecure=() redirect
   LB_IP=${LB_IP:-$(kc -n "$NS_INGRESS" get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)}
-  PUBLIC_DOMAIN=${PUBLIC_DOMAIN:-$(kc -n "$NS_INGRESS" get configmap "$PUBLIC_CM" -o jsonpath='{.data.baseDomain}' 2>/dev/null)}
+  PUBLIC_DOMAIN=${PUBLIC_DOMAIN:-$(state_public | jq -r '.baseDomain // empty' 2>/dev/null || true)}
   host="grafana.$PUBLIC_DOMAIN"
   if [[ -z $LB_IP || -z $PUBLIC_DOMAIN ]]; then
     record public fail "публичный доступ не настроен: нет адреса Traefik или домена"

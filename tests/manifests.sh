@@ -18,6 +18,8 @@ source "$ROOT/lib/common.sh"
 source "$ROOT/lib/external.sh"
 # shellcheck source=../lib/checks.sh
 source "$ROOT/lib/checks.sh"
+# shellcheck source=../lib/state.sh
+source "$ROOT/lib/state.sh"
 # shellcheck source=../lib/deploy.sh
 source "$ROOT/lib/deploy.sh"
 # shellcheck source=../lib/public.sh

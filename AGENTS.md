@@ -80,7 +80,7 @@ at the pinned version. Name any job you could not run in your report, with the r
 - `hammurapi-deploy` keeps its exit codes and the last line of JSON output (the deploy contract).
 - The chart of core has no agent and no runner (FTR.HMR.CMN-0007): code tasks run in the sandboxes of
   Nabu; the MCP of the worker (`worker-mcp:8083`) is open only to the namespace of Nabu.
-- **MCP servers live in `mcps`**: images, the chart and the descriptions. To move a stand, bump `MCP_CHART_VERSION` to a published release. Options are the `MCP_*` names of `config/defaults.env` and of the config file, never any `MCP_*` of the environment: other tools set their own.
+- **MCP servers live in `mcps`**: images, the chart and the descriptions. To move a stand, bump `MCP_CHART_VERSION` to a published release. Options are the `MCP_*=true|false` keys of `config/defaults.env`, of the config file and of `installer-config`, never any `MCP_*` of the environment: other tools set their own.
 - `tests/unit/public.bats` runs the config step of `deploy-component.yml` from `hammurapi` `main`;
   keep it working with the workflow both before and after a change there.
 
