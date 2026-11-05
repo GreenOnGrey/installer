@@ -1,4 +1,4 @@
-    # --- Объектное хранилище (SeaweedFS all-in-one): порт метрик 9324 ---
+    # --- Object storage (SeaweedFS all-in-one): metrics port 9324 ---
     - job_name: s3
       kubernetes_sd_configs: [{ role: pod, namespaces: { names: [storages] } }]
       relabel_configs:

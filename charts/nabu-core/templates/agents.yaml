@@ -1,7 +1,7 @@
 {{- if .Values.agents.enabled }}
-# Поды агентов (FTR.NAB.CMN-0004 arch §3.1, §8.3; tech §7.2): под на
-# владельца создаёт worker; здесь — его права, сеть, приоритет, квота и
-# предзагрузка образа.
+# Agent pods (FTR.NAB.CMN-0004 arch §3.1, §8.3; tech §7.2): worker creates a pod per
+# owner; this file holds its rights, network, priority, quota and
+# image preloading.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -26,8 +26,8 @@ roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: nabu-agents }
 subjects:
   - { kind: ServiceAccount, name: nabu-worker, namespace: {{ .Release.Namespace }} }
 ---
-# Ниже нуля и без вытеснения: при нехватке ресурсов узла первыми уходят поды
-# агентов, а не api, worker и хранилища.
+# Below zero and without preemption: when a node lacks resources, agent pods leave
+# first, not api, worker and storages.
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
@@ -36,11 +36,11 @@ metadata:
 value: -10
 preemptionPolicy: Never
 globalDefault: false
-description: Поды агентов Nabu
+description: Nabu agent pods
 ---
-# Входящие — только от worker (оператор) и наблюдаемости (метрики). Исходящие —
-# DNS, внутренний API и relay Nabu, поставщики моделей на 443 в интернете и
-# адреса из agents.egressAllow. Поды агентов не видят друг друга.
+# Ingress only from worker (operator) and observability (metrics). Egress:
+# DNS, the internal API and relay of Nabu, model providers on 443 on the internet and
+# addresses from agents.egressAllow. Agent pods do not see each other.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -92,8 +92,8 @@ spec:
 {{- end }}
 {{- if .Values.agents.prepull }}
 ---
-# Образ агента на каждом узле до первого пода: начальный контейнер тянет
-# образ и выходит, заглушка держит под.
+# The agent image on every node before the first pod: an init container pulls
+# the image and exits, and a stub holds the pod.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:

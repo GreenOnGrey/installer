@@ -1,6 +1,6 @@
-# Миграции БД до обновления api и worker. ConfigMap и секреты создаёт
-# nabu-deploy до Helm — хук их видит. Провал хука при --atomic возвращает
-# релиз на прежнюю ревизию.
+# Database migrations before api and worker update. nabu-deploy creates the ConfigMap
+# and secrets before Helm, so the hook sees them. A failed hook with --atomic returns
+# the release to the previous revision.
 apiVersion: batch/v1
 kind: Job
 metadata:

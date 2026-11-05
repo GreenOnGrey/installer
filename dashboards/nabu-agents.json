@@ -1,5 +1,5 @@
 {
-  "title": "Агенты Nabu",
+  "title": "Nabu agents",
   "uid": "hammurapi-nabu-agents",
   "tags": [],
   "editable": true,
@@ -22,7 +22,7 @@
   "panels": [
     {
       "type": "row",
-      "title": "Обзор",
+      "title": "Overview",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -34,7 +34,7 @@
     },
     {
       "type": "stat",
-      "title": "Ходов за сутки",
+      "title": "Turns in 24 h",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -76,7 +76,7 @@
     },
     {
       "type": "stat",
-      "title": "Успешных ходов за сутки",
+      "title": "Successful turns in 24 h",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -135,7 +135,7 @@
     },
     {
       "type": "stat",
-      "title": "Активные сессии агентов",
+      "title": "Active agent sessions",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -177,7 +177,7 @@
     },
     {
       "type": "stat",
-      "title": "В очереди за подом",
+      "title": "Queued for a pod",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -236,7 +236,7 @@
     },
     {
       "type": "stat",
-      "title": "Ждут подтверждения",
+      "title": "Awaiting confirmation",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -278,8 +278,8 @@
     },
     {
       "type": "stat",
-      "title": "Перезапуски Nabu за сутки",
-      "description": "Контейнеры namespace nabu и nabu-agents; причина — на панели «Перезапуски и OOM» ниже",
+      "title": "Nabu restarts in 24 h",
+      "description": "Containers of the namespaces nabu and nabu-agents; the reason is on the panel Restarts and OOM below",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
@@ -337,7 +337,7 @@
     },
     {
       "type": "row",
-      "title": "Ходы",
+      "title": "Turns",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -349,8 +349,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Ходы по каналам и результату",
-      "description": "ходов в минуту",
+      "title": "Turns by channel and result",
+      "description": "turns per minute",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
@@ -390,8 +390,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Время до первого ответа, p95",
-      "description": "От сообщения до первого куска ответа: hot — живая сессия, warm — тёплый под, cold — новый под",
+      "title": "Time to first answer, p95",
+      "description": "From a message to the first chunk of the answer: hot is a live session, warm is a warm pod, cold is a new pod",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
@@ -431,7 +431,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Ожидание пода, p95",
+      "title": "Pod wait, p95",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -472,7 +472,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Очередь за подом",
+      "title": "Pod queue",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -506,7 +506,7 @@
             "uid": "victoriametrics"
           },
           "expr": "sum by (reason) (increase(nabu_agent_queue_expired_total[15m]))",
-          "legendFormat": "истекло · {{reason}}",
+          "legendFormat": "expired · {{reason}}",
           "refId": "B"
         }
       ],
@@ -522,7 +522,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Сбросы и сжатия контекста",
+      "title": "Context resets and compactions",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -563,7 +563,7 @@
     },
     {
       "type": "row",
-      "title": "Модели",
+      "title": "Models",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -575,8 +575,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Запросы к моделям",
-      "description": "в минуту",
+      "title": "Model requests",
+      "description": "per minute",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
@@ -616,7 +616,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Ошибки моделей по классам",
+      "title": "Model errors by class",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -657,8 +657,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Токены",
-      "description": "в минуту",
+      "title": "Tokens",
+      "description": "per minute",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
@@ -698,7 +698,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Стоимость за сутки",
+      "title": "Cost in 24 h",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -740,7 +740,7 @@
     },
     {
       "type": "row",
-      "title": "Инструменты",
+      "title": "Tools",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -752,7 +752,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Вызовы MCP-серверов каталога",
+      "title": "Calls to catalog MCP servers",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -793,8 +793,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Длительность вызова MCP, p95",
-      "description": "Pi ждёт ответа сервера 180 с",
+      "title": "MCP call duration, p95",
+      "description": "Pi waits 180 s for a server answer",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
@@ -834,7 +834,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Операции в песочнице и рабочих местах",
+      "title": "Operations in sandboxes and workplaces",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -875,7 +875,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Песочницы и подключения",
+      "title": "Sandboxes and connections",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -900,7 +900,7 @@
             "uid": "victoriametrics"
           },
           "expr": "sum(nabu_sandboxes_running)",
-          "legendFormat": "песочниц работает",
+          "legendFormat": "sandboxes running",
           "refId": "A"
         },
         {
@@ -909,7 +909,7 @@
             "uid": "victoriametrics"
           },
           "expr": "sum by (kind) (nabu_relay_workspace_connections)",
-          "legendFormat": "подключено · {{kind}}",
+          "legendFormat": "connected · {{kind}}",
           "refId": "B"
         }
       ],
@@ -925,7 +925,7 @@
     },
     {
       "type": "row",
-      "title": "Поды агентов (FTR.NAB.CMN-0004)",
+      "title": "Agent pods (FTR.NAB.CMN-0004)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -937,7 +937,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Поды по состояниям",
+      "title": "Pods by state",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -971,7 +971,7 @@
             "uid": "victoriametrics"
           },
           "expr": "max(nabu_agent_pods_capacity)",
-          "legendFormat": "потолок",
+          "legendFormat": "ceiling",
           "refId": "B"
         },
         {
@@ -980,7 +980,7 @@
             "uid": "victoriametrics"
           },
           "expr": "max(nabu_agent_pods_warm_target)",
-          "legendFormat": "тёплый резерв, цель",
+          "legendFormat": "warm reserve, target",
           "refId": "C"
         }
       ],
@@ -996,7 +996,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Старт пода, p95",
+      "title": "Pod start, p95",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -1037,8 +1037,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Остановки подов и запуски Pi",
-      "description": "Запуски Pi с reason=crash — падения агента",
+      "title": "Pod stops and Pi starts",
+      "description": "Pi starts with reason=crash are agent crashes",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
@@ -1062,7 +1062,7 @@
             "uid": "victoriametrics"
           },
           "expr": "sum by (reason) (increase(nabu_agent_pod_stops_total[1h]))",
-          "legendFormat": "остановка · {{reason}}",
+          "legendFormat": "stop · {{reason}}",
           "refId": "A"
         },
         {
@@ -1071,7 +1071,7 @@
             "uid": "victoriametrics"
           },
           "expr": "sum by (reason) (increase(nabu_agent_process_starts_total[1h]))",
-          "legendFormat": "запуск Pi · {{reason}}",
+          "legendFormat": "Pi start · {{reason}}",
           "refId": "B"
         }
       ],
@@ -1087,7 +1087,7 @@
     },
     {
       "type": "stat",
-      "title": "Цикл менеджера подов, с назад",
+      "title": "Pod manager loop, seconds ago",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -1146,7 +1146,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Служебные агенты и задания",
+      "title": "Service agents and tasks",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -1180,7 +1180,7 @@
             "uid": "victoriametrics"
           },
           "expr": "sum by (result) (increase(nabu_task_runs_total[1h]))",
-          "legendFormat": "задания · {{result}}",
+          "legendFormat": "tasks · {{result}}",
           "refId": "B"
         }
       ],
@@ -1196,7 +1196,7 @@
     },
     {
       "type": "row",
-      "title": "Ресурсы",
+      "title": "Resources",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1208,7 +1208,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Память",
+      "title": "Memory",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -1250,7 +1250,7 @@
     {
       "type": "timeseries",
       "title": "CPU",
-      "description": "ядер",
+      "description": "cores",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
@@ -1291,8 +1291,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Перезапуски и OOM",
-      "description": "OOMKilled — контейнер упёрся в лимит памяти",
+      "title": "Restarts and OOM",
+      "description": "OOMKilled: a container hit its memory limit",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"

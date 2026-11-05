@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # shellcheck disable=SC2034,SC2016,SC2030,SC2031,SC2153,SC2329
-# FTR.NAB.CMN-0006: MCP-серверы стенда — опции, бюджет памяти, ключи, удаление
-# релиза, адреса для каталога Nabu.
+# FTR.NAB.CMN-0006: MCP servers of the stand: options, memory budget, keys, removal of the
+# release, addresses for the Nabu catalog.
 
 load helpers
 
@@ -11,7 +11,7 @@ setup() {
   KUBE_SECRETS=$BATS_TEST_TMPDIR/secrets
   mkdir -p "$KUBE_SECRETS"
   export KUBE_SECRETS
-  # kubectl: секреты — файлы каталога; HAS_RELEASE — есть ли релиз mcp-servers.
+  # kubectl: secrets are files of a directory; HAS_RELEASE says whether the release mcp-servers exists.
   stub kubectl '
 case "$*" in
   *"get secret "*" -o jsonpath"*) n=$(sed "s/.*get secret \([^ ]*\).*/\1/" <<<"$*"); [[ -f $KUBE_SECRETS/$n ]] && base64 <"$KUBE_SECRETS/$n" ;;
@@ -28,13 +28,13 @@ case "$*" in
 esac'
 }
 
-@test "STD-01: по умолчанию все серверы выключены" {
+@test "STD-01: all servers are off by default" {
   [ "$MCP_DOCLING" = false ] && [ "$MCP_SEARCH" = false ] && [ "$MCP_YANDEX_MAIL" = false ]
   run mcp_enabled
   [ "$status" -ne 0 ]
 }
 
-@test "FTR.INFRA.INST-0001 R21: чужая переменная MCP_* из окружения — не опция сервера" {
+@test "FTR.INFRA.INST-0001 R21: a foreign MCP_* variable from the environment is not a server option" {
   export MCP_CONNECTION_NONBLOCKING=true MCP_SOMETHING=not-a-bool
   load_config "$ROOT" /dev/null
   run mcp_enabled
@@ -43,7 +43,7 @@ esac'
   [ "$status" -eq 0 ]
 }
 
-@test "FTR.INFRA.INST-0001 R20: сервер из описания и своей опции — без кода инсталлятора" {
+@test "FTR.INFRA.INST-0001 R20: a server from its description and option needs no installer code" {
   local chart=$BATS_TEST_TMPDIR/chart cfg=$BATS_TEST_TMPDIR/local.env
   mkdir -p "$chart/files/servers"
   jq -n '{name: "new-one", valuesKey: "newOne", service: "new-one:9000", deployments: ["new-one"],
@@ -60,14 +60,14 @@ esac'
   [ "$output" = new-one ]
 }
 
-@test "FTR.INFRA.INST-0001 R21: пока ни один сервер не включён, чарт не скачивается" {
+@test "FTR.INFRA.INST-0001 R21: while no server is on, the chart does not download" {
   MCP_CHART_DIR=""
   mcp_load
   [ "$MCP_LOADED" -eq 0 ]
   not_called "helm pull"
 }
 
-@test "FTR.INFRA.INST-0001 R20: чарт скачивается анонимно и один раз на выгрузку" {
+@test "FTR.INFRA.INST-0001 R20: the chart downloads anonymously and once per export" {
   local fake=$BATS_TEST_TMPDIR/root
   mkdir -p "$fake"
   stub helm '
@@ -81,7 +81,7 @@ esac'
   called "--registry-config"
 }
 
-@test "FTR.INFRA.INST-0001 R20: чарт недоступен — код 13" {
+@test "FTR.INFRA.INST-0001 R20: the chart is unavailable: code 13" {
   stub helm 'exit 1'
   retry() { "${@:3}"; }
   MCP_SEARCH=true MCP_CHART_DIR=""
@@ -91,7 +91,7 @@ esac'
   [[ $output == *"failed to download chart"* ]]
 }
 
-@test "FTR.INFRA.INST-0001 R21: включённая опция без сервера в чарте — код 2" {
+@test "FTR.INFRA.INST-0001 R21: an enabled option without a server in the chart: code 2" {
   local cfg=$BATS_TEST_TMPDIR/local.env
   echo 'MCP_DOCGN=true' >"$cfg"
   load_config "$ROOT" "$cfg"
@@ -104,7 +104,7 @@ esac'
   jq -e '.error | test("MCP_DOCGN")' <<<"$output"
 }
 
-@test "FTR.INFRA.INST-0001 R20: прежний параметр MCP_* в файле конфигурации — не опция" {
+@test "FTR.INFRA.INST-0001 R20: an old MCP_* parameter in the config file is not an option" {
   local cfg=$BATS_TEST_TMPDIR/local.env
   echo 'MCP_IMAGE_REGISTRY=ghcr.io/x' >"$cfg"
   load_config "$ROOT" "$cfg"
@@ -112,7 +112,7 @@ esac'
   [ "$status" -eq 0 ]
 }
 
-@test "FTR.INFRA.INST-0001 R20: чарт недоступен — status сообщает, а не падает; check_mcp записывает сбой" {
+@test "FTR.INFRA.INST-0001 R20: the chart is unavailable: status reports it and check_mcp records a failure" {
   stub helm 'exit 1'
   retry() { "${@:3}"; }
   MCP_SEARCH=true MCP_CHART_DIR=""
@@ -125,35 +125,35 @@ esac'
   [[ ${CHECK_RESULTS[*]} == *"mcp|fail|"* ]]
 }
 
-@test "STD-05: значение опции не true/false — код 2" {
+@test "STD-05: an option value other than true/false: code 2" {
   MCP_DOCLING=yes
   run validate_mcp_config
   [ "$status" -eq 2 ]
   [[ $output == *"MCP_DOCLING must be true or false"* ]]
 }
 
-@test "неверный список поисковых систем — код 2" {
+@test "a wrong list of search engines: code 2" {
   MCP_SEARCH_ENGINES='bing; rm -rf'
   run validate_mcp_config
   [ "$status" -eq 2 ]
 }
 
-@test "STD-09: бюджет — укладывается" {
+@test "STD-09: the budget fits" {
   run mcp_budget $((4 << 30)) $((2 << 30)) $((12 << 30)) $((12 << 30))
   [ "$output" = ok ]
 }
 
-@test "STD-08, STD-09: бюджет превышен — недостающий объём и нужный MK_MEMORY" {
+@test "STD-08, STD-09: the budget is exceeded: the missing amount and the needed MK_MEMORY" {
   MK_MEMORY=12g
-  # стенд 6 ГиБ + серверы 3 ГиБ = 9 ГиБ при бюджете 8 ГиБ из 12; системная часть 0,5 ГиБ
+  # stand 6 GiB + servers 3 GiB = 9 GiB with a budget of 8 GiB of 12; the system part is 0.5 GiB
   run mcp_budget $((6 << 30)) $((3 << 30)) $((12 << 30)) $((25 << 29))
   [[ $output == *"lack 1.0 GiB"* ]]
-  # 9 × 3/2 + 0,5 = 14 ГиБ
+  # 9 × 3/2 + 0.5 = 14 GiB
   [[ $output == *"MK_MEMORY=14g"* ]]
   [[ $output == *"(now 12g)"* ]]
 }
 
-@test "STD-11, STD-12, STD-03: ключи создаются один раз, у выключенных удаляются после релиза" {
+@test "STD-11, STD-12, STD-03: keys are created once, and those of disabled servers go after the release" {
   MCP_DOCLING=true MCP_SEARCH=true
   ensure_mcp_secrets
   [ -f "$KUBE_SECRETS/mcp-docling-key" ] && [ -f "$KUBE_SECRETS/mcp-search-key" ] && [ -f "$KUBE_SECRETS/mcp-searxng-secret" ]
@@ -163,14 +163,14 @@ esac'
   [ "$(cat "$KUBE_SECRETS/mcp-search-key")" = "$first" ]
   MCP_DOCLING=false
   ensure_mcp_secrets
-  # ensure_mcp_secrets ничего не удаляет: релиз ещё ссылается на ключи
+  # ensure_mcp_secrets deletes nothing: the release still references the keys
   [ -f "$KUBE_SECRETS/mcp-docling-key" ]
   drop_disabled_secrets
   [ ! -f "$KUBE_SECRETS/mcp-docling-key" ] && [ ! -f "$KUBE_SECRETS/mcp-docling-serve-key" ]
   [ -f "$KUBE_SECRETS/mcp-search-key" ]
 }
 
-@test "STD-08 (R3): бюджет превышен — up останавливается до любых изменений стенда" {
+@test "STD-08 (R3): the budget is exceeded: up stops before any change to the stand" {
   MCP_DOCLING=true MK_MEMORY=4g
   mcp_rendered_memory() { echo $((3 << 30)); }
   stub kubectl '
@@ -189,7 +189,7 @@ esac'
   not_called "apply -f -"
 }
 
-@test "STD-13: ключи не попадают в argv и журнал" {
+@test "STD-13: keys reach neither argv nor the log" {
   MCP_SEARCH=true
   ensure_mcp_secrets 2>"$BATS_TEST_TMPDIR/log"
   key=$(cat "$KUBE_SECRETS/mcp-search-key")
@@ -197,20 +197,20 @@ esac'
   not_grep -F "$key" "$BATS_TEST_TMPDIR/log"
 }
 
-@test "STD-04: все выключены — релиз и namespace удаляются" {
+@test "STD-04: all off: the release and namespace are removed" {
   HAS_RELEASE=true
   deploy_mcp
   called "helm --kube-context hammurapi uninstall mcp-servers -n mcp"
   called "kubectl --context hammurapi delete ns mcp"
 }
 
-@test "STD-01: все выключены и релиза нет — ничего не ставится" {
+@test "STD-01: all off and no release: nothing installs" {
   deploy_mcp
   not_called "upgrade --install mcp-servers"
   not_called uninstall
 }
 
-@test "значения чарта — включение и конфигурация; образы задаёт сам чарт" {
+@test "chart values: enabling and configuration; the chart itself sets images" {
   MCP_DOCLING=true
   mcp_load
   run mcp_helm_args
@@ -220,7 +220,7 @@ esac'
   [[ $output == *"search.engines=[\"duckduckgo\""* ]]
 }
 
-@test "STD-17: creds — адреса и способ доступа только включённых серверов" {
+@test "STD-17: creds: addresses and access mode of enabled servers only" {
   MCP_SEARCH=true MCP_YANDEX_MAIL=true
   printf 'k-search' >"$KUBE_SECRETS/mcp-search-key"
   run mcp_creds_json
@@ -231,7 +231,7 @@ esac'
   [ "$(jq -c '."yandex-mail".oauth.scopes' <<<"$output")" = '["mail:imap_ro","login:email"]' ]
 }
 
-@test "R1: Яндекс Почта — своя опция, по умолчанию выключена; включение даёт релиз" {
+@test "R1: Yandex Mail has its own option, off by default; enabling gives a release" {
   [ "$MCP_YANDEX_MAIL" = false ]
   MCP_YANDEX_MAIL=true
   run mcp_enabled
@@ -243,7 +243,7 @@ esac'
   [ "$status" -eq 2 ]
 }
 
-@test "R6: скрипт пробы берёт ключ из окружения пода и передаёт curl через stdin" {
+@test "R6: the probe script takes the key from the pod's environment and passes it to curl through stdin" {
   run mcp_rpc_script http://search.mcp.svc:3000/mcp SEARCH_KEY tools/list '{}'
   [[ $output == *'eval "KEY=\$SEARCH_KEY"'* ]]
   [[ $output == *"curl -K -"* ]]
@@ -251,7 +251,7 @@ esac'
   sh -n <<<"$output"
 }
 
-@test "R6: проверки сервера — отдельными записями" {
+@test "R6: server checks are separate records" {
   MCP_SEARCH=true
   mcp_rpc() {
     case "$2 $3" in
@@ -268,10 +268,10 @@ esac'
   [ "${MCP_TOOL_COUNT[search]}" = 2 ]
 }
 
-@test "STD-15: status — готовность по Deployment'ам, число инструментов и проверки" {
+@test "STD-15: status: readiness by Deployments, tool count and checks" {
   MCP_SEARCH=true MCP_DOCLING=true
   MCP_TOOL_COUNT[search]=4
-  CHECK_RESULTS=("mcp-search-tools|ok|4 инструментов" "mcp-search-auth|ok|без ключа — 401" "storages|ok|x")
+  CHECK_RESULTS=("mcp-search-tools|ok|4 tools" "mcp-search-auth|ok|without a key: 401" "storages|ok|x")
   deploys='{"items":[{"metadata":{"name":"search"},"spec":{"replicas":1},"status":{"readyReplicas":1}},
     {"metadata":{"name":"docling-mcp"},"spec":{"replicas":1},"status":{"readyReplicas":1}},
     {"metadata":{"name":"docling-serve"},"spec":{"replicas":1},"status":{}}]}'
@@ -283,7 +283,7 @@ esac'
   [ "$(jq -r '."yandex-mail".enabled' <<<"$output")" = false ]
 }
 
-@test "R3: память серверов — из рендера чарта через kubectl и jq, без yq" {
+@test "R3: server memory comes from the rendered chart through kubectl and jq, without yq" {
   MCP_DOCLING=true
   stub helm 'echo "kind: Deployment"'
   stub kubectl '
@@ -299,6 +299,6 @@ esac'
   [ "$output" = $(((2 << 30) + (256 << 20))) ]
 }
 
-@test "стенд не зависит от yq: на машине его нет (prereqs ставит jq)" {
+@test "the stand does not depend on yq: the machine has none (prereqs installs jq)" {
   not_grep -nE '(^|[^#]*[|;&(] *|^ *)yq\b' "$ROOT"/lib/*.sh "$ROOT/installer"
 }

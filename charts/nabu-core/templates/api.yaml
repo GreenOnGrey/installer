@@ -13,8 +13,8 @@ spec:
   ports:
     - { name: http, port: 8080, targetPort: http }
 ---
-# Внутренний API (:8081): встроенный MCP и MCP-прокси для оператора агента,
-# синхронизация файлов для песочниц.
+# The internal API (:8081): built-in MCP and MCP proxy for the agent operator,
+# file sync for sandboxes.
 apiVersion: v1
 kind: Service
 metadata:
@@ -37,7 +37,7 @@ metadata:
     app.kubernetes.io/component: api
 spec:
   ingressClassName: {{ .Values.ingress.className }}
-  # Сертификат по умолчанию Traefik (общий сертификат стенда с nabu. и nabu-api.).
+  # The default Traefik certificate (the stand's shared certificate with nabu. and nabu-api.).
   tls: [{ hosts: [{{ include "nabu.api" . | quote }}] }]
   rules:
     - host: {{ include "nabu.api" . | quote }}

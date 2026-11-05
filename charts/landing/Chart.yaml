@@ -1,7 +1,7 @@
 apiVersion: v2
 name: landing
-description: "Сайт GreenOnGrey (FTR.LND.WEB-0001): статические страницы на nginx"
+description: "GreenOnGrey site (FTR.LND.WEB-0001): static pages on nginx"
 type: application
-# Версию задаёт deploy-prod.yml installer из тега стенда vX.Y.Z (как у чартов Hammurapi и Nabu).
+# deploy-prod.yml of installer sets the version from the tag vX.Y.Z (like the Hammurapi and Nabu charts).
 version: 0.0.0
 appVersion: "0.0.0"

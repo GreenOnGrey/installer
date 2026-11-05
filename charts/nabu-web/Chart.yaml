@@ -1,7 +1,7 @@
 apiVersion: v2
 name: nabu-web
-description: "Nabu web (FTR.NAB.CMN-0001): сайт пользователя и панель администрирования"
+description: "Nabu web (FTR.NAB.CMN-0001): user site and admin panel"
 type: application
-# Версию задаёт deploy-prod.yml installer из тега стенда vX.Y.Z (как у чартов Hammurapi).
+# deploy-prod.yml of installer sets the version from the tag vX.Y.Z (like the Hammurapi charts).
 version: 0.0.0
 appVersion: "0.0.0"

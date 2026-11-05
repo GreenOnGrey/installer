@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # shellcheck disable=SC2034,SC2016,SC2030,SC2031,SC2153,SC2329
-# R1: проверки машины перед установкой.
+# R1: checks of the machine before installing.
 
 load helpers
 
@@ -15,7 +15,7 @@ setup() {
   host_free_disk_gb() { echo 100; }
 }
 
-@test "HOST-01: Debian 12 — код 10, ничего не устанавливается" {
+@test "HOST-01: Debian 12: code 10, nothing installs" {
   os_release debian 12
   run check_host
   [ "$status" -eq 10 ]
@@ -24,48 +24,48 @@ setup() {
   not_called curl
 }
 
-@test "HOST-01: Debian 13 проходит проверку" {
+@test "HOST-01: Debian 13 passes" {
   run check_host
   [ "$status" -eq 0 ]
   [[ $output == *"machine is suitable: Debian 13"* ]]
 }
 
-@test "HOST-02: архитектура aarch64 — код 10" {
+@test "HOST-02: architecture aarch64: code 10" {
   host_arch() { echo aarch64; }
   run check_host
   [ "$status" -eq 10 ]
   [[ $output == *"aarch64"* ]]
 }
 
-@test "HOST-03: нет sudo без пароля — код 10" {
+@test "HOST-03: no passwordless sudo: code 10" {
   host_has_sudo() { return 1; }
   run check_host
   [ "$status" -eq 10 ]
   [[ $output == *"sudo"* ]]
 }
 
-@test "HOST-04: мало памяти — код 10 с требуемым и фактическим значением" {
+@test "HOST-04: not enough memory: code 10 with the required and actual values" {
   meminfo_gb 8
   run check_host
   [ "$status" -eq 10 ]
   [[ $output == *"8 GB"* && $output == *"15 GB"* ]]
 }
 
-@test "HOST-04: мало CPU — код 10" {
+@test "HOST-04: not enough CPUs: code 10" {
   host_cpus() { echo 2; }
   run check_host
   [ "$status" -eq 10 ]
   [[ $output == *"CPUs: 2"* ]]
 }
 
-@test "R1: мало места на диске до создания кластера — код 10" {
+@test "R1: not enough disk before the cluster exists: code 10" {
   host_free_disk_gb() { echo 20; }
   run check_host
   [ "$status" -eq 10 ]
   [[ $output == *"20 GB"* ]]
 }
 
-@test "R4: на повторном up место на диске не проверяется" {
+@test "R4: a repeated up does not check disk space" {
   host_free_disk_gb() { echo 20; }
   mkdir -p "$MINIKUBE_HOME/profiles/hammurapi"
   echo '{}' >"$MINIKUBE_HOME/profiles/hammurapi/config.json"

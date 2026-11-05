@@ -1,5 +1,5 @@
-# Vector (роль Agent, DaemonSet): логи всех контейнеров всех namespace (R9) →
-# VictoriaLogs через Elasticsearch-совместимый эндпоинт.
+# Vector (role Agent, DaemonSet): logs of all containers of all namespaces (R9) →
+# VictoriaLogs through the Elasticsearch-compatible endpoint.
 role: Agent
 service: { enabled: false }
 serviceHeadless: { enabled: false }
@@ -9,8 +9,8 @@ customConfig:
   data_dir: /vector-data-dir
   api: { enabled: false }
   sources:
-    # Новые файлы логов ищем каждые 5 с, а не раз в минуту по умолчанию: иначе
-    # строки короткоживущих подов (и пробы проверки logs) опаздывают до минуты.
+    # Look for new log files every 5 s, not once a minute by default: otherwise
+    # lines of short-lived pods (and the probe of the logs check) lag up to a minute.
     k8s: { type: kubernetes_logs, glob_minimum_cooldown_ms: 5000 }
     internal: { type: internal_metrics }
   transforms:

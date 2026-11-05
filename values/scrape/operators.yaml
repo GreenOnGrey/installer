@@ -1,4 +1,4 @@
-    # --- Операторы Strimzi (метка name, порт http) и CloudNativePG (порт metrics) ---
+    # --- Operators Strimzi (label name, port http) and CloudNativePG (port metrics) ---
     - job_name: operators
       kubernetes_sd_configs: [{ role: pod, namespaces: { names: [storages] } }]
       relabel_configs:

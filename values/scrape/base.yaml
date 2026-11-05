@@ -1,4 +1,4 @@
-    # --- Кластер: kubelet, cadvisor, API-сервер, ноды, объекты Kubernetes ---
+    # --- The cluster: kubelet, cadvisor, API server, nodes, Kubernetes objects ---
     - job_name: kubelet
       scheme: https
       tls_config: { insecure_skip_verify: true }
@@ -33,13 +33,13 @@
       relabel_configs:
         - { source_labels: [__meta_kubernetes_service_name], regex: kube-state-metrics, action: keep }
         - { source_labels: [__meta_kubernetes_endpoint_port_name], regex: http, action: keep }
-    # --- Сам стек: поды observability с аннотацией prometheus.io/scrape ---
+    # --- The stack itself: observability pods with the annotation prometheus.io/scrape ---
     - job_name: stack
       kubernetes_sd_configs: [{ role: pod, namespaces: { names: [observability] } }]
       relabel_configs:
         - { source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape], regex: "true", action: keep }
         - { source_labels: [__meta_kubernetes_pod_phase], regex: Running, action: keep }
-        # Одна цель на под: порт контейнера, указанный в аннотации.
+        # One target per pod: the container port named in the annotation.
         - { source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port, __meta_kubernetes_pod_container_port_number], action: keep_if_equal }
         - { source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path], regex: (.+), target_label: __metrics_path__ }
         - { source_labels: [__meta_kubernetes_namespace], target_label: namespace }

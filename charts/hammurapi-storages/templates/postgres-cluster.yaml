@@ -1,6 +1,6 @@
 {{- if eq .Values.postgres.mode "internal" }}
-# Postgres через CloudNativePG: один экземпляр, пользователь и база из секрета
-# postgres-credentials (создаёт installer), метрики на порту 9187.
+# Postgres through CloudNativePG: one instance, user and database from the secret
+# postgres-credentials (created by installer), metrics on port 9187.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -8,7 +8,7 @@ metadata:
   labels: {{- include "storages.labels" . | nindent 4 }}
 spec:
   instances: 1
-  imageName: {{ required "postgres.image обязателен" .Values.postgres.image | quote }}
+  imageName: {{ required "postgres.image is required" .Values.postgres.image | quote }}
   bootstrap:
     initdb:
       database: {{ .Values.postgres.database }}

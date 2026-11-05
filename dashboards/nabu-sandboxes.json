@@ -1,5 +1,5 @@
 {
-  "title": "Песочницы Nabu",
+  "title": "Nabu sandboxes",
   "uid": "hammurapi-nabu-sandboxes",
   "tags": [],
   "editable": true,
@@ -22,7 +22,7 @@
   "panels": [
     {
       "type": "row",
-      "title": "Старт песочниц (FTR.NAB.CMN-0008 R20)",
+      "title": "Sandbox start (FTR.NAB.CMN-0008 R20)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -34,8 +34,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Время старта по профилям, p95",
-      "description": "От создания пода до подключения к relay; kind: sandbox — пространство, runbox — прогон служебного агента",
+      "title": "Start time by profile, p95",
+      "description": "From pod creation to connecting to relay; kind: sandbox is a space, runbox is a service agent run",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
@@ -75,8 +75,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Сбои старта",
-      "description": "pull — образ не скачивается, crash — контейнер падает, timeout — не подключился за 5 минут. Алерт NabuSandboxCustomStartFailing — больше трёх сбоев собственного профиля за 10 минут",
+      "title": "Start failures",
+      "description": "pull: the image does not download, crash: the container crashes, timeout: no connection in 5 minutes. The alert NabuSandboxCustomStartFailing fires on more than three failures of a custom profile in 10 minutes.",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
@@ -116,7 +116,7 @@
     },
     {
       "type": "row",
-      "title": "Образы профилей",
+      "title": "Profile images",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -128,7 +128,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Загрузка образов на узлы",
+      "title": "Image loading on nodes",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -169,7 +169,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Проверки собственных образов",
+      "title": "Checks of custom images",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -210,7 +210,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Перезапуски на новый образ",
+      "title": "Restarts onto a new image",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -251,7 +251,7 @@
     },
     {
       "type": "row",
-      "title": "Недостающие библиотеки (R13)",
+      "title": "Missing libraries (R13)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -263,7 +263,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Сигналы по экосистемам",
+      "title": "Signals by ecosystem",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -304,8 +304,8 @@
     },
     {
       "type": "table",
-      "title": "Топ профилей по сигналам за неделю",
-      "description": "Сами пакеты — в админке Nabu, раздел «Образы песочниц»: в метрики имена пакетов не попадают",
+      "title": "Top profiles by signals in a week",
+      "description": "The packages themselves are in the Nabu admin area, section Sandbox images: package names stay out of metrics",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
@@ -346,7 +346,7 @@
               "Time": true
             },
             "renameByName": {
-              "Value": "сигналов"
+              "Value": "signals"
             }
           }
         }

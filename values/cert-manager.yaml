@@ -1,5 +1,5 @@
-# cert-manager (FTR.HMR.INFRA-0002, R19): сертификаты Let's Encrypt, проверка HTTP-01
-# через Traefik. CRD ставятся чартом.
+# cert-manager (FTR.HMR.INFRA-0002, R19): Let's Encrypt certificates, the HTTP-01 check
+# through Traefik. The chart installs CRDs.
 crds: { enabled: true, keep: true }
 resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { cpu: 200m, memory: 192Mi } }
 webhook:
@@ -8,7 +8,7 @@ cainjector:
   resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { cpu: 200m, memory: 192Mi } }
 startupapicheck:
   resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { cpu: 100m, memory: 64Mi } }
-# Решатель HTTP-01 — временный под на время выпуска.
+# The HTTP-01 solver is a temporary pod for the time of issuance.
 extraArgs: []
 acmesolver:
   image: {}

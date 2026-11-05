@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # shellcheck disable=SC2034,SC2016,SC2030,SC2031,SC2153,SC2329
-# AUTO: кластер и компоненты стенда поднимаются после перезагрузки машины.
+# AUTO: the cluster and components come back after a machine reboot.
 
 load helpers
 
@@ -15,12 +15,12 @@ setup() {
   stub kubectl 'exit 0'
 }
 
-# mk_state <Host/APIServer> — что отвечает minikube status.
+# mk_state <Host/APIServer> — what minikube status answers.
 mk_state() {
   stub minikube "case \"\$*\" in status*) echo '$1' ;; esac"
 }
 
-@test "AUTO-01: после перезагрузки — minikube start, ожидание ноды и подов" {
+@test "AUTO-01: after a reboot, minikube start and waiting for the node and pods" {
   mk_state Stopped/Stopped
   run bash "$AUTOSTART" start
   [ "$status" -eq 0 ]
@@ -32,7 +32,7 @@ mk_state() {
   [[ $output == *"all pods are ready"* ]]
 }
 
-@test "AUTO-02: кластер уже запущен (включение юнита в up) — ничего не делает и не ждёт подов" {
+@test "AUTO-02: the cluster already runs (up enables the unit): does nothing, does not wait for pods" {
   mk_state Running/Running
   run bash "$AUTOSTART" start
   [ "$status" -eq 0 ]
@@ -41,7 +41,7 @@ mk_state() {
   [[ $output == *"already running"* ]]
 }
 
-@test "AUTO-03: поды не готовы — юнит не проваливается, неготовые в журнале" {
+@test "AUTO-03: pods are not ready: the unit does not fail, unready ones are in the log" {
   mk_state Stopped/Stopped
   stub kubectl 'case "$*" in
     *"wait pods"*) exit 1 ;;
@@ -53,7 +53,7 @@ mk_state() {
   [[ $output != *"grafana-0"* ]]
 }
 
-@test "AUTO-04: профиля нет (после down) — start и stop ничего не делают" {
+@test "AUTO-04: no profile (after down): start and stop do nothing" {
   rm -rf "$HOME/.minikube"
   mk_state Stopped/Stopped
   run bash "$AUTOSTART" start
@@ -63,7 +63,7 @@ mk_state() {
   not_called "minikube"
 }
 
-@test "AUTO-05: выключение машины — minikube stop; остановленный кластер не трогается" {
+@test "AUTO-05: machine shutdown: minikube stop; a stopped cluster is left alone" {
   mk_state Running/Running
   run bash "$AUTOSTART" stop
   [ "$status" -eq 0 ]
@@ -75,7 +75,7 @@ mk_state() {
   not_called "minikube stop"
 }
 
-@test "AUTO-06: Docker не отвечает — ошибка, кластер не запускается" {
+@test "AUTO-06: Docker does not answer: an error, the cluster does not start" {
   stub docker 'exit 1'
   mk_state Stopped/Stopped
   run bash "$AUTOSTART" start
@@ -84,7 +84,7 @@ mk_state() {
   not_called "minikube start"
 }
 
-@test "AUTO-07: up ставит юнит от своего пользователя, включает и запускает его" {
+@test "AUTO-07: up installs the unit as its user, enables and starts it" {
   load_script
   as_root() { "$@"; }
   stub minikube 'exit 0'
@@ -109,7 +109,7 @@ mk_state() {
   called "systemctl start hammurapi-stand.service"
 }
 
-@test "AUTO-08: STAND_AUTOSTART=false — юнит снимается, кластер не останавливается" {
+@test "AUTO-08: STAND_AUTOSTART=false: the unit is removed, the cluster does not stop" {
   load_script
   as_root() { "$@"; }
   AUTOSTART_UNIT=$BATS_TEST_TMPDIR/hammurapi-stand.service
@@ -124,13 +124,13 @@ mk_state() {
   not_called "disable --now"
 }
 
-@test "AUTO-09: недопустимое STAND_AUTOSTART — код 2" {
+@test "AUTO-09: an invalid STAND_AUTOSTART: code 2" {
   STAND_AUTOSTART=maybe run bash "$BATS_TEST_DIRNAME/../../installer" up --no-color
   [ "$status" -eq 2 ]
   [[ $output == *"STAND_AUTOSTART"* ]]
 }
 
-@test "AUTO-10: kubelet-gc — правит конфигурацию kubelet в ноде, при изменении сообщает о перезапуске" {
+@test "AUTO-10: kubelet-gc edits the kubelet configuration in the node and reports a restart on a change" {
   stub minikube 'echo changed'
   IMAGE_GC_MAX_AGE=168h run bash "$AUTOSTART" kubelet-gc
   [ "$status" -eq 0 ]
@@ -140,10 +140,10 @@ mk_state() {
   stub minikube 'echo unchanged'
   run bash "$AUTOSTART" kubelet-gc
   [ "$status" -eq 0 ]
-  [[ $output != *"перезапущен"* ]]
+  [[ $output != *"restarted"* ]]
 }
 
-@test "AUTO-11: kubelet-gc не удался — код 1; при автозапуске юнит не проваливается" {
+@test "AUTO-11: kubelet-gc failed: code 1; on autostart the unit does not fail" {
   stub minikube 'case "$*" in ssh*) echo "ssh: connection refused"; exit 1 ;; esac'
   run bash "$AUTOSTART" kubelet-gc
   [ "$status" -eq 1 ]
@@ -154,12 +154,12 @@ mk_state() {
   [[ $output == *"all pods are ready"* ]]
 }
 
-@test "AUTO-12: скрипт kubelet-gc в ноде — выставляет ключи, второй запуск ничего не меняет" {
+@test "AUTO-12: the kubelet-gc script in the node sets the keys, a second run changes nothing" {
   local node=$BATS_TEST_TMPDIR/node
   mkdir -p "$node"
   printf 'kind: KubeletConfiguration\nimageGCHighThresholdPercent: 100\nimageMaximumGCAge: 0s\n' >"$node/config.yaml"
-  # «Нода» — локальный sh: путь к файлу подменяется, systemctl — заглушка.
-  # minikube ssh -p P -- sudo sh -c <скрипт в %q> kubelet-gc <значения>: так его разберёт shell ноды.
+  # The node is a local sh: the file path is replaced, systemctl is a stub.
+  # minikube ssh -p P -- sudo sh -c <script in %q> kubelet-gc <values>: this is how the node's shell parses it.
   stub minikube 'shift 7; script=$(eval "printf %s $1"); script=${script//\/var\/lib\/kubelet\/config.yaml/'"$node"'/config.yaml}; sh -c "$script" "${@:2}"'
   run bash "$AUTOSTART" kubelet-gc
   [ "$status" -eq 0 ]
@@ -174,7 +174,7 @@ mk_state() {
   not_called "^systemctl"
 }
 
-@test "AUTO-13: up настраивает сборку мусора и без бита исполнения у bin/stand-autostart, как в релизе" {
+@test "AUTO-13: up configures garbage collection even without the executable bit of bin/stand-autostart, as in a release" {
   load_script
   local release=$BATS_TEST_TMPDIR/release
   mkdir -p "$release/bin"

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Статические проверки манифестов (уровень I): рендер ровно тех релизов, что
-# развернула бы `up`, для 8 комбинаций режимов хранилищ; kubeconform, запросы и
-# лимиты, типы сервисов, задания сбора метрик, сервисы хранилищ, сроки хранения.
-# Нужны: helm ≥ 3.17, kubeconform, jq, yq (mikefarah). Сеть — для чартов.
-#   tests/manifests.sh            # все проверки
-#   SKIP_REPOS=1 tests/manifests.sh   # без helm repo add/update
-# SC2034: переменные конфигурации читают подключённые функции lib/*.sh.
+# Static checks of manifests (level I): renders exactly the releases that
+# `up` would deploy, for 8 combinations of storage modes; kubeconform, requests and
+# limits, service types, scrape jobs, storage services, retention.
+# Needs: helm ≥ 3.17, kubeconform, jq, yq (mikefarah). Network for charts.
+#   tests/manifests.sh            # all checks
+#   SKIP_REPOS=1 tests/manifests.sh   # without helm repo add/update
+# SC2034: the sourced functions of lib/*.sh read configuration variables.
 # shellcheck disable=SC2034
 set -euo pipefail
 
@@ -37,8 +37,8 @@ fail() {
 }
 pass() { printf '  %s✓%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
 
-# hm — вместо установки рендерит релиз (`helm template`) в stdout, который
-# release() пишет в $RUN_DIR/helm-<релиз>.log.
+# hm — renders a release (`helm template`) to stdout instead of installing, and
+# release() writes it to $RUN_DIR/helm-<release>.log.
 hm() {
   if [[ $1 == upgrade ]]; then
     shift 2
@@ -59,7 +59,7 @@ hm() {
 }
 kc() { return 0; }
 
-# render <каталог> — релизы текущей конфигурации.
+# render <directory> — releases of the current configuration.
 render() {
   RUN_DIR=$1 WORK_DIR=$1/work
   rm -rf "$RUN_DIR"
@@ -71,13 +71,13 @@ render() {
   deploy_observability
 }
 
-# jq на Windows (Git Bash) печатает CRLF; на Linux tr ничего не меняет.
+# jq on Windows (Git Bash) prints CRLF; tr changes nothing on Linux.
 jq() { command jq "$@" | tr -d '\r'; }
 
-# docs_json <файлы…> — все объекты манифестов как поток JSON.
+# docs_json <files…> — all manifest objects as a JSON stream.
 docs_json() { cat "$@" | yq -o=json -I=0 'select(. != null)'; }
 
-# resources_missing <файлы…> — контейнеры без запросов или лимитов.
+# resources_missing <files…> — containers without requests or limits.
 resources_missing() {
   docs_json "$@" | jq -r '
     select(.kind | IN("Deployment", "StatefulSet", "DaemonSet", "Job", "Pod", "CronJob"))
@@ -96,28 +96,28 @@ check_resources() {
     select(.kind == "KafkaNodePool" or .kind == "Cluster")
     | select((.spec.resources.requests.memory // "") == "" or (.spec.resources.limits.memory // "") == "")
     | " \(.kind)/\(.metadata.name)"')
-  if [[ -n $missing ]]; then fail "RES-01 $2: нет запросов или лимитов: $(echo "$missing" | tr '\n' ' ')"; else pass "RES-01 $2: запросы и лимиты заданы"; fi
+  if [[ -n $missing ]]; then fail "RES-01 $2: no requests or limits: $(echo "$missing" | tr '\n' ' ')"; else pass "RES-01 $2: requests and limits are set"; fi
 }
 
 check_service_types() {
   local bad
   bad=$(docs_json "$1"/helm-*.log | jq -r 'select(.kind == "Service") | select((.spec.type // "ClusterIP") | IN("ClusterIP", "ExternalName") | not) | "\(.metadata.name):\(.spec.type)"')
-  if [[ -n $bad ]]; then fail "SEC-04 $2: сервисы наружу: $bad"; else pass "SEC-04 $2: только ClusterIP и ExternalName"; fi
+  if [[ -n $bad ]]; then fail "SEC-04 $2: services exposed outside: $bad"; else pass "SEC-04 $2: only ClusterIP and ExternalName"; fi
 }
 
 check_storage_services() {
   local names
   names=$(docs_json "$1/helm-storages.log" | jq -r 'select(.kind == "Service") | .metadata.name' | sort | tr '\n' ' ')
-  if [[ $names == "kafka postgres s3 " ]]; then pass "STO-05 $2: сервисы postgres, kafka, s3"; else fail "STO-05 $2: сервисы: $names"; fi
+  if [[ $names == "kafka postgres s3 " ]]; then pass "STO-05 $2: services postgres, kafka, s3"; else fail "STO-05 $2: services: $names"; fi
 }
 
 check_scrape_jobs() {
   local jobs expected
   jobs=$(yq -r '.config.scrape_configs[].job_name' "$1/vmagent-scrape.yaml" | sort | tr '\n' ' ')
-  # hammurapi и mcp (values/scrape/hammurapi.yaml) — всегда в конфигурации, но не обязательны в
-  # проверках стенда: целей у них нет, пока не развёрнуты Hammurapi, Nabu и MCP-серверы.
+  # hammurapi and mcp (values/scrape/hammurapi.yaml) are always configured but not required by
+  # the checks: they have no targets until Hammurapi, Nabu and MCP servers are deployed.
   expected=$({ expected_jobs; echo hammurapi; echo mcp; } | sort | tr '\n' ' ')
-  if [[ $jobs == "$expected" ]]; then pass "MET-02 $2: задания сбора $jobs"; else fail "MET-02 $2: задания «$jobs», ожидались «$expected»"; fi
+  if [[ $jobs == "$expected" ]]; then pass "MET-02 $2: scrape jobs $jobs"; else fail "MET-02 $2: jobs '$jobs', expected '$expected'"; fi
 }
 
 check_internal_releases() {
@@ -127,12 +127,12 @@ check_internal_releases() {
   [[ $S3_MODE == internal ]] || { [[ -f $dir/helm-seaweedfs.log ]] && ok=0; }
   if docs_json "$dir/helm-storages.log" | jq -e --arg pg "$POSTGRES_MODE" --arg k "$KAFKA_MODE" '
       select((.kind == "Cluster" and $pg == "external") or (.kind == "Kafka" and $k == "external"))' >/dev/null; then ok=0; fi
-  if ((ok)); then pass "EXT-01 $label: внешние хранилища не разворачиваются"; else fail "EXT-01 $label: развёрнуто хранилище во внешнем режиме"; fi
+  if ((ok)); then pass "EXT-01 $label: external storages are not deployed"; else fail "EXT-01 $label: a storage in external mode is deployed"; fi
 }
 
 kubeconform_dir() {
   local dir=$1 label=$2 schemas=$OUT/schemas out f
-  # Только объекты Kubernetes: в журналах рендера бывают предупреждения Helm.
+  # Only Kubernetes objects: render logs may hold Helm warnings.
   for f in "$dir"/helm-*.log; do
     grep -v -E '^(WARNING|walk\.go|coalesce\.go)' "$f"
     printf '\n---\n'
@@ -147,7 +147,7 @@ kubeconform_dir() {
   fi
 }
 
-# crd_schemas — JSON-схемы CR (Kafka, KafkaNodePool, Cluster) из CRD операторов.
+# crd_schemas — JSON schemas of CRs (Kafka, KafkaNodePool, Cluster) from operator CRDs.
 crd_schemas() {
   local schemas=$OUT/schemas
   rm -rf "$schemas"
@@ -164,34 +164,34 @@ crd_schemas() {
     done
 }
 
-# --- FTR.NAB.CMN-0006: MCP-серверы ---
+# --- FTR.NAB.CMN-0006: MCP servers ---
 
-# mcp_chart — закреплённая версия чарта загружается без учётных данных и рендерится со
-# значениями инсталлятора; сам чарт проверяет репозиторий mcps.
+# mcp_chart — the pinned chart version downloads without credentials and renders with the
+# installer's values; the repository mcps checks the chart itself.
 mcp_chart() {
-  printf '\nMCP-серверы\n'
+  printf '\nMCP servers\n'
   local f=$OUT/mcp-servers.yaml args=() deps want srv
   MCP_DOCLING=true MCP_SEARCH=true MCP_YANDEX_MAIL=true MCP_DOCGEN=true
   mcp_load
   mapfile -t args < <(mcp_helm_args)
   if ! helm template "$MCP_RELEASE" "$MCP_CHART_DIR" -n mcp --kube-version "$KUBE_VERSION" "${args[@]}" >"$f" 2>&1; then
-    fail "MCP-01: чарт mcp-servers $MCP_CHART_VERSION не рендерится: $(tail -1 "$f")"
+    fail "MCP-01: chart mcp-servers $MCP_CHART_VERSION does not render: $(tail -1 "$f")"
     return
   fi
   kubeconform_file "$f" "mcp-servers"
   deps=$(docs_json "$f" | jq -r 'select(.kind == "Deployment") | .metadata.name' | sort | tr '\n' ' ')
   want=$(for srv in "${MCP_SERVERS[@]}"; do tr ' ' '\n' <<<"${MCP_DEPLOYMENTS[$srv]}"; done | sort | tr '\n' ' ')
   if [[ $deps == "$want" ]]; then
-    pass "MCP-01: чарт $MCP_CHART_VERSION и его описания: $deps"
+    pass "MCP-01: chart $MCP_CHART_VERSION and its descriptions: $deps"
   else
-    fail "MCP-01: Deployment'ы чарта «$deps», в описаниях «$want»"
+    fail "MCP-01: Deployments of the chart '$deps', in descriptions '$want'"
   fi
   MCP_DOCLING=false MCP_SEARCH=false MCP_YANDEX_MAIL=false MCP_DOCGEN=false
 }
 
-# --- FTR.HMR.INFRA-0002: чарты Hammurapi и публичный доступ ---
+# --- FTR.HMR.INFRA-0002: Hammurapi charts and public access ---
 
-# kubeconform_file <файл> <метка>
+# kubeconform_file <file> <label>
 kubeconform_file() {
   local out
   if out=$(kubeconform -strict -summary -kubernetes-version "$KUBE_VERSION" -skip CustomResourceDefinition \
@@ -204,9 +204,9 @@ kubeconform_file() {
   fi
 }
 
-# nabu_charts — чарты Nabu на том же стенде (FTR.NAB.CMN-0001 arch §11).
+# nabu_charts — Nabu charts on the same stand (FTR.NAB.CMN-0001 arch §11).
 nabu_charts() {
-  printf '\nчарты Nabu\n'
+  printf '\nNabu charts\n'
   local dir=$OUT/nabu c f bad
   mkdir -p "$dir"
   for c in nabu-core nabu-web; do
@@ -224,32 +224,32 @@ nabu_charts() {
       | (if $k == "CronJob" then .spec.jobTemplate.spec.template.spec else .spec.template.spec end) as $s
       | "\($k)/\(.metadata.name)" as $o
       | $s.containers[]
-      | [ (if (.resources.requests.cpu // "") == "" or (.resources.limits.memory // "") == "" then "ресурсы" else empty end),
+      | [ (if (.resources.requests.cpu // "") == "" or (.resources.limits.memory // "") == "" then "resources" else empty end),
           (if ((.securityContext.runAsNonRoot // $s.securityContext.runAsNonRoot // false) | not) then "runAsNonRoot" else empty end) ]
       | select(length > 0) | "\($o): \(join(", "))"')
-    if [[ -n $bad ]]; then fail "RES-01 $c: $(echo "$bad" | tr '\n' ' ')"; else pass "RES-01 $c: запросы, лимиты, runAsNonRoot"; fi
+    if [[ -n $bad ]]; then fail "RES-01 $c: $(echo "$bad" | tr '\n' ' ')"; else pass "RES-01 $c: requests, limits, runAsNonRoot"; fi
   done
-  # Хосты nabu. и nabu-api. того же домена; API без служебных портов.
+  # Hosts nabu. and nabu-api. of the same domain; the API without service ports.
   local hosts
   hosts=$(docs_json "$dir"/nabu-*.yaml | jq -r 'select(.kind == "Ingress") | .spec.rules[].host' | sort -u | tr '\n' ' ')
   if [[ $hosts == "nabu-api.34-12-5-6.sslip.io nabu.34-12-5-6.sslip.io " ]]; then
-    pass "R29: Ingress nabu.<домен> и nabu-api.<домен>"
+    pass "R29: Ingress nabu.<domain> and nabu-api.<domain>"
   else
-    fail "R29: хосты Nabu «$hosts»"
+    fail "R29: Nabu hosts '$hosts'"
   fi
-  # FTR.NAB.CMN-0008: профили песочниц по тегу nabu и предзагрузка их образов worker'ом.
+  # FTR.NAB.CMN-0008: sandbox profiles by the nabu tag and preloading their images by worker.
   local profiles verbs
   profiles=$(docs_json "$dir/nabu-core.yaml" | jq -r 'select(.kind == "Deployment" and .metadata.name == "worker")
     | .spec.template.spec.containers[0].env[] | select(.name == "SANDBOX_PROFILES") | .value')
   verbs=$(docs_json "$dir/nabu-core.yaml" | jq -r 'select(.kind == "Role" and .metadata.name == "nabu-sandboxes")
     | .rules[] | select(.resources == ["daemonsets"]) | .verbs | join(",")')
   if [[ $profiles == *"documents=ghcr.io/greenongrey/nabu-sandbox-documents:v1.0.0"* && $verbs == "get,list,watch,create,update" ]]; then
-    pass "PRE-04: SANDBOX_PROFILES с тегом nabu, worker управляет DaemonSet в namespace песочниц"
+    pass "PRE-04: SANDBOX_PROFILES with the nabu tag, worker manages the DaemonSet in the sandbox namespace"
   else
-    fail "PRE-04: профили «$profiles», права на daemonsets «$verbs»"
+    fail "PRE-04: profiles '$profiles', daemonset rights '$verbs'"
   fi
-  # FTR.HMR.CMN-0007 PF-03, PX-13: профиль code и шлюз egress; песочницы с прокси
-  # ходят только к шлюзу, снаружи канал рабочих пространств закрыт.
+  # FTR.HMR.CMN-0007 PF-03, PX-13: the profile code and the egress gateway; sandboxes with a proxy
+  # reach only the gateway, and the workspace channel is closed outside.
   if [[ $profiles == *"code=ghcr.io/greenongrey/nabu-sandbox-code:v1.0.0"* ]] &&
     docs_json "$dir/nabu-core.yaml" | jq -e 'select(.kind == "Deployment" and .metadata.name == "egress")
       | .spec.template.spec.containers[0].args == ["egress"]' >/dev/null &&
@@ -258,26 +258,26 @@ nabu_charts() {
     docs_json "$dir/nabu-core.yaml" | jq -e 'select(.kind == "Deployment" and .metadata.name == "worker")
       | .spec.template.spec.containers[0].env[] | select(.name == "EGRESS_URL")' >/dev/null &&
     ! docs_json "$dir/nabu-core.yaml" | jq -e 'select(.kind == "Ingress") | .spec.rules[].http.paths[] | select(.backend.service.name == "relay")' >/dev/null; then
-    pass "PF-03, PX-13: профиль code, шлюз egress и его сетевые политики"
+    pass "PF-03, PX-13: the profile code, the egress gateway and its network policies"
   else
-    fail "PF-03, PX-13: профиль code или шлюз egress"
+    fail "PF-03, PX-13: the profile code or the egress gateway"
   fi
-  # Без профилей — один образ nabu-core, как до FTR.NAB.CMN-0008 (tech §9).
+  # Without profiles: one nabu-core image, as before FTR.NAB.CMN-0008 (tech §9).
   local legacy
   legacy=$(helm template nabu-core "$ROOT/charts/nabu-core" -n nabu --kube-version "$KUBE_VERSION" --set image.tag=v1.0.0 \
     --set publicBaseDomain=34-12-5-6.sslip.io --set sandboxes.profiles=null --set sandboxes.defaults=null 2>&1 |
     docs_json | jq -r 'select(.kind == "Deployment" and .metadata.name == "worker") | .spec.template.spec.containers[0].env[]
       | select(.name | IN("SANDBOX_PROFILES", "SANDBOX_DEFAULTS", "SANDBOX_IMAGE")) | "\(.name)=\(.value)"' | tr '\n' ' ')
   if [[ $legacy == "SANDBOX_IMAGE=ghcr.io/greenongrey/nabu-core:v1.0.0 " ]]; then
-    pass "PRE-04: без профилей — один образ nabu-core"
+    pass "PRE-04: without profiles, one nabu-core image"
   else
-    fail "PRE-04 без профилей: «$legacy»"
+    fail "PRE-04 without profiles: '$legacy'"
   fi
 }
 
-# landing_chart — сайт GreenOnGrey на том же стенде (FTR.LND.WEB-0001 arch §7).
+# landing_chart — the GreenOnGrey site on the same stand (FTR.LND.WEB-0001 arch §7).
 landing_chart() {
-  printf '\nчарт landing\n'
+  printf '\nchart landing\n'
   local dir=$OUT/landing f bad hosts site
   mkdir -p "$dir"
   f=$dir/landing.yaml
@@ -293,44 +293,44 @@ landing_chart() {
     | .spec.template.spec as $s
     | "\(.kind)/\(.metadata.name)" as $o
     | $s.containers[]
-    | [ (if (.resources.requests.cpu // "") == "" or (.resources.limits.memory // "") == "" then "ресурсы" else empty end),
+    | [ (if (.resources.requests.cpu // "") == "" or (.resources.limits.memory // "") == "" then "resources" else empty end),
         (if ((.securityContext.runAsNonRoot // $s.securityContext.runAsNonRoot // false) | not) then "runAsNonRoot" else empty end) ]
     | select(length > 0) | "\($o): \(join(", "))"')
-  if [[ -n $bad ]]; then fail "LND-38 RES-01 landing: $(echo "$bad" | tr '\n' ' ')"; else pass "LND-38 RES-01 landing: запросы, лимиты, runAsNonRoot"; fi
-  # Хост web.<домен>, и тот же адрес сайт получает в SITE_URL.
+  if [[ -n $bad ]]; then fail "LND-38 RES-01 landing: $(echo "$bad" | tr '\n' ' ')"; else pass "LND-38 RES-01 landing: requests, limits, runAsNonRoot"; fi
+  # Host web.<domain>, and the site gets the same address in SITE_URL.
   hosts=$(docs_json "$f" | jq -r 'select(.kind == "Ingress") | .spec.rules[].host' | tr '\n' ' ')
   site=$(docs_json "$f" | jq -r 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "SITE_URL") | .value')
   if [[ $hosts == "web.34-12-5-6.sslip.io " && $site == "https://web.34-12-5-6.sslip.io" ]]; then
-    pass "LND-38 R26: Ingress web.<домен>, SITE_URL сайта — тот же адрес"
+    pass "LND-38 R26: Ingress web.<domain>, the SITE_URL of the site is the same address"
   else
-    fail "LND-38 R26: хост «$hosts», SITE_URL «$site»"
+    fail "LND-38 R26: host '$hosts', SITE_URL '$site'"
   fi
-  # Собственный домен: адрес сайта — домен, отдельный сертификат на домен и www.,
-  # перенаправление с www., прежний хост стенда остаётся.
+  # The own domain: the site address is the domain, a separate certificate for the domain and www.,
+  # a redirect from www., and the stand's host stays.
   local own=$dir/landing-domain.yaml names regex
   if ! helm template landing "$ROOT/charts/landing" -n landing --kube-version "$KUBE_VERSION" \
     --set image.tag=v1.0.0 --set publicBaseDomain=34-12-5-6.sslip.io --set domain=example.org \
     --set issuer=letsencrypt-staging >"$own" 2>&1; then
-    fail "LND-40 landing с доменом: helm template"
+    fail "LND-40 landing with a domain: helm template"
     return
   fi
-  kubeconform_file "$own" "LND-40 landing с доменом"
+  kubeconform_file "$own" "LND-40 landing with a domain"
   hosts=$(docs_json "$own" | jq -r 'select(.kind == "Ingress") | .spec.rules[].host' | sort | tr '\n' ' ')
   site=$(docs_json "$own" | jq -r 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "SITE_URL") | .value')
   names=$(docs_json "$own" | jq -r 'select(.kind == "Certificate") | "\(.spec.issuerRef.name): \(.spec.dnsNames | join(" "))"')
   regex=$(docs_json "$own" | jq -r 'select(.kind == "Middleware") | .spec.redirectRegex | "\(.regex) -> \(.replacement)"')
-  # shellcheck disable=SC2016 # ${1} — подстановка Traefik, а не shell
+  # shellcheck disable=SC2016 # ${1} is a Traefik substitution, not shell
   if [[ $hosts == "example.org web.34-12-5-6.sslip.io www.example.org " && $site == "https://example.org" &&
     $names == "letsencrypt-staging: example.org www.example.org" &&
     $regex == '^https?://www\.example\.org/(.*) -> https://example.org/${1}' ]]; then
-    pass "LND-40: домен и www. в Ingress и сертификате, SITE_URL — домен, www. перенаправляется"
+    pass "LND-40: the domain and www. in Ingress and certificate, SITE_URL is the domain, www. redirects"
   else
-    fail "LND-40: хосты «$hosts», SITE_URL «$site», сертификат «$names», перенаправление «$regex»"
+    fail "LND-40: hosts '$hosts', SITE_URL '$site', certificate '$names', redirect '$regex'"
   fi
 }
 
 hammurapi_charts() {
-  printf '\nчарты Hammurapi\n'
+  printf '\nHammurapi charts\n'
   local dir=$OUT/hammurapi c f bad
   mkdir -p "$dir"
   for c in hammurapi-core hammurapi-web; do
@@ -342,58 +342,58 @@ hammurapi_charts() {
       continue
     fi
     kubeconform_file "$f" "$c"
-    # CH-04: запросы, лимиты, пробы у долгоживущих контейнеров, runAsNonRoot.
+    # CH-04: requests, limits, probes of long-lived containers, runAsNonRoot.
     bad=$(docs_json "$f" | jq -r '
       select(.kind | IN("Deployment", "Job", "CronJob"))
       | .kind as $k
       | (if $k == "CronJob" then .spec.jobTemplate.spec.template.spec else .spec.template.spec end) as $s
       | "\($k)/\(.metadata.name)" as $o
       | $s.containers[]
-      | [ (if (.resources.requests.cpu // "") == "" or (.resources.limits.memory // "") == "" then "ресурсы" else empty end),
-          (if $k == "Deployment" and (.readinessProbe == null or .livenessProbe == null) then "пробы" else empty end),
+      | [ (if (.resources.requests.cpu // "") == "" or (.resources.limits.memory // "") == "" then "resources" else empty end),
+          (if $k == "Deployment" and (.readinessProbe == null or .livenessProbe == null) then "probes" else empty end),
           (if ((.securityContext.runAsNonRoot // $s.securityContext.runAsNonRoot // false) | not) then "runAsNonRoot" else empty end) ]
       | select(length > 0) | "\($o): \(join(", "))"')
-    if [[ -n $bad ]]; then fail "CH-04 $c: $(echo "$bad" | tr '\n' ' ')"; else pass "CH-04 $c: запросы, лимиты, пробы, runAsNonRoot"; fi
+    if [[ -n $bad ]]; then fail "CH-04 $c: $(echo "$bad" | tr '\n' ' ')"; else pass "CH-04 $c: requests, limits, probes, runAsNonRoot"; fi
   done
-  # CH-07: Ingress api — только публичные префиксы; служебные порты не публикуются.
-  # /mcp/nabu — MCP для персональных агентов Nabu с их JWT (FTR.HMR.CMN-0006 R7).
+  # CH-07: Ingress api has only public prefixes; service ports are not published.
+  # /mcp/nabu is the MCP for personal Nabu agents with their JWT (FTR.HMR.CMN-0006 R7).
   local paths ports
   paths=$(docs_json "$dir/hammurapi-core.yaml" | jq -r 'select(.kind == "Ingress" and .metadata.name == "api") | .spec.rules[].http.paths[].path' | sort | tr '\n' ' ')
   ports=$(docs_json "$dir/hammurapi-core.yaml" | jq -r 'select(.kind == "Ingress") | .spec.rules[].http.paths[].backend.service.port.name' | sort -u | tr '\n' ' ')
   if [[ $paths == "/admin/api/ /api/ /hooks/ /mcp/nabu " && $ports == "http " ]]; then
-    pass "CH-07: Ingress api — /api/, /admin/api/, /hooks/, /mcp/nabu на порт http"
+    pass "CH-07: Ingress api: /api/, /admin/api/, /hooks/, /mcp/nabu to the port http"
   else
-    fail "CH-07: пути «$paths», порты «$ports»"
+    fail "CH-07: paths '$paths', ports '$ports'"
   fi
-  # FTR.HMR.CMN-0007 HN-08: агента и runner в Hammurapi нет — ни оператора, ни ролей
-  # на Job, ни внутреннего API; служебные агенты Nabu ходят в worker-mcp.
+  # FTR.HMR.CMN-0007 HN-08: Hammurapi has no agent or runner: no operator, no roles
+  # on Jobs, no internal API; Nabu service agents reach worker-mcp.
   if ! docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Role" or .kind == "RoleBinding" or .kind == "ClusterRole" or .kind == "ClusterRoleBinding")' >/dev/null &&
     ! docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Deployment" and .metadata.name == "agent")' >/dev/null &&
     ! docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Service" and .metadata.name == "api-internal")' >/dev/null &&
     docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Service" and .metadata.name == "worker-mcp")' >/dev/null; then
-    pass "HN-08: без оператора агента, runner и прав в Kubernetes; worker-mcp на месте"
+    pass "HN-08: no agent operator, runner or Kubernetes rights; worker-mcp is in place"
   else
-    fail "HN-08: в hammurapi-core остались агент, runner или их права"
+    fail "HN-08: hammurapi-core still has an agent, a runner or their rights"
   fi
-  # Удалённый ServiceAccount worker не должен вернуться через устаревшее поле
-  # serviceAccount живого Deployment: имя задано явно.
+  # The removed ServiceAccount worker must not return through the deprecated field
+  # serviceAccount of the live Deployment: the name is explicit.
   if docs_json "$dir/hammurapi-core.yaml" | jq -e 'select(.kind == "Deployment" and .metadata.name == "worker")
       | .spec.template.spec.serviceAccountName == "default"' >/dev/null; then
-    pass "HN-08: worker явно работает под ServiceAccount default"
+    pass "HN-08: worker runs explicitly under the ServiceAccount default"
   else
-    fail "HN-08: у worker не задан serviceAccountName: default"
+    fail "HN-08: worker has no serviceAccountName: default"
   fi
-  # Web получает адрес API на своём домене.
+  # Web gets the API address on its domain.
   if docs_json "$dir/hammurapi-web.yaml" | jq -e 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[]
       | select(.name == "API_BASE_URL" and .value == "https://hammurapi-api.34-12-5-6.sslip.io")' >/dev/null; then
-    pass "R17: web — API_BASE_URL https://hammurapi-api.<домен>"
+    pass "R17: web has API_BASE_URL https://hammurapi-api.<domain>"
   else
-    fail "R17: web без API_BASE_URL"
+    fail "R17: web has no API_BASE_URL"
   fi
 }
 
 public_access_charts() {
-  printf '\nпубличный доступ\n'
+  printf '\npublic access\n'
   local dir=$OUT/public
   mkdir -p "$dir"
   if ! helm template traefik traefik/traefik --version "$TRAEFIK_CHART_VERSION" -n ingress --kube-version "$KUBE_VERSION" \
@@ -405,9 +405,9 @@ public_access_charts() {
     args=$(docs_json "$dir/traefik.yaml" | jq -r 'select(.kind == "Deployment") | .spec.template.spec.containers[0].args[]')
     if grep -q 'redirections.entryPoint.scheme=https' <<<"$args" && grep -q 'allowACMEByPass=true' <<<"$args" &&
       docs_json "$dir/traefik.yaml" | jq -e 'select(.kind == "TLSStore") | .spec.defaultCertificate.secretName == "hammurapi-public"' >/dev/null; then
-      pass "R19: HTTP → HTTPS, HTTP-01 мимо перенаправления, сертификат по умолчанию hammurapi-public"
+      pass "R19: HTTP → HTTPS, HTTP-01 bypasses the redirect, default certificate hammurapi-public"
     else
-      fail "R19: настройки Traefik"
+      fail "R19: Traefik settings"
     fi
   fi
   if ! helm template cert-manager jetstack/cert-manager --version "$CERT_MANAGER_CHART_VERSION" -n cert-manager \
@@ -422,8 +422,8 @@ public_access_charts() {
     select(.kind | IN("Deployment", "Job")) | "\(.kind)/\(.metadata.name)" as $o
     | .spec.template.spec.containers[]
     | select((.resources.requests.memory // "") == "" or (.resources.limits.memory // "") == "") | "\($o)/\(.name)"')
-  if [[ -n $missing ]]; then fail "RES-01 публичный доступ: $(echo "$missing" | tr '\n' ' ')"; else pass "RES-01 публичный доступ: запросы и лимиты"; fi
-  # Ingress Grafana с GitHub OAuth (R20).
+  if [[ -n $missing ]]; then fail "RES-01 public access: $(echo "$missing" | tr '\n' ' ')"; else pass "RES-01 public access: requests and limits"; fi
+  # Ingress of Grafana with GitHub OAuth (R20).
   PUBLIC_DOMAIN=34-12-5-6.sslip.io GRAFANA_GITHUB_CLIENT_ID=Iv1.x
   grafana_public_values "$dir/grafana-public.yaml"
   if helm template grafana grafana-community/grafana --version "$GRAFANA_CHART_VERSION" -n observability \
@@ -431,9 +431,9 @@ public_access_charts() {
     docs_json "$dir/grafana.yaml" | jq -e 'select(.kind == "Ingress") | .spec.rules[0].host == "grafana.34-12-5-6.sslip.io"' >/dev/null &&
     docs_json "$dir/grafana.yaml" | jq -e 'select(.kind == "Deployment") | .spec.template.spec.containers[] | select(.name == "grafana")
       | .envFrom[]? | select(.secretRef.name == "grafana-github-oauth")' >/dev/null; then
-    pass "R20: Ingress grafana.<домен>, секрет OAuth GitHub"
+    pass "R20: Ingress grafana.<domain>, the GitHub OAuth secret"
   else
-    fail "R20: Grafana с публичным доступом: $(head -3 "$dir/grafana.yaml")"
+    fail "R20: Grafana with public access: $(head -3 "$dir/grafana.yaml")"
   fi
 }
 
@@ -454,10 +454,10 @@ main() {
     S3_ENDPOINT=https://storage.googleapis.com
     local label="postgres=$POSTGRES_MODE kafka=$KAFKA_MODE s3=$S3_MODE" dir=$OUT/$combo
     printf '\n%s\n' "$label"
-    # Вывод рендера — в журнал рядом с каталогом комбинации (render очищает каталог):
-    # при ошибке видно, что сломалось, например загрузка внешнего чарта.
+    # Render output goes to a log next to the combination's directory (render clears it):
+    # on an error it shows what broke, such as downloading an external chart.
     (render "$dir") >"$OUT/render-$combo.log" 2>&1 || {
-      fail "рендер $label: $(tail -5 "$OUT/render-$combo.log" "$dir"/helm-*.log 2>/dev/null | grep -v '^==>' | grep -v '^$' | tail -5 | tr '\n' ' ')"
+      fail "render $label: $(tail -5 "$OUT/render-$combo.log" "$dir"/helm-*.log 2>/dev/null | grep -v '^==>' | grep -v '^$' | tail -5 | tr '\n' ' ')"
       continue
     }
     if ((first)); then
@@ -472,31 +472,31 @@ main() {
     check_internal_releases "$dir" "$label"
   done
 
-  printf '\nвнешний Postgres по IP\n'
+  printf '\nexternal Postgres by IP\n'
   POSTGRES_MODE=external KAFKA_MODE=internal S3_MODE=internal POSTGRES_HOST=10.20.0.5
   (render "$OUT/ip") >/dev/null 2>&1 || true
   if docs_json "$OUT/ip/helm-storages.log" | jq -e 'select(.kind == "EndpointSlice" and .endpoints[0].addresses[0] == "10.20.0.5"
       and .metadata.labels["kubernetes.io/service-name"] == "postgres")' >/dev/null &&
     docs_json "$OUT/ip/helm-storages.log" | jq -e 'select(.kind == "Service" and .metadata.name == "postgres" and (.spec.selector == null))' >/dev/null; then
-    pass "EXT-02: сервис postgres без селектора и EndpointSlice с 10.20.0.5"
+    pass "EXT-02: the service postgres without a selector and an EndpointSlice with 10.20.0.5"
   else
-    fail "EXT-02: нет сервиса без селектора или EndpointSlice для IP"
+    fail "EXT-02: no service without a selector or EndpointSlice for the IP"
   fi
 
-  printf '\nсроки хранения\n'
+  printf '\nretention\n'
   local vm vl
   vm=$(docs_json "$OUT/iii/helm-victoria-metrics.log" | jq -r 'select(.kind == "StatefulSet") | .spec.template.spec.containers[0].args[]' | grep -c -- '-retentionPeriod=7d' || true)
   vl=$(docs_json "$OUT/iii/helm-victoria-logs.log" | jq -r 'select(.kind == "StatefulSet") | .spec.template.spec.containers[0].args[]' | grep -c -- '-retentionPeriod=3d' || true)
-  if [[ $vm == 1 && $vl == 1 ]]; then pass "OBS-02: retentionPeriod 7d и 3d"; else fail "OBS-02: retentionPeriod метрик/логов не 7d/3d"; fi
+  if [[ $vm == 1 && $vl == 1 ]]; then pass "OBS-02: retentionPeriod 7d and 3d"; else fail "OBS-02: retentionPeriod of metrics/logs is not 7d/3d"; fi
   POSTGRES_MODE=internal VM_RETENTION=14d VL_RETENTION=1d
   (render "$OUT/retention") >/dev/null 2>&1 || true
   vm=$(docs_json "$OUT/retention/helm-victoria-metrics.log" | jq -r 'select(.kind == "StatefulSet") | .spec.template.spec.containers[0].args[]' | grep -c -- '-retentionPeriod=14d' || true)
   vl=$(docs_json "$OUT/retention/helm-victoria-logs.log" | jq -r 'select(.kind == "StatefulSet") | .spec.template.spec.containers[0].args[]' | grep -c -- '-retentionPeriod=1d' || true)
-  if [[ $vm == 1 && $vl == 1 ]]; then pass "OBS-02: значения из конфигурации применяются"; else fail "OBS-02: VM_RETENTION/VL_RETENTION не применились"; fi
+  if [[ $vm == 1 && $vl == 1 ]]; then pass "OBS-02: values from the configuration apply"; else fail "OBS-02: VM_RETENTION/VL_RETENTION did not apply"; fi
 
-  printf '\nлокальные чарты\n'
+  printf '\nlocal charts\n'
   if helm lint "$ROOT/charts/hammurapi-storages" --set kafka.version=4 --set postgres.image=x >/dev/null &&
-    helm lint "$OUT/iii/work/hammurapi-dashboards" >/dev/null; then pass "QUAL-02: helm lint локальных чартов"; else fail "QUAL-02: helm lint"; fi
+    helm lint "$OUT/iii/work/hammurapi-dashboards" >/dev/null; then pass "QUAL-02: helm lint of local charts"; else fail "QUAL-02: helm lint"; fi
 
   hammurapi_charts
   nabu_charts
@@ -505,10 +505,10 @@ main() {
   mcp_chart
 
   if ((FAILURES)); then
-    printf '\n%sНе прошло проверок: %d%s\n' "$C_RED" "$FAILURES" "$C_RESET"
+    printf '\n%sChecks failed: %d%s\n' "$C_RED" "$FAILURES" "$C_RESET"
     exit 1
   fi
-  printf '\n%sВсе проверки манифестов прошли%s\n' "$C_GREEN" "$C_RESET"
+  printf '\n%sAll manifest checks passed%s\n' "$C_GREEN" "$C_RESET"
 }
 
 main "$@"

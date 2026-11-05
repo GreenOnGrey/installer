@@ -1,39 +1,39 @@
-# Релиз installer (R18; FTR.HMR.INFRA-0002, R15): по тегу vX.Y.Z сначала
-# публикуются чарты hammurapi-core и hammurapi-web с версией X.Y.Z, затем — только
-# при успехе — тег выкатывается на прод (демо-стенд в Google Cloud).
-# Для повторной выкатки или возврата на прежнюю версию — ручной запуск с тегом:
-# уже опубликованные версии чартов не перезаписываются. Автоматического отката нет.
-# Конфигурация и секреты прода остаются на машине (/opt/hammurapi-infra) и в
-# workflow не передаются; GitHub хранит только доступ к машине.
+# Release of installer (R18; FTR.HMR.INFRA-0002, R15): a tag vX.Y.Z first publishes
+# the charts with the version X.Y.Z, then, only on success,
+# rolls the tag out to production.
+# To repeat a rollout or return to an earlier version, run it manually from a tag:
+# published chart versions are not overwritten. There is no automatic rollback.
+# Production configuration and secrets stay on the machine (/opt/hammurapi-infra) and do not
+# pass through the workflow; GitHub keeps only the access to the machine.
 name: deploy-prod
 on:
   push:
     tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
-      tag: { description: "Тег для выкатки (vX.Y.Z)", required: true, type: string }
+      tag: { description: "Tag to roll out (vX.Y.Z)", required: true, type: string }
 concurrency: { group: deploy-prod, cancel-in-progress: false }
-permissions: { contents: read, id-token: write }   # id-token — для gcp-iap
+permissions: { contents: read, id-token: write }   # id-token for gcp-iap
 
 env:
   DEPLOY_TRANSPORT: ${{ vars.DEPLOY_TRANSPORT || 'ssh' }}
   PROD_DIR: /opt/hammurapi-infra
 
 jobs:
-  # Чарты hammurapi-core, hammurapi-web, nabu-core, nabu-web и landing в oci://ghcr.io/<организация>/charts:
-  # версия чартов совпадает с версией стенда (техспека FTR.HMR.INFRA-0002, п. 11).
+  # Charts hammurapi-core, hammurapi-web, nabu-core, nabu-web and landing in oci://ghcr.io/<organization>/charts:
+  # the chart version equals the stand's version (tech spec FTR.HMR.INFRA-0002, §11).
   publish-charts:
-    runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest is moving to Ubuntu 26
     permissions: { contents: read, packages: write }
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
-      - name: Тег
+      - name: Tag
         id: tag
         env:
           INPUT_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          [[ $INPUT_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::тег «$INPUT_TAG» не в формате vX.Y.Z"; exit 1; }
+          [[ $INPUT_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::tag '$INPUT_TAG' is not in the format vX.Y.Z"; exit 1; }
           echo "tag=$INPUT_TAG" >>"$GITHUB_OUTPUT"
           echo "version=${INPUT_TAG#v}" >>"$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,11 +52,11 @@ jobs:
           repo="oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"
           printf '%s' "$GH_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           mkdir -p dist
-          echo "## Чарты $VERSION" >>"$GITHUB_STEP_SUMMARY"
+          echo "## Charts $VERSION" >>"$GITHUB_STEP_SUMMARY"
           for chart in hammurapi-core hammurapi-web nabu-core nabu-web landing; do
-            # Повторная выкатка (откат) того же тега: версия уже в реестре — не перезаписываем.
+            # A repeated rollout (rollback) of the same tag: the version is in the registry, do not overwrite.
             if helm show chart "$repo/$chart" --version "$VERSION" >/dev/null 2>&1; then
-              echo "- $repo/$chart:$VERSION — уже опубликован" >>"$GITHUB_STEP_SUMMARY"
+              echo "- $repo/$chart:$VERSION is already published" >>"$GITHUB_STEP_SUMMARY"
               continue
             fi
             helm lint "charts/$chart" --set image.tag=v0.0.0 --set publicBaseDomain=example.org
@@ -67,14 +67,14 @@ jobs:
 
   deploy:
     needs: publish-charts
-    runs-on: ubuntu-24.04  # фиксировано: ubuntu-latest переезжает на Ubuntu 26
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest is moving to Ubuntu 26
     environment: production
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
 
-      - name: Определить тег и коммит
+      - name: Resolve tag and commit
         id: tag
         env:
           INPUT_TAG: ${{ inputs.tag || github.ref_name }}
@@ -82,13 +82,13 @@ jobs:
         run: |
           tag=$(bash .github/scripts/resolve-tag.sh "$INPUT_TAG")
           git fetch --tags --force --quiet
-          sha=$(git rev-list -n 1 "refs/tags/$tag") || { echo "::error::тег $tag не найден"; exit 1; }
-          [[ $ACTOR =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::недопустимое имя $ACTOR"; exit 1; }
+          sha=$(git rev-list -n 1 "refs/tags/$tag") || { echo "::error::tag $tag not found"; exit 1; }
+          [[ $ACTOR =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::invalid name $ACTOR"; exit 1; }
           echo "tag=$tag" >>"$GITHUB_OUTPUT"
           echo "sha=$sha" >>"$GITHUB_OUTPUT"
-          echo "Выкатка $tag ($sha), инициатор $ACTOR"
+          echo "Rollout of $tag ($sha), initiated by $ACTOR"
 
-      - name: Доступ к машине (ssh)
+      - name: Machine access (ssh)
         if: env.DEPLOY_TRANSPORT == 'ssh'
         env:
           PROD_HOST: ${{ secrets.PROD_HOST || vars.PROD_HOST }}
@@ -97,7 +97,7 @@ jobs:
           PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
         run: bash .github/scripts/ssh-setup.sh
 
-      - name: Доступ к машине (gcp-iap, Workload Identity Federation)
+      - name: Machine access (gcp-iap, Workload Identity Federation)
         if: env.DEPLOY_TRANSPORT == 'gcp-iap'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -108,7 +108,7 @@ jobs:
         if: env.DEPLOY_TRANSPORT == 'gcp-iap'
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
-      - name: Выкатка
+      - name: Rollout
         id: up
         env:
           GCP_PROJECT: ${{ vars.GCP_PROJECT }}
@@ -117,41 +117,41 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
           ACTOR: ${{ github.actor }}
           SHA: ${{ steps.tag.outputs.sha }}
-          # Публичный доступ стенда (FTR.HMR.INFRA-0002, R17–R21).
+          # Public access of the stand (FTR.HMR.INFRA-0002, R17–R21).
           PUBLIC_ACCESS: ${{ vars.PUBLIC_ACCESS }}
           ACME_EMAIL: ${{ secrets.ACME_EMAIL || vars.ACME_EMAIL }}
           ACME_ISSUER: ${{ vars.ACME_ISSUER }}
           PUBLIC_BASE_DOMAIN: ${{ vars.PUBLIC_BASE_DOMAIN }}
           PUBLIC_IP: ${{ vars.PUBLIC_IP }}
-          # Вход в Grafana через GitHub (R20): OAuth-приложение организации.
+          # Grafana sign-in through GitHub (R20): the organization's OAuth app.
           GRAFANA_GITHUB_CLIENT_ID: ${{ vars.GRAFANA_GITHUB_CLIENT_ID }}
           GRAFANA_GITHUB_ORG: ${{ vars.GRAFANA_GITHUB_ORG }}
           GRAFANA_GITHUB_CLIENT_SECRET: ${{ secrets.GRAFANA_GITHUB_CLIENT_SECRET }}
-          # MCP-серверы стенда (FTR.NAB.CMN-0006): опции, не секреты.
+          # MCP servers of the stand (FTR.NAB.CMN-0006): options, not secrets.
           MCP_DOCLING: ${{ vars.MCP_DOCLING }}
           MCP_SEARCH: ${{ vars.MCP_SEARCH }}
           MCP_YANDEX_MAIL: ${{ vars.MCP_YANDEX_MAIL }}
           MCP_DOCGEN: ${{ vars.MCP_DOCGEN }}
           MCP_DOCLING_MAX_MB: ${{ vars.MCP_DOCLING_MAX_MB }}
           MCP_SEARCH_ENGINES: ${{ vars.MCP_SEARCH_ENGINES }}
-        # Машине прода не нужен доступ к GitHub (deploy keys запрещены политикой
-        # организации): раннер передаёт ей выгрузку тега по тому же SSH.
+        # The production machine needs no access to GitHub (deploy keys are forbidden by the
+        # organization's policy): the runner passes it the tag export over the same SSH.
         run: |
           remote() { bash .github/scripts/remote.sh "$@"; }
           remote "mkdir -p $PROD_DIR && cat >$PROD_DIR/deploy-remote.sh" <.github/scripts/deploy-remote.sh
           git archive --format=tar.gz "refs/tags/$TAG" | remote "bash $PROD_DIR/deploy-remote.sh unpack $PROD_DIR $TAG"
           if [[ -n $GRAFANA_GITHUB_CLIENT_ID && -z $GRAFANA_GITHUB_CLIENT_SECRET ]]; then
-            echo "::error::задана переменная GRAFANA_GITHUB_CLIENT_ID, но нет секрета GRAFANA_GITHUB_CLIENT_SECRET"
+            echo "::error::the variable GRAFANA_GITHUB_CLIENT_ID is set, but the secret GRAFANA_GITHUB_CLIENT_SECRET is missing"
             exit 1
           fi
-          # Заданные параметры — в stdin выкатки (секрет не попадает в argv и на диск).
+          # Set parameters go to the stdin of the rollout (a secret reaches neither argv nor disk).
           for k in PUBLIC_ACCESS ACME_EMAIL ACME_ISSUER PUBLIC_BASE_DOMAIN PUBLIC_IP \
             GRAFANA_GITHUB_CLIENT_ID GRAFANA_GITHUB_ORG GRAFANA_GITHUB_CLIENT_SECRET \
             MCP_DOCLING MCP_SEARCH MCP_YANDEX_MAIL MCP_DOCGEN MCP_DOCLING_MAX_MB MCP_SEARCH_ENGINES; do
             if [[ -n ${!k} ]]; then printf '%s=%s\n' "$k" "$(printf '%s' "${!k}" | tr -d '\r\n')"; fi
           done | remote "bash $PROD_DIR/deploy-remote.sh up $PROD_DIR $TAG $SHA $ACTOR"
 
-      - name: Статус
+      - name: Status
         if: always() && steps.tag.outcome == 'success'
         env:
           GCP_PROJECT: ${{ vars.GCP_PROJECT }}
@@ -160,17 +160,17 @@ jobs:
         run: |
           bash .github/scripts/remote.sh "bash $PROD_DIR/deploy-remote.sh status $PROD_DIR ${{ steps.tag.outputs.tag }}" >status.json || true
           {
-            echo "## Прод: ${{ steps.tag.outputs.tag }}"
+            echo "## Production: ${{ steps.tag.outputs.tag }}"
             echo
             if jq -e '.profile' status.json >/dev/null 2>&1; then
-              jq -r '"Развёрнуто: \(.version.tag // "?") (\(.version.commit // "?")), \(.version.deployedAt // "?"), \(.version.deployedBy // "?")",
-                "Кластер: \(.profile.status // "?"), Kubernetes \(.profile.kubernetes // "?")",
-                "Память: \(.resources.requestedPercent // "?") % minikube запрошено компонентами", "",
-                "| Проверка | Итог | Сообщение |", "|---|---|---|",
+              jq -r '"Deployed: \(.version.tag // "?") (\(.version.commit // "?")), \(.version.deployedAt // "?"), \(.version.deployedBy // "?")",
+                "Cluster: \(.profile.status // "?"), Kubernetes \(.profile.kubernetes // "?")",
+                "Memory: \(.resources.requestedPercent // "?")% of minikube requested by components", "",
+                "| Check | Result | Message |", "|---|---|---|",
                 ((.checks // [])[] | "| \(.name) | \(if .ok then "✓" else "✗" end) | \(.message) |")' status.json
             elif jq -e '.error' status.json >/dev/null 2>&1; then
               echo "status: $(jq -r .error status.json)"
             else
-              echo "status недоступен"
+              echo "status is unavailable"
             fi
           } >>"$GITHUB_STEP_SUMMARY"

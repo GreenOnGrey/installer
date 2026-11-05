@@ -1,16 +1,16 @@
-# Образ сайта; тег задаёт выкатка (landing-deploy).
+# The site image; the rollout sets the tag (landing-deploy).
 image: { repository: ghcr.io/greenongrey/landing, tag: "", pullPolicy: IfNotPresent }
 imagePullSecrets: [{ name: ghcr-pull }]
 
-# Базовый домен: сайт на web.<домен>. Обязателен.
+# Base domain: the site on web.<domain>. Required.
 publicBaseDomain: ""
 hosts: { web: web }
 
-# Собственный домен сайта (необязателен), например greenongrey.tech. Тогда сайт
-# открывается по https://<domain>, www.<domain> перенаправляется на него, а для
-# обоих имён выпускается отдельный сертификат. Адрес web.<домен> продолжает работать.
+# The site's own domain (optional), such as greenongrey.tech. The site then
+# opens at https://<domain>, www.<domain> redirects to it, and both names get a
+# separate certificate. The address web.<domain> keeps working.
 domain: ""
-# ClusterIssuer cert-manager для сертификата собственного домена.
+# The cert-manager ClusterIssuer for the certificate of the own domain.
 issuer: letsencrypt
 
 ingress:

@@ -14,12 +14,12 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
 {{- define "nabu.image" -}}
-{{- $tag := required "image.tag обязателен (задаёт выкатка)" .Values.image.tag -}}
+{{- $tag := required "image.tag is required (set by the rollout)" .Values.image.tag -}}
 {{ printf "%s:%s" .Values.image.repository $tag }}
 {{- end }}
 
 {{- define "nabu.domain" -}}
-{{ required "publicBaseDomain обязателен" .Values.publicBaseDomain }}
+{{ required "publicBaseDomain is required" .Values.publicBaseDomain }}
 {{- end }}
 
 {{- define "nabu.web" -}}
@@ -30,14 +30,14 @@ app.kubernetes.io/component: {{ .component }}
 {{ printf "%s.%s" .Values.hosts.api (include "nabu.domain" .) }}
 {{- end }}
 
-{{/* Окружение api, worker, relay, migrate и cleaner: конфигурация из GitHub, адреса, хранилища. */}}
+{{/* Environment of api, worker, relay, migrate and cleaner: configuration from GitHub, addresses, storages. */}}
 {{- define "nabu.env" -}}
 envFrom:
   - configMapRef: { name: {{ .Values.existingSecrets.configMap }} }
   - secretRef: { name: {{ .Values.existingSecrets.config }} }
-  # FTR.NAB.CHAT-0003 tech §9.4: адреса конвертеров предпросмотра; секрет создаёт
-  # стенд при MCP_DOCGEN, без него предпросмотр офисных файлов выключен.
-  # В doc-convert сетевая политика пускает только api.
+  # FTR.NAB.CHAT-0003 tech §9.4: addresses of preview converters; the stand creates the secret
+  # with MCP_DOCGEN, and without it office file preview is off.
+  # The network policy of doc-convert admits only api.
   - secretRef: { name: nabu-docs-preview, optional: true }
 env:
   - { name: PUBLIC_WEB_URL, value: "https://{{ include "nabu.web" . }}" }
@@ -52,7 +52,7 @@ env:
   - { name: RELAY_INTERNAL_URL, value: "http://relay.{{ .Release.Namespace }}.svc:8085" }
   - { name: RELAY_SANDBOX_WS_URL, value: "ws://relay.{{ .Release.Namespace }}.svc:8085/v1/workspaces/connect" }
   {{- if .Values.egress.enabled }}
-  # FTR.HMR.CMN-0007 tech §3.5: шлюз, через который выходят песочницы с прокси.
+  # FTR.HMR.CMN-0007 tech §3.5: the gateway for sandboxes with a proxy.
   - { name: EGRESS_URL, value: "http://nabu-egress.{{ .Release.Namespace }}.svc:3128" }
   {{- end }}
   - { name: AGENT_ADDR, value: "http://agent.{{ .Release.Namespace }}.svc:8090" }
@@ -93,7 +93,7 @@ env:
   - { name: SANDBOX_MEMORY, value: {{ .Values.sandboxes.memory | quote }} }
   - { name: SPACE_QUOTA, value: {{ .Values.sandboxes.spaceQuota | quote }} }
   {{- with .Values.sandboxes.profiles }}
-  {{- $tag := required "image.tag обязателен (задаёт выкатка)" $.Values.image.tag }}
+  {{- $tag := required "image.tag is required (set by the rollout)" $.Values.image.tag }}
   {{- $pairs := list }}
   {{- range $name, $repo := . }}{{ $pairs = append $pairs (printf "%s=%s:%s" $name $repo $tag) }}{{ end }}
   - { name: SANDBOX_PROFILES, value: {{ join "," $pairs | quote }} }
@@ -145,7 +145,7 @@ securityContext:
   capabilities: { drop: [ALL] }
 {{- end }}
 
-{{/* Записываемые каталоги при read-only корне: /tmp и HOME. */}}
+{{/* Writable directories under a read-only root: /tmp and HOME. */}}
 {{- define "nabu.volumeMounts" -}}
 volumeMounts:
   - { name: tmp, mountPath: /tmp }
@@ -158,7 +158,7 @@ volumes:
   - { name: home, emptyDir: {} }
 {{- end }}
 
-{{/* Deployment одного режима: api, worker, relay. */}}
+{{/* A Deployment of one mode: api, worker, relay. */}}
 {{- define "nabu.deployment" -}}
 {{- $root := .root -}}
 apiVersion: apps/v1

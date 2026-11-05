@@ -1,4 +1,4 @@
-    # --- Kafka (Strimzi): брокер (JMX-экспортёр) и kafka-exporter ---
+    # --- Kafka (Strimzi): the broker (JMX exporter) and kafka-exporter ---
     - job_name: kafka
       kubernetes_sd_configs: [{ role: pod, namespaces: { names: [storages] } }]
       relabel_configs:

@@ -1,5 +1,5 @@
 {{- if eq .Values.kafka.mode "internal" }}
-# Правила JMX Prometheus Exporter из примеров Strimzi (packaging/examples/metrics).
+# JMX Prometheus Exporter rules from the Strimzi examples (packaging/examples/metrics).
 apiVersion: v1
 kind: ConfigMap
 metadata:
