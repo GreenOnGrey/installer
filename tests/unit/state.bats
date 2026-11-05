@@ -111,6 +111,18 @@ put_cm() { jq -n --argjson d "$3" '{data: $d}' >"$CM_DIR/$1_$2.json"; }
   [ "$status" -eq 0 ]
 }
 
+@test "CFG-10: предупреждение kubectl в stderr не мешает прочитать конфигурацию" {
+  stub kubectl 'echo "Warning: something is deprecated" >&2; echo "{\"data\":{\"MCP_DOCGEN\":\"true\"}}"'
+  restore_config strict
+  [ "$MCP_DOCGEN" = true ]
+}
+
+@test "CFG-11: нечитаемый ответ останавливает up, а не разворачивает умолчания" {
+  stub kubectl 'echo "not json"'
+  run restore_config strict
+  [ "$status" -eq 12 ]
+}
+
 @test "CFG-09: конфигурации нет — ничего не меняется" {
   stub kubectl 'exit 0'
   restore_config strict

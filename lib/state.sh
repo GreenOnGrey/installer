@@ -43,14 +43,20 @@ write_config() {
 # the file and the environment win. Set MCP_<NAME>=false to disable a server. strict (up): a read
 # error stops the run, or up would deploy the defaults and overwrite what is stored.
 restore_config() {
-  local out data entry key value
-  if ! out=$(kc -n "$NS_STATE" get configmap "$STATE_CONFIG_CM" --ignore-not-found -o json 2>&1); then
-    [[ ${1:-} != strict ]] || die "$E_CLUSTER" "failed to read the configuration from the cluster: $(tail -1 <<<"$out")"
-    warn "failed to read the configuration from the cluster: $(tail -1 <<<"$out")"
+  local out data entry key value err
+  # stderr apart: a kubectl warning on a successful call must not reach the JSON.
+  err=$(mktemp)
+  if ! out=$(kc -n "$NS_STATE" get configmap "$STATE_CONFIG_CM" --ignore-not-found -o json 2>"$err") ||
+    ! data=$(if [[ -n $out ]]; then jq -ce '.data // {}' <<<"$out" 2>>"$err"; fi); then
+    local reason
+    reason=$(tail -1 "$err")
+    rm -f "$err"
+    [[ ${1:-} != strict ]] || die "$E_CLUSTER" "failed to read the configuration from the cluster: $reason"
+    warn "failed to read the configuration from the cluster: $reason"
     return 0
   fi
+  rm -f "$err"
   [[ -n $out ]] || return 0
-  data=$(jq -c '.data // {}' <<<"$out")
   while read -r entry; do
     key=$(base64 -d <<<"$entry" | jq -r .key)
     value=$(base64 -d <<<"$entry" | jq -r .value)
