@@ -44,8 +44,9 @@ In production, public access parameters are GitHub variables of the repository `
 | Variable | Value |
 |---|---|
 | `PUBLIC_ACCESS` | `true` |
-| `ACME_EMAIL` | address for Let's Encrypt notices (required with `PUBLIC_ACCESS=true`), kept as a secret in production |
-| `ACME_ISSUER` | `letsencrypt` (default) or `letsencrypt-staging` for trials |
+| `ACME_EMAIL` | address for Let's Encrypt notices (required with `PUBLIC_ACCESS=true` and `INGRESS_MODE=internal`), kept as a secret in production |
+| `ACME_ISSUER` | `letsencrypt` (default) or `letsencrypt-staging` for trials; with `INGRESS_MODE=external`, a `ClusterIssuer` of the cluster |
+| `INGRESS_MODE`, `INGRESS_CLASS` | `internal` (default) or `external` with the ingress class of the cluster: see the README |
 | `PUBLIC_BASE_DOMAIN` | empty means `<external IP with dashes>.sslip.io` |
 | `PUBLIC_IP` | empty means it is detected automatically |
 | `HAMMURAPI_WEB_HOST`, `HAMMURAPI_API_HOST` | `hammurapi`, `hammurapi-api`: subdomains of the Hammurapi site and API (`hammurapi.<domain>`, `hammurapi-api.<domain>`); the rollout passes them to the charts |

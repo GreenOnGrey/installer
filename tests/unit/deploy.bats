@@ -20,7 +20,7 @@ setup() {
   cat >"$STUBS/status.sh" <<'EOF'
 jq -cn --argjson ok "$STAND_OK" --argjson pub "$PUBLIC" \
   '{ok: $ok, checks: [{name: "logs", ok: $ok, message: "logs do not reach VictoriaLogs"}],
-    public: ({enabled: $pub} + (if $pub then {baseDomain: "34-12-5-6.sslip.io"} else {} end))}'
+    public: ({enabled: $pub} + (if $pub then {baseDomain: "34-12-5-6.sslip.io"} else {} end) + (env.STATUS_PUBLIC // "{}" | fromjson))}'
 EOF
   export STATUS_CMD=$STUBS/status.sh
   # helm: CORE_INSTALLED says whether the release hammurapi-core exists.
@@ -265,5 +265,21 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   stub helm 'exit 1'
   run deploy_observability
   [ "$status" -eq 0 ]
-  called "delete secret grafana-admin grafana-github-oauth --ignore-not-found"
+  called "delete secret grafana-admin grafana-github-oauth grafana-tls --ignore-not-found"
+}
+
+@test "RES-06 (U): hammurapi-deploy passes the ingress recorded by up to the chart" {
+  need_linux
+  run deploy hammurapi-core v1.8.0 0.4.0
+  [ "$status" -eq 0 ]
+  called "ingress.className=traefik"
+  not_called "ingress.clusterIssuer"
+  : >"$CALLS"
+  export CERT_TIMEOUT=0
+  STATUS_PUBLIC='{"ingressMode":"external","ingressClass":"nginx","issuer":"corp"}' run deploy hammurapi-core v1.8.0 0.4.0
+  [ "$status" -eq 0 ]
+  called "ingress.className=nginx"
+  called "ingress.clusterIssuer=corp"
+  # The certificate of the Ingress is not ready: a warning, the release stays.
+  [[ $output == *"certificate hammurapi/api-tls is not ready"* ]]
 }

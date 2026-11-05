@@ -105,6 +105,8 @@ sandboxes:
 
 ingress:
   className: traefik
+  # A ClusterIssuer: the Ingress gets a certificate of its own, for controllers other than Traefik of the stand.
+  clusterIssuer: ""
   # Public API prefixes; the service :9100 and internal :8081 are not routed.
   paths: [/api/, /admin/api/, /client/v1/, /hooks/, /auth/, /oauth/, /.well-known/]
   # The workspace channel (wss) is not open outside: workspaces of

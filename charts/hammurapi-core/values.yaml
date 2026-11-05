@@ -31,6 +31,8 @@ nabu:
 
 ingress:
   className: traefik
+  # A ClusterIssuer: the Ingress gets a certificate of its own, for controllers other than Traefik of the stand.
+  clusterIssuer: ""
   # Only public prefixes; the service :9100 and internal :8081 are not routed.
   # /mcp/nabu is the MCP for personal Nabu agents (Nabu JWT, FTR.HMR.CMN-0006 R7).
   paths: [/api/, /admin/api/, /hooks/, /mcp/nabu]

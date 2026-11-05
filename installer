@@ -169,7 +169,7 @@ EOF
 
 Public access (certificate ${ACME_ISSUER:-letsencrypt}):
   $(if observability_enabled; then echo "https://grafana.$PUBLIC_DOMAIN   "; fi)https://${HAMMURAPI_WEB_HOST:-hammurapi}.$PUBLIC_DOMAIN   https://${HAMMURAPI_API_HOST:-hammurapi-api}.$PUBLIC_DOMAIN
-  ports 80/443 of this machine → Traefik $LB_IP; open them in your cloud firewall
+  $(if ingress_external; then echo "ingress class $INGRESS_CLASS; point the hosts to its load balancer"; else echo "ports 80/443 of this machine → Traefik $LB_IP; open them in your cloud firewall"; fi)
 EOF
   fi
 }
@@ -216,7 +216,7 @@ public_status_json() {
   if [[ -z $data || $data == "{}" ]]; then
     echo '{"enabled":false}'
   else
-    jq -c '{enabled: true, baseDomain, publicIp, lbIp, issuer}' <<<"$data"
+    jq -c '{enabled: true, baseDomain, publicIp, lbIp, issuer, ingressMode: (.ingressMode // "internal"), ingressClass: (.ingressClass // "traefik")}' <<<"$data"
   fi
 }
 

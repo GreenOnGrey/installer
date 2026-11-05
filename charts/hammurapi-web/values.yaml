@@ -9,5 +9,7 @@ hosts: { web: hammurapi, api: hammurapi-api }
 
 ingress:
   className: traefik
+  # A ClusterIssuer: the Ingress gets a certificate of its own, for controllers other than Traefik of the stand.
+  clusterIssuer: ""
 
 resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { cpu: 200m, memory: 128Mi } }

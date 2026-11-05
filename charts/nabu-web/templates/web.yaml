@@ -64,9 +64,12 @@ kind: Ingress
 metadata:
   name: web
   labels: {{- include "nabuweb.labels" . | nindent 4 }}
+  {{- with .Values.ingress.clusterIssuer }}
+  annotations: { cert-manager.io/cluster-issuer: {{ . | quote }} }
+  {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
-  tls: [{ hosts: ["{{ $web }}"] }]
+  tls: [{ hosts: ["{{ $web }}"]{{ if .Values.ingress.clusterIssuer }}, secretName: web-tls{{ end }} }]
   rules:
     - host: "{{ $web }}"
       http:
