@@ -164,78 +164,27 @@ crd_schemas() {
 
 # --- FTR.NAB.CMN-0006: MCP-серверы ---
 
-# mcp_chart — релиз mcp-servers при каждой опции отдельно и при всех вместе:
-# kubeconform, запросы и лимиты, безопасность контейнеров, сетевые политики (M).
+# mcp_chart — закреплённая версия чарта загружается без учётных данных и рендерится со
+# значениями инсталлятора; сам чарт проверяет репозиторий mcps.
 mcp_chart() {
   printf '\nMCP-серверы\n'
-  local combo dir f args=()
-  for combo in docling search yandex-mail docgen all; do
-    MCP_DOCLING=false MCP_SEARCH=false MCP_YANDEX_MAIL=false MCP_DOCGEN=false
-    case $combo in
-      docling) MCP_DOCLING=true ;;
-      search) MCP_SEARCH=true ;;
-      yandex-mail) MCP_YANDEX_MAIL=true ;;
-      docgen) MCP_DOCGEN=true ;;
-      all) MCP_DOCLING=true MCP_SEARCH=true MCP_YANDEX_MAIL=true MCP_DOCGEN=true ;;
-    esac
-    dir=$OUT/mcp-$combo
-    mkdir -p "$dir"
-    f=$dir/mcp-servers.yaml
-    mapfile -t args < <(mcp_helm_args)
-    if ! helm template "$MCP_RELEASE" "$ROOT/charts/mcp-servers" -n mcp --kube-version "$KUBE_VERSION" "${args[@]}" >"$f" 2>&1; then
-      fail "STD-02 $combo: чарт mcp-servers не рендерится: $(tail -1 "$f")"
-      continue
-    fi
-    kubeconform_file "$f" "mcp-servers $combo"
-    local missing
-    missing=$(resources_missing "$f")
-    if [[ -z $missing ]]; then pass "RES-01 mcp-servers $combo: запросы и лимиты заданы"; else
-      fail "RES-01 mcp-servers $combo: нет запросов или лимитов: $(echo "$missing" | tr '\n' ' ')"
-    fi
-    local deps want
-    deps=$(docs_json "$f" | jq -r 'select(.kind == "Deployment") | .metadata.name' | sort | tr '\n' ' ')
-    case $combo in
-      docling) want="docling-mcp docling-serve " ;;
-      search) want="search " ;;
-      yandex-mail) want="yandex-mail " ;;
-      docgen) want="doc-convert docgen " ;;
-      all) want="doc-convert docgen docling-mcp docling-serve search yandex-mail " ;;
-    esac
-    if [[ $deps == "$want" ]]; then pass "STD-02 $combo: только $want"; else fail "STD-02 $combo: Deployment'ы «$deps», ожидались «$want»"; fi
-    local bad
-    bad=$(docs_json "$f" | jq -r 'select(.kind == "Deployment") | .metadata.name as $d | .spec.template.spec as $s
-      | select($s.automountServiceAccountToken != false or $s.securityContext.runAsNonRoot != true) // empty | $d,
-      ($s.containers[] | select(.securityContext.allowPrivilegeEscalation != false or .securityContext.runAsNonRoot != true) | "\($d)/\(.name)")')
-    if [[ -z $bad ]]; then pass "SEC-06 $combo: не root, без токена ServiceAccount"; else fail "SEC-06 $combo: $(echo "$bad" | tr '\n' ' ')"; fi
-    local pols
-    pols=$(docs_json "$f" | jq -r 'select(.kind == "NetworkPolicy") | .metadata.name' | sort | tr '\n' ' ')
-    # политики сервиса документов — только вместе с ним
-    local docs_pols=true
-    if [[ $combo == docgen || $combo == all ]] && [[ $pols != *doc-convert-in* || $pols != *egress-docgen* ]]; then docs_pols=false; fi
-    if [[ $pols == *default-deny* && $pols == *from-nabu* && $pols == *egress-internet* && $pols == *docling-serve-in* ]] && $docs_pols; then
-      pass "SEC-05 $combo: сетевые политики на месте"
-    else
-      fail "SEC-05 $combo: политики «$pols»"
-    fi
-    if docs_json "$f" | jq -e 'select(.kind == "NetworkPolicy" and .metadata.name == "egress-internet")
-        | .spec.egress[0].to[0].ipBlock.except | (index("10.0.0.0/8") != null and index("169.254.0.0/16") != null)' >/dev/null; then
-      pass "SEC-04 $combo: выход в интернет без частных сетей и метаданных облака"
-    else
-      fail "SEC-04 $combo: egress-internet не исключает частные сети"
-    fi
-    if [[ $combo == yandex-mail ]] || grep -Eq '(mcp-[a-z-]+-key|searxng-secret)' "$f" && ! grep -Eq 'value: "?[0-9a-f]{64}' "$f"; then
-      pass "STD-14 $combo: ключи только из секретов"
-    else
-      fail "STD-14 $combo: ключи не из секретов"
-    fi
-  done
-  if docs_json "$OUT/mcp-search/mcp-servers.yaml" | jq -r 'select(.kind == "ConfigMap" and .metadata.name == "searxng-settings") | .data["settings.yml"]' |
-    yq -e '.server.limiter == false and (.use_default_settings.engines.keep_only | length) == 7 and (.use_default_settings.engines.keep_only | contains(["google"]) | not)
-      and ([.engines[] | select(.disabled == false) | .name] | join(",")) == (.use_default_settings.engines.keep_only | join(","))' >/dev/null; then
-    pass "SRC-06: SearXNG — заданные системы включены явно, без Google, лимитер выключен"
-  else
-    fail "SRC-06: настройки SearXNG"
+  local f=$OUT/mcp-servers.yaml args=() deps want srv
+  MCP_DOCLING=true MCP_SEARCH=true MCP_YANDEX_MAIL=true MCP_DOCGEN=true
+  mcp_load
+  mapfile -t args < <(mcp_helm_args)
+  if ! helm template "$MCP_RELEASE" "$MCP_CHART_DIR" -n mcp --kube-version "$KUBE_VERSION" "${args[@]}" >"$f" 2>&1; then
+    fail "MCP-01: чарт mcp-servers $MCP_CHART_VERSION не рендерится: $(tail -1 "$f")"
+    return
   fi
+  kubeconform_file "$f" "mcp-servers"
+  deps=$(docs_json "$f" | jq -r 'select(.kind == "Deployment") | .metadata.name' | sort | tr '\n' ' ')
+  want=$(for srv in "${MCP_SERVERS[@]}"; do tr ' ' '\n' <<<"${MCP_DEPLOYMENTS[$srv]}"; done | sort | tr '\n' ' ')
+  if [[ $deps == "$want" ]]; then
+    pass "MCP-01: чарт $MCP_CHART_VERSION и его описания: $deps"
+  else
+    fail "MCP-01: Deployment'ы чарта «$deps», в описаниях «$want»"
+  fi
+  MCP_DOCLING=false MCP_SEARCH=false MCP_YANDEX_MAIL=false MCP_DOCGEN=false
 }
 
 # --- FTR.HMR.INFRA-0002: чарты Hammurapi и публичный доступ ---

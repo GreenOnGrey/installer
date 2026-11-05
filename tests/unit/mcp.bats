@@ -34,6 +34,97 @@ esac'
   [ "$status" -ne 0 ]
 }
 
+@test "FTR.INFRA.INST-0001 R21: чужая переменная MCP_* из окружения — не опция сервера" {
+  export MCP_CONNECTION_NONBLOCKING=true MCP_SOMETHING=not-a-bool
+  load_config "$ROOT" /dev/null
+  run mcp_enabled
+  [ "$status" -ne 0 ]
+  run validate_mcp_config
+  [ "$status" -eq 0 ]
+}
+
+@test "FTR.INFRA.INST-0001 R20: сервер из описания и своей опции — без кода инсталлятора" {
+  local chart=$BATS_TEST_TMPDIR/chart cfg=$BATS_TEST_TMPDIR/local.env
+  mkdir -p "$chart/files/servers"
+  jq -n '{name: "new-one", valuesKey: "newOne", service: "new-one:9000", deployments: ["new-one"],
+    secrets: ["mcp-new-one-key"], keySecret: "mcp-new-one-key", wantTools: ["t"], oauth: null, catalogHint: null}' \
+    >"$chart/files/servers/new-one.json"
+  echo 'MCP_NEW_ONE=true' >"$cfg"
+  load_config "$ROOT" "$cfg"
+  MCP_CHART_DIR=$chart
+  run mcp_enabled
+  [ "$status" -eq 0 ]
+  run mcp_helm_args
+  [[ $output == *"newOne.enabled=true"* ]]
+  run mcp_enabled_list
+  [ "$output" = new-one ]
+}
+
+@test "FTR.INFRA.INST-0001 R21: пока ни один сервер не включён, чарт не скачивается" {
+  MCP_CHART_DIR=""
+  mcp_load
+  [ "$MCP_LOADED" -eq 0 ]
+  not_called "helm pull"
+}
+
+@test "FTR.INFRA.INST-0001 R20: чарт скачивается анонимно и один раз на выгрузку" {
+  local fake=$BATS_TEST_TMPDIR/root
+  mkdir -p "$fake"
+  stub helm '
+case "$*" in
+  *" pull "*|pull\ *) d=$(sed "s/.*--untardir \([^ ]*\).*/\1/" <<<"$*"); mkdir -p "$d/mcp-servers"; touch "$d/mcp-servers/Chart.yaml" ;;
+esac'
+  ROOT=$fake MCP_CHART_DIR="" mcp_fetch_chart
+  ROOT=$fake MCP_CHART_DIR="" mcp_fetch_chart
+  [ -f "$fake/.cache/mcp-servers-$MCP_CHART_VERSION/Chart.yaml" ]
+  [ "$(grep -c 'helm pull' "$CALLS")" -eq 1 ]
+  called "--registry-config"
+}
+
+@test "FTR.INFRA.INST-0001 R20: чарт недоступен — код 13" {
+  stub helm 'exit 1'
+  retry() { "${@:3}"; }
+  MCP_SEARCH=true MCP_CHART_DIR=""
+  ROOT=$BATS_TEST_TMPDIR
+  run mcp_load
+  [ "$status" -eq 13 ]
+  [[ $output == *"не удалось загрузить чарт"* ]]
+}
+
+@test "FTR.INFRA.INST-0001 R21: включённая опция без сервера в чарте — код 2" {
+  local cfg=$BATS_TEST_TMPDIR/local.env
+  echo 'MCP_DOCGN=true' >"$cfg"
+  load_config "$ROOT" "$cfg"
+  MCP_CHART_DIR=$ROOT/tests/fixtures/mcp/chart
+  run mcp_load
+  [ "$status" -eq 2 ]
+  [[ $output == *"MCP_DOCGN"* ]]
+  run mcp_status_json
+  [ "$status" -eq 0 ]
+  jq -e '.error | test("MCP_DOCGN")' <<<"$output"
+}
+
+@test "FTR.INFRA.INST-0001 R20: прежний параметр MCP_* в файле конфигурации — не опция" {
+  local cfg=$BATS_TEST_TMPDIR/local.env
+  echo 'MCP_IMAGE_REGISTRY=ghcr.io/x' >"$cfg"
+  load_config "$ROOT" "$cfg"
+  run validate_mcp_config
+  [ "$status" -eq 0 ]
+}
+
+@test "FTR.INFRA.INST-0001 R20: чарт недоступен — status сообщает, а не падает; check_mcp записывает сбой" {
+  stub helm 'exit 1'
+  retry() { "${@:3}"; }
+  MCP_SEARCH=true MCP_CHART_DIR=""
+  ROOT=$BATS_TEST_TMPDIR
+  run mcp_status_json
+  [ "$status" -eq 0 ]
+  jq -e '.error | test("не удалось загрузить чарт")' <<<"$output"
+  CHECK_RESULTS=()
+  check_mcp
+  [[ ${CHECK_RESULTS[*]} == *"mcp|fail|"* ]]
+}
+
 @test "STD-05: значение опции не true/false — код 2" {
   MCP_DOCLING=yes
   run validate_mcp_config
@@ -119,11 +210,13 @@ esac'
   not_called uninstall
 }
 
-@test "значения чарта — из versions.env и конфигурации" {
+@test "значения чарта — включение и конфигурация; образы задаёт сам чарт" {
   MCP_DOCLING=true
+  mcp_load
   run mcp_helm_args
   [[ $output == *"docling.enabled=true"* ]]
-  [[ $output == *"ghcr.io/greenongrey/docling-mcp:$DOCLING_MCP_VERSION"* ]]
+  [[ $output == *"yandexMail.enabled=false"* ]]
+  [[ $output != *image* ]]
   [[ $output == *"search.engines=[\"duckduckgo\""* ]]
 }
 
@@ -145,7 +238,6 @@ esac'
   [ "$status" -eq 0 ]
   run mcp_helm_args
   [[ $output == *"yandexMail.enabled=true"* ]]
-  [[ $output == *"ghcr.io/greenongrey/imap-mcp:$IMAP_MCP_VERSION"* ]]
   MCP_YANDEX_MAIL=maybe
   run validate_mcp_config
   [ "$status" -eq 2 ]

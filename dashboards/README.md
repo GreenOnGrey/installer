@@ -12,7 +12,6 @@ JSON дашбордов хранится здесь и загружается в
 | `kafka.json` | Strimzi Kafka | чарт `strimzi-kafka-operator`, `files/grafana-dashboards/strimzi-kafka.json` | 1.2.0 | 2026-09-29 |
 | `postgres.json` | CloudNativePG | [cloudnative-pg/grafana-dashboards](https://github.com/cloudnative-pg/grafana-dashboards), `charts/cluster/grafana-dashboard.json` | cluster-v0.0.5 | 2026-09-29 |
 | `s3.json` | SeaweedFS | чарт `seaweedfs`, `dashboards/seaweedfs-grafana-dashboard.json` | 4.48.0 | 2026-09-29 |
-| `mcp.json` | MCP-серверы | собственный (FTR.NAB.CMN-0006 R18): поды namespace `mcp`, метрики прокси `nabu_mcp_proxy_*`; раздел «Документы» (FTR.NAB.CHAT-0003 R24) | — | 2026-10-24 |
 | `nabu-agents.json` | Агенты Nabu | собственный: ходы и время до первого ответа, очередь за подом, модели (запросы, ошибки, токены, стоимость), вызовы MCP и операции песочниц, поды агентов, служебные агенты и задания, память, CPU, перезапуски и OOM namespace `nabu` и `nabu-agents` | — | 2026-10-25 |
 | `nabu-sandboxes.json` | Песочницы Nabu | собственный (FTR.NAB.CMN-0008 R20): старт и сбои по профилям, загрузка образов на узлы, проверки собственных образов, сигналы недостающих библиотек. Алерт `NabuSandboxCustomStartFailing` — в `values/grafana.yaml` | — | 2026-10-24 |
 

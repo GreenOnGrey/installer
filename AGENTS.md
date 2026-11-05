@@ -37,11 +37,8 @@ charts/nabu-core         Nabu: api, worker, agent, relay, egress, migrate, clean
                          DaemonSet of preloaded sandbox images; sandboxes.profiles — images of sandbox profiles
 charts/nabu-web          the SPA of Nabu
 charts/landing           the site of GreenOnGrey: nginx with static pages
-charts/mcp-servers       optional MCP servers of the stand (FTR.NAB.CMN-0006): docling, search, yandex-mail,
-                         docgen (FTR.NAB.CHAT-0003: docgen-mcp and doc-convert — Gotenberg with a legacy
-                         sidecar); lib/mcp.sh deploys them by MCP_* options, images/ builds docling-mcp,
-                         imap-mcp (our own read-only IMAP server), docgen-mcp and doc-convert; each has
-                         python -m unittest and/or images/*/test.sh
+lib/mcp.sh               optional MCP servers (FTR.NAB.CMN-0006): enabled by MCP_* options; the chart mcp-servers and
+                         the descriptions of servers come from a release of `mcps` (MCP_CHART_VERSION)
 config/                  defaults.env, versions.env (chart and tool versions)
 values/                  Helm values of the stand's components
 dashboards/              Grafana dashboards; alert rules are in values/grafana.yaml (alerting)
@@ -52,7 +49,7 @@ tests/unit/*.bats        unit tests (Linux); tests/manifests.sh — rendered man
 
 ```sh
 shellcheck -x installer                       # CI pins shellcheck v0.11.0
-shellcheck -x tests/manifests.sh tests/e2e/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/landing-deploy bin/ingress-forward bin/stand-autostart images/publish.sh images/*/test.sh
+shellcheck -x tests/manifests.sh tests/e2e/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/landing-deploy bin/ingress-forward bin/stand-autostart
 bats tests/unit                                        # Linux; needs jq, yq for some tests
 bash tests/manifests.sh                                # helm, kubeconform, jq, yq, network
 helm lint charts/hammurapi-core --set image.tag=v1 --set publicBaseDomain=x.example
@@ -67,7 +64,6 @@ at the pinned version. Name any job you could not run in your report, with the r
 
 - Always: `shellcheck` on the file list of `checks.yml`, `actionlint`, `bats tests/unit` with `../hammurapi` checked out beside this repository (its `deploy-component.yml` is under test).
 - `charts/**`: `bash tests/manifests.sh`.
-- `images/**`: `images/publish.sh --test-only`.
 - A chart change also has to survive an upgrade of the live release, which `helm template` cannot show. A dropped field can come back through its deprecated twin (`serviceAccountName`/`serviceAccount`), so set the new value explicitly; a dropped object is deleted after the new pods start. Compare with `kubectl patch --dry-run=server` on the live resource.
 - A changed public route: update the post-deploy checks of `deploy-component.yml` in `nabu` and `hammurapi`, and tag them before the release of the component.
 - Always, after the checks pass: run the `code-review` skill on the diff to be committed. Fix each finding, or name it in your report with the reason it stays. Ask the user when you doubt a finding.
@@ -84,10 +80,7 @@ at the pinned version. Name any job you could not run in your report, with the r
 - `hammurapi-deploy` keeps its exit codes and the last line of JSON output (the deploy contract).
 - The chart of core has no agent and no runner (FTR.HMR.CMN-0007): code tasks run in the sandboxes of
   Nabu; the MCP of the worker (`worker-mcp:8083`) is open only to the namespace of Nabu.
-- **Images of `images/` are published once per version** (`images/publish.sh` skips a tag that exists): a change
-  of `images/imap-mcp` needs a new `IMAP_MCP_VERSION` (`DOCGEN_MCP_VERSION`, `DOC_CONVERT_VERSION` for the others; and
-  the tag in `charts/mcp-servers/values.yaml`), or the stand
-  keeps running the old image.
+- **MCP servers live in `mcps`**: images, the chart and the descriptions. To move a stand, bump `MCP_CHART_VERSION` to a published release. Options are the `MCP_*` names of `config/defaults.env` and of the config file, never any `MCP_*` of the environment: other tools set their own.
 - `tests/unit/public.bats` runs the config step of `deploy-component.yml` from `hammurapi` `main`;
   keep it working with the workflow both before and after a change there.
 

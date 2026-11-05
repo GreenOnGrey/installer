@@ -137,6 +137,11 @@ stage_dashboards() {
   cp -r "$ROOT/charts/hammurapi-dashboards/." "$dir/"
   mkdir -p "$dir/files"
   cp "$ROOT"/dashboards/*.json "$dir/files/"
+  # Дашборд MCP-серверов едет в их чарте (репозиторий mcps).
+  if mcp_enabled; then
+    mcp_load
+    cp "$MCP_CHART_DIR/files/dashboard.json" "$dir/files/mcp.json"
+  fi
 }
 
 deploy_observability() {
