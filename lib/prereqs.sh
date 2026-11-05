@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Installs dependencies (R2): utilities, Docker Engine, kubectl, Helm, minikube.
+# Installs dependencies (R2, FTR.INFRA.INST-0001 R9): utilities, Docker Engine, kubectl, Helm, minikube.
 # A component of the right version is skipped.
 
 BIN_DIR=${BIN_DIR:-/usr/local/bin}
@@ -18,44 +18,104 @@ apt_install() {
     die "$E_PREREQ" "failed to install: $*"
 }
 
-pkg_installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q '^install ok installed$'; }
+dnf_install() {
+  retry 3 10 as_root dnf install -y -q "$@" >/dev/null || die "$E_PREREQ" "failed to install: $*"
+}
+
+pkg_installed() {
+  if os_is_el; then
+    # whatprovides: curl of EL comes as curl-minimal, and installing curl over it is a conflict.
+    rpm -q --whatprovides "$1" >/dev/null 2>&1
+  else
+    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q '^install ok installed$'
+  fi
+}
 
 install_utils() {
   local missing=() p
-  for p in curl ca-certificates gnupg jq openssl util-linux; do
+  for p in curl ca-certificates jq openssl tar util-linux; do
     pkg_installed "$p" || missing+=("$p")
   done
   if ((${#missing[@]})); then
     log "utilities: ${missing[*]}"
-    apt_install "${missing[@]}"
+    if os_is_el; then dnf_install "${missing[@]}"; else apt_install "${missing[@]}"; fi
   fi
 }
 
 # --- Docker Engine ---
 
 docker_installed_version() {
-  dpkg-query -W -f='${Version}' docker-ce 2>/dev/null || true
+  if os_is_el; then
+    rpm -q --qf '%{VERSION}-%{RELEASE}' docker-ce 2>/dev/null | grep -v 'not installed' || true
+  else
+    dpkg-query -W -f='${Version}' docker-ce 2>/dev/null || true
+  fi
+}
+
+docker_wanted_version() {
+  local var=DOCKER_VERSION_DEB
+  if os_is_el; then var=DOCKER_VERSION_RPM_EL$(os_major); fi
+  echo "${!var}"
+}
+
+install_docker_deb() {
+  as_root install -m 0755 -d /etc/apt/keyrings
+  if [[ ! -s /etc/apt/keyrings/docker.asc ]]; then
+    retry 3 10 curl -fsSL https://download.docker.com/linux/debian/gpg -o "$WORK_DIR/docker.asc" ||
+      die "$E_PREREQ" "failed to download the Docker repository key"
+    as_root install -m 0644 "$WORK_DIR/docker.asc" /etc/apt/keyrings/docker.asc
+  fi
+  echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian trixie stable" |
+    as_root tee /etc/apt/sources.list.d/docker.list >/dev/null
+  APT_UPDATED=0
+  apt_install "docker-ce=$DOCKER_VERSION_DEB" "docker-ce-cli=$DOCKER_VERSION_DEB" "containerd.io=$CONTAINERD_VERSION_DEB"
+  as_root apt-mark hold docker-ce docker-ce-cli containerd.io >/dev/null
+}
+
+# ensure_el_kernel_modules — on EL10 the netfilter modules that Docker needs are in kernel-modules-extra, which a
+# minimal install does not have, and without them dockerd does not start. The package follows the running kernel.
+ensure_el_kernel_modules() {
+  modinfo xt_addrtype >/dev/null 2>&1 && return 0
+  local kernel
+  kernel=$(uname -r)
+  log "kernel modules of netfilter: kernel-modules-extra-$kernel"
+  retry 3 10 as_root dnf install -y -q "kernel-modules-extra-$kernel" >/dev/null ||
+    die "$E_PREREQ" "kernel-modules-extra of the running kernel $kernel is not available: update the kernel, reboot and run up again"
+}
+
+# install_docker_el — the repository of Docker; container-selinux comes as its dependency, and SELinux
+# stays as it is (FTR.INFRA.INST-0001 R9).
+install_docker_el() {
+  local major repo=centos docker containerd
+  major=$(os_major)
+  [[ $(os_field ID) == rhel ]] && repo=rhel
+  docker=DOCKER_VERSION_RPM_EL$major containerd=CONTAINERD_VERSION_RPM_EL$major
+  as_root tee /etc/yum.repos.d/docker-ce.repo >/dev/null <<EOF
+[docker-ce-stable]
+name=Docker CE Stable
+baseurl=https://download.docker.com/linux/$repo/$major/x86_64/stable
+enabled=1
+gpgcheck=1
+gpgkey=https://download.docker.com/linux/$repo/gpg
+EOF
+  dnf_install python3-dnf-plugin-versionlock
+  # The lock of an older run would hide the version asked for.
+  as_root dnf versionlock delete docker-ce docker-ce-cli containerd.io >/dev/null 2>&1 || true
+  dnf_install "docker-ce-${!docker}" "docker-ce-cli-${!docker}" "containerd.io-${!containerd}"
+  as_root dnf versionlock add docker-ce docker-ce-cli containerd.io >/dev/null
 }
 
 install_docker() {
-  if [[ $(docker_installed_version) == "$DOCKER_VERSION" ]]; then
-    debug "Docker $DOCKER_VERSION is already installed"
+  if [[ $(docker_installed_version) == "$(docker_wanted_version)" ]]; then
+    debug "Docker $(docker_wanted_version) is already installed"
   else
-    log "Docker Engine $DOCKER_VERSION"
-    as_root install -m 0755 -d /etc/apt/keyrings
-    if [[ ! -s /etc/apt/keyrings/docker.asc ]]; then
-      retry 3 10 curl -fsSL https://download.docker.com/linux/debian/gpg -o "$WORK_DIR/docker.asc" ||
-        die "$E_PREREQ" "failed to download the Docker repository key"
-      as_root install -m 0644 "$WORK_DIR/docker.asc" /etc/apt/keyrings/docker.asc
-    fi
-    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian trixie stable" |
-      as_root tee /etc/apt/sources.list.d/docker.list >/dev/null
-    APT_UPDATED=0
-    apt_install "docker-ce=$DOCKER_VERSION" "docker-ce-cli=$DOCKER_VERSION" "containerd.io=$CONTAINERD_VERSION"
-    as_root apt-mark hold docker-ce docker-ce-cli containerd.io >/dev/null
+    log "Docker Engine $(docker_wanted_version)"
+    if os_is_el; then install_docker_el; else install_docker_deb; fi
   fi
+  if os_is_el; then ensure_el_kernel_modules; fi
   if ! systemctl is-enabled --quiet docker 2>/dev/null; then
-    as_root systemctl enable --now docker >/dev/null
+    as_root systemctl enable --now docker >/dev/null ||
+      die "$E_PREREQ" "Docker did not start, see journalctl -u docker"
   fi
   local user=${SUDO_USER:-$(id -un)}
   if [[ $user != root ]] && ! id -nG "$user" | tr ' ' '\n' | grep -qx docker; then
@@ -74,23 +134,6 @@ kubectl_minor() {
   kubectl version --client -o json 2>/dev/null | jq -r '"v" + .clientVersion.major + "." + .clientVersion.minor' 2>/dev/null || true
 }
 
-install_kubectl() {
-  if [[ $(kubectl_minor) == "$KUBECTL_MINOR" ]]; then
-    debug "kubectl $KUBECTL_MINOR is already installed"
-    return
-  fi
-  log "kubectl $KUBECTL_VERSION"
-  as_root install -m 0755 -d /etc/apt/keyrings
-  retry 3 10 curl -fsSL "https://pkgs.k8s.io/core:/stable:/$KUBECTL_MINOR/deb/Release.key" -o "$WORK_DIR/k8s.key" ||
-    die "$E_PREREQ" "failed to download the Kubernetes repository key"
-  as_root gpg --batch --yes --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg "$WORK_DIR/k8s.key"
-  echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/$KUBECTL_MINOR/deb/ /" |
-    as_root tee /etc/apt/sources.list.d/kubernetes.list >/dev/null
-  APT_UPDATED=0
-  apt_install "kubectl=$KUBECTL_VERSION"
-  as_root apt-mark hold kubectl >/dev/null
-}
-
 # --- Binaries verified by SHA-256 ---
 
 # verify_sha256 <file> <expected sum>
@@ -98,6 +141,22 @@ verify_sha256() {
   local actual
   actual=$(sha256sum "$1" | awk '{print $1}')
   [[ $actual == "$2" ]]
+}
+
+# install_kubectl — the binary on every OS: no branch for packages. An installed kubectl of the right minor
+# version stays, whatever installed it.
+install_kubectl() {
+  if [[ $(kubectl_minor) == "$KUBECTL_MINOR" ]]; then
+    debug "kubectl $KUBECTL_MINOR is already installed"
+    return
+  fi
+  log "kubectl $KUBECTL_BIN_VERSION"
+  local bin="$WORK_DIR/kubectl"
+  retry 3 10 curl -fsSL "https://dl.k8s.io/release/$KUBECTL_BIN_VERSION/bin/linux/amd64/kubectl" -o "$bin" ||
+    die "$E_PREREQ" "failed to download kubectl $KUBECTL_BIN_VERSION"
+  verify_sha256 "$bin" "$KUBECTL_SHA256" ||
+    die "$E_PREREQ" "checksum of kubectl $KUBECTL_BIN_VERSION does not match; nothing was installed"
+  as_root install -m 0755 "$bin" "$BIN_DIR/kubectl"
 }
 
 helm_installed_version() {

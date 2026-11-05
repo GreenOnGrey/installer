@@ -407,3 +407,67 @@ external_ingress() {
   check_public
   [[ ${CHECK_RESULTS[*]} == "public|fail|ClusterIssuer corp is not ready ('False')" ]]
 }
+
+# --- firewalld (FTR.INFRA.INST-0001 R9, tech §5) ---
+
+firewalld_stub() {
+  export FW=$BATS_TEST_TMPDIR/fw
+  : >"$FW"
+  stub firewall-cmd '
+scope=runtime; args=("$@")
+[[ $1 == --permanent ]] && { scope=permanent; args=("${@:2}"); }
+case "${args[*]}" in
+  --state) exit 0 ;;
+  --get-zone-of-interface=*) echo public ;;
+  --get-zones) echo public trusted ;;
+  *--list-forward-ports*) { grep "^$scope " "$FW" || true; } | cut -d" " -f2 ;;
+  *--add-forward-port=*) r=${args[1]#--add-forward-port=}; echo "$scope $r" >>"$FW" ;;
+  *--remove-forward-port=*) r=${args[1]#--remove-forward-port=}; grep -vxF "$scope $r" "$FW" >"$FW.new" || true; mv "$FW.new" "$FW" ;;
+esac'
+  export FIREWALL_CMD=firewall-cmd FORWARD_STATE=$BATS_TEST_TMPDIR/state
+  mkdir -p "$FORWARD_STATE"
+}
+
+@test "R9: firewalld runs: forward-port in both configurations, no masquerade, no DNAT of iptables" {
+  iptables_stub
+  firewalld_stub
+  LB_IP=192.168.49.200 EXT_IF=ens4 run bash "$FORWARD" apply
+  [ "$status" -eq 0 ]
+  grep -qx "runtime port=80:proto=tcp:toport=80:toaddr=192.168.49.200" "$FW"
+  grep -qx "permanent port=443:proto=tcp:toport=443:toaddr=192.168.49.200" "$FW"
+  not_grep -q masquerade "$CALLS"
+  not_grep -q '^nat PREROUTING' "$RULES"
+  # Docker drops what it did not publish without this rule.
+  grep -q '^filter DOCKER-USER -d 192.168.49.200' "$RULES"
+}
+
+@test "R9: a new address replaces the old rules, a repeat adds nothing" {
+  iptables_stub
+  firewalld_stub
+  LB_IP=192.168.49.200 EXT_IF=ens4 bash "$FORWARD" apply
+  LB_IP=192.168.49.201 EXT_IF=ens4 bash "$FORWARD" apply
+  LB_IP=192.168.49.201 EXT_IF=ens4 bash "$FORWARD" apply
+  [ "$(wc -l <"$FW")" -eq 4 ]
+  not_grep -q 192.168.49.200 "$FW"
+}
+
+@test "R9: remove clears both configurations; forwards of the user stay, also on ports 80 and 443" {
+  iptables_stub
+  firewalld_stub
+  printf 'permanent port=8080:proto=tcp:toport=80:toaddr=10.0.0.5\nruntime port=80:proto=tcp:toport=80:toaddr=10.0.0.6\n' >"$FW"
+  LB_IP=192.168.49.200 EXT_IF=ens4 bash "$FORWARD" apply
+  EXT_IF=ens4 run bash "$FORWARD" remove
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$FW")" -eq 2 ]
+  not_grep -q 192.168.49.200 "$FW"
+  grep -q toaddr=10.0.0.6 "$FW"
+}
+
+@test "R9: firewalld is installed but stopped: iptables, as on Debian" {
+  iptables_stub
+  stub firewall-cmd 'exit 252'
+  export FIREWALL_CMD=firewall-cmd
+  LB_IP=192.168.49.200 EXT_IF=ens4 run bash "$FORWARD" apply
+  [ "$status" -eq 0 ]
+  grep -q '^nat PREROUTING' "$RULES"
+}
