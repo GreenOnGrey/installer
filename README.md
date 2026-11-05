@@ -112,7 +112,9 @@ The main settings are minikube resources (`MK_CPUS`, `MK_MEMORY`, `MK_DISK`, app
 
 ### External (managed) storages
 
-Set `POSTGRES_MODE`, `KAFKA_MODE` or `S3_MODE` to `external`, separately for each storage. The built-in storage is then not deployed, the service `postgres`/`kafka`/`s3` points to the external host (`ExternalName` for a DNS name, a service with an `EndpointSlice` for an IP), and the `*-conn` secret is filled from the configuration. Before the deploy, the Job `external-check` verifies access (`pg_isready`, Kafka metadata, `HEAD` of the bucket). If a host is unreachable, `up` stops with code 14.
+Set `POSTGRES_MODE`, `KAFKA_MODE` or `S3_MODE` to `external`, separately for each storage. The built-in storage is then not deployed, the service `postgres`/`kafka`/`s3` points to the external host (`ExternalName` for a DNS name, a service with an `EndpointSlice` for an IP), and the `*-conn` secret is filled from the configuration.
+
+Before the deploy, the Job `external-check` checks them from the cluster, and a failure stops `up` with code 14 and deploys no storages. Postgres needs the `vector` extension, and its owner needs `CREATEROLE` and `CREATEDB` (without `CREATEDB`, create the database of Nabu in advance). Kafka needs an answer to a metadata request. S3 needs the buckets `S3_BUCKET` and `S3_BUCKET_NABU` created in advance: the check writes, reads and deletes an object `.installer-check/<id>` in each.
 
 Passwords and keys go only through files (`POSTGRES_PASSWORD_FILE=/secure/pg-password`) or environment variables. A password written directly in `local.env` stops the script with code 2.
 

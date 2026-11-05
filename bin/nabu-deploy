@@ -33,9 +33,6 @@ STATUS_CMD=${STATUS_CMD:-"$ROOT/installer"}
 NS_INGRESS=${NS_INGRESS:-ingress}
 WEB_HOST=${NABU_WEB_HOST:-nabu}
 API_HOST=${NABU_API_HOST:-nabu-api}
-PG_ROLE=${NABU_PG_ROLE:-nabu}
-PG_DB=${NABU_PG_DB:-nabu}
-S3_BUCKET_NABU=${NABU_S3_BUCKET:-nabu}
 
 COMPONENT="" TAG="" CHART_VERSION="" ALLOW_KEY_ROTATION=0
 FIRST_INSTALL=false BASE_DOMAIN="" REVISION="" DIAG="" PAYLOAD="" HELM_REG="" FAIL_MSG=""
@@ -174,8 +171,9 @@ ensure_database() {
   local pw pod sql
   pw=$(secret_get "$NS" nabu-postgres-conn password)
   [[ -n $pw ]] || pw=$(openssl rand -hex 24)
-  sql=$(printf "SELECT 'CREATE ROLE %s LOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '%s')\\\\gexec\nALTER ROLE %s WITH LOGIN PASSWORD '%s';\nSELECT 'CREATE DATABASE %s OWNER %s' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '%s')\\\\gexec\n" \
-    "$PG_ROLE" "$PG_ROLE" "$PG_ROLE" "$pw" "$PG_DB" "$PG_ROLE" "$PG_DB")
+  # GRANT: without superuser, CREATE DATABASE … OWNER needs membership in that role (managed Postgres).
+  sql=$(printf "SELECT 'CREATE ROLE %s LOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '%s')\\\\gexec\nALTER ROLE %s WITH LOGIN PASSWORD '%s';\nGRANT %s TO CURRENT_USER;\nSELECT 'CREATE DATABASE %s OWNER %s' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '%s')\\\\gexec\n" \
+    "$PG_ROLE" "$PG_ROLE" "$PG_ROLE" "$pw" "$PG_ROLE" "$PG_DB" "$PG_ROLE" "$PG_DB")
   pod=$(kc -n "$NS_STORAGES" get pods -l cnpg.io/instanceRole=primary -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
   if [[ -n $pod ]]; then
     printf '%s' "$sql" | kc -n "$NS_STORAGES" exec -i "$pod" -c postgres -- psql -v ON_ERROR_STOP=1 -q -U postgres -d postgres >/dev/null ||
@@ -209,7 +207,8 @@ ensure_database() {
   ok "database $PG_DB and user $PG_ROLE"
 }
 
-# copy_storages — kafka-conn as is; s3-conn with the bucket nabu (nabu-core creates it at start).
+# copy_storages — kafka-conn as is; s3-conn with the bucket nabu (nabu-core creates it at start on the
+# built-in S3; an external one is checked before the deploy and must have it).
 copy_storages() {
   kc -n "$NS_STORAGES" get secret kafka-conn -o json 2>/dev/null | jq -c --arg ns "$NS" '
     {apiVersion: "v1", kind: "Secret", type: "Opaque",
@@ -393,6 +392,9 @@ main() {
   parse_args "$@"
   INSTALLER_CONFIG=$(installer_config)
   load_config "$ROOT" "$INSTALLER_CONFIG"
+  S3_BUCKET_NABU=$(nabu_bucket)
+  PG_ROLE=${NABU_PG_ROLE:-nabu}
+  PG_DB=${NABU_PG_DB:-nabu}
   acquire_deploy_lock
   read_payload
   check_stand
