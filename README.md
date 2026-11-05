@@ -79,7 +79,7 @@ The log of each `up` is `logs/<time>/run.log`. On failure `diagnostics/` sits ne
 
 At the end of `up` and in `status`, these are checked:
 
-- all pods in `storages` and `observability` are ready;
+- all pods in `storages` and `observability` (if it is on) are ready;
 - Grafana and both data sources answer;
 - all metric scrape jobs are active (`up == 0` is empty);
 - a test log line reaches VictoriaLogs with the fields namespace, pod, container, node;
@@ -105,6 +105,10 @@ Passwords of built-in storages are generated on the first `up` and kept only in 
 Overrides go in `config/local.env` (ignored by git), with an example in [`config/local.env.example`](config/local.env.example). Priority: `config/defaults.env` → `config/local.env` → environment variables → flags.
 
 The main settings are minikube resources (`MK_CPUS`, `MK_MEMORY`, `MK_DISK`, applied when the profile is created), retention (`VM_RETENTION`, `VL_RETENTION`), volume sizes and storage modes.
+
+### Observability
+
+`OBSERVABILITY=false` installs no VictoriaMetrics, VictoriaLogs, collectors or Grafana: `up` removes them if they are installed. The volumes of metrics and logs stay, the data of Grafana is deleted, and the checks of Grafana, metrics and logs are skipped.
 
 ### External (managed) storages
 

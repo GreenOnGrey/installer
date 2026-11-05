@@ -49,10 +49,10 @@ release_local() {
   RELEASES[-1]="$name local"
 }
 
-# uninstall_if_present <release> <ns> — for storages switched to external mode.
+# uninstall_if_present <release> <ns> — for what the configuration has switched off.
 uninstall_if_present() {
   if hm status "$1" -n "$2" >/dev/null 2>&1; then
-    log "removing release $1: the storage is in external mode"
+    log "removing release $1: the configuration turns it off"
     hm uninstall "$1" -n "$2" --wait --timeout "$HELM_TIMEOUT" >/dev/null ||
       die "$E_DEPLOY" "failed to remove release $1"
   fi
@@ -144,8 +144,23 @@ stage_dashboards() {
   fi
 }
 
+# remove_observability — OBSERVABILITY=false (R17). The volumes of metrics and logs stay; those of Grafana
+# go with its release, so its secrets go too.
+remove_observability() {
+  local rel
+  for rel in dashboards grafana vector vmagent node-exporter kube-state-metrics victoria-logs victoria-metrics; do
+    uninstall_if_present "$rel" "$NS_OBSERVABILITY"
+  done
+  kc -n "$NS_OBSERVABILITY" delete secret grafana-admin grafana-github-oauth --ignore-not-found >/dev/null 2>&1 ||
+    warn "failed to delete the secrets of Grafana in $NS_OBSERVABILITY"
+}
+
 deploy_observability() {
   local ns=$NS_OBSERVABILITY
+  if ! observability_enabled; then
+    remove_observability
+    return 0
+  fi
   release victoria-metrics "$ns" vm/victoria-metrics-single "$VM_SINGLE_CHART_VERSION" victoria-metrics.yaml \
     --set-string "server.retentionPeriod=$VM_RETENTION" --set "server.persistentVolume.size=$VM_STORAGE"
   release victoria-logs "$ns" vm/victoria-logs-single "$VL_SINGLE_CHART_VERSION" victoria-logs.yaml \

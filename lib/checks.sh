@@ -250,16 +250,18 @@ run_probe_job() {
 
 check_pods() {
   local ns failed=0 out
-  for ns in "$NS_STORAGES" "$NS_OBSERVABILITY"; do
+  for ns in $(stand_namespaces); do
     # Pods of finished Jobs and probe pods do not count.
     if ! out=$(kc -n "$ns" wait --for=condition=Ready pod \
       --field-selector=status.phase!=Succeeded,status.phase!=Failed \
       -l 'app.kubernetes.io/managed-by notin (installer,hammurapi-infra)' --timeout="$CHECK_TIMEOUT" 2>&1); then
+      # All storages external and observability off: an empty namespace is fine.
+      [[ $out == *"no matching resources"* ]] && continue
       record pods fail "$ns: not all pods are ready: $(echo "$out" | grep -v 'condition met' | head -3 | tr '\n' ' ')"
       failed=1
     fi
   done
-  ((failed)) || record pods ok "all pods in $NS_STORAGES and $NS_OBSERVABILITY are ready"
+  ((failed)) || record pods ok "all pods in $(stand_namespaces | paste -sd' ' | sed 's/ / and /') are ready"
 }
 
 start_probe_pods() {
@@ -362,8 +364,8 @@ check_storages() {
 
 # collect_resources — total memory requests and containers without requests or limits.
 check_resources() {
-  local pods missing
-  pods=$(kc get pods -n "$NS_STORAGES" -o json; kc get pods -n "$NS_OBSERVABILITY" -o json
+  local pods missing ns
+  pods=$(for ns in $(stand_namespaces); do kc get pods -n "$ns" -o json; done
     if mcp_enabled; then kc get pods -n "$NS_MCP" -l 'app.kubernetes.io/part-of=mcp-servers' -o json; fi)
   missing=$(jq -rs '[.[].items[] | select(.status.phase == "Running" or .status.phase == "Pending")
       | .metadata.namespace as $ns | .metadata.name as $p
@@ -404,7 +406,9 @@ run_checks() {
   step checks
   CHECK_RESULTS=()
   check_pods
-  if start_probe_pods; then
+  if ! observability_enabled; then
+    debug "observability is off: no checks of Grafana, metrics and logs"
+  elif start_probe_pods; then
     check_grafana
     check_metrics
     check_logs

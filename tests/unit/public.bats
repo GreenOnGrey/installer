@@ -277,3 +277,29 @@ config_step() {
   [ "$status" -eq 0 ]
   [[ $output == *"name: hammurapi-public"* && $output == *"secretName: hammurapi-public"* ]]
 }
+
+@test "FTR.INFRA.INST-0001 R17: without Grafana a fault of a product does not fail the stand" {
+  load_script
+  OBSERVABILITY=false PUBLIC_ACCESS=true PUBLIC_DOMAIN=x.example LB_IP=192.168.49.200
+  stub kubectl '[[ $* == *"get certificate"* ]] && echo True; exit 0'
+  public_curl() { [[ $2 == http ]] && echo "308 https://$1/" || echo 503; }
+  check_public
+  [[ ${CHECK_RESULTS[*]} == "public|ok|certificate greenongrey-public is ready"* ]]
+}
+
+@test "FTR.INFRA.INST-0001 R17: without Grafana a certificate that is not ready fails the check" {
+  load_script
+  OBSERVABILITY=false PUBLIC_ACCESS=true PUBLIC_DOMAIN=x.example LB_IP=192.168.49.200
+  stub kubectl '[[ $* == *"get certificate"* ]] && echo False; exit 0'
+  public_curl() { echo "308 https://$1/"; }
+  check_public
+  [[ ${CHECK_RESULTS[*]} == "public|fail|certificate ingress/greenongrey-public is not ready"* ]]
+}
+
+@test "FTR.INFRA.INST-0001 R17: with Grafana the check still asks Grafana" {
+  load_script
+  PUBLIC_ACCESS=true PUBLIC_DOMAIN=x.example LB_IP=192.168.49.200
+  public_curl() { [[ $1 == grafana.x.example ]] || return 1; [[ $2 == http ]] && echo "308 https://$1/" || echo 503; }
+  check_public
+  [[ ${CHECK_RESULTS[*]} == "public|fail|https://grafana.x.example answers '503'"* ]]
+}

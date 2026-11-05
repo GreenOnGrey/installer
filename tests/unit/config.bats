@@ -214,3 +214,9 @@ setup() {
   [ "$(HAMMURAPI_INFRA_CONFIG=/old installer_config)" = /old ]
   [ "$(INSTALLER_CONFIG=/new HAMMURAPI_INFRA_CONFIG=/old installer_config)" = /new ]
 }
+
+@test "RES-07 (U): an invalid OBSERVABILITY: code 2" {
+  OBSERVABILITY=maybe run validate_config
+  [ "$status" -eq 2 ]
+  [[ $output == *OBSERVABILITY* ]]
+}

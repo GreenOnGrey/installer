@@ -259,10 +259,10 @@ mcp_budget() {
 mcp_preflight() {
   mcp_enabled || return 0
   mcp_load
-  local others=0 q servers alloc capacity verdict
+  local others=0 q servers alloc capacity verdict ns
   while read -r q; do
     [[ -n $q ]] && others=$((others + $(to_bytes "$q")))
-  done < <({ kc get pods -n "$NS_STORAGES" -o json 2>/dev/null; kc get pods -n "$NS_OBSERVABILITY" -o json 2>/dev/null; } |
+  done < <({ for ns in $(stand_namespaces); do kc get pods -n "$ns" -o json 2>/dev/null; done; } |
     jq -rs '.[].items[] | select(.status.phase == "Running" or .status.phase == "Pending")
       | .spec.containers[] | .resources.requests.memory // empty')
   servers=$(mcp_rendered_memory) || die "$E_DEPLOY" "failed to count the memory of MCP servers"
