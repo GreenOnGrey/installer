@@ -68,6 +68,7 @@ ensure_credentials() {
       ensure_secret "$ns" s3-seaweedfs-config Opaque seaweedfs_s3_config "$(s3_seaweedfs_config "$access" "$secret")"
     fi
   fi
+  observability_enabled || return 0
   ensure_secret "$NS_OBSERVABILITY" grafana-admin Opaque admin-user admin admin-password "$(gen_password)"
 }
 

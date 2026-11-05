@@ -207,3 +207,63 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   [ "$status" -eq 17 ]
   kill %1 2>/dev/null || true
 }
+
+@test "FTR.INFRA.INST-0001 R17: OBSERVABILITY=false: nothing is installed, installed releases are removed" {
+  load_script
+  OBSERVABILITY=false
+  stub helm '[[ $* == *"status grafana"* ]] && exit 0; [[ $* == *"status"* ]] && exit 1; exit 0'
+  run deploy_observability
+  [ "$status" -eq 0 ]
+  called "uninstall grafana -n observability"
+  not_called "uninstall vector"
+  not_called "upgrade --install"
+}
+
+@test "FTR.INFRA.INST-0001 R17: OBSERVABILITY=false: no namespace of its own and no Grafana password" {
+  load_script
+  OBSERVABILITY=false
+  [ "$(stand_namespaces)" = storages ]
+  [[ $(public_hosts) != *grafana* ]]
+  stub kubectl 'exit 0'
+  POSTGRES_MODE=external S3_MODE=external run ensure_credentials
+  [ "$status" -eq 0 ]
+  not_called grafana-admin
+}
+
+@test "FTR.INFRA.INST-0001 R17: OBSERVABILITY=false: run_checks starts no probe of Grafana, metrics or logs" {
+  load_script
+  OBSERVABILITY=false
+  start_probe_pods() { echo called >"$BATS_TEST_TMPDIR/probe"; }
+  check_pods() { record pods ok x; }
+  check_storages() { record storages ok x; }
+  check_mcp() { :; }
+  check_resources() { record resources ok x; }
+  check_public() { :; }
+  cleanup_probes() { :; }
+  run_checks
+  [ ! -e "$BATS_TEST_TMPDIR/probe" ]
+  [[ ${CHECK_RESULTS[*]} != *grafana* && ${CHECK_RESULTS[*]} != *metrics* && ${CHECK_RESULTS[*]} != *logs* ]]
+}
+
+@test "FTR.INFRA.INST-0001 R17: the observability default keeps Grafana among the hosts and namespaces" {
+  load_script
+  [[ $(public_hosts) == *" grafana"* ]]
+  [ "$(stand_namespaces | wc -l)" -eq 2 ]
+}
+
+@test "FTR.INFRA.INST-0001 R17: all storages external and observability off: an empty namespace passes" {
+  load_script
+  OBSERVABILITY=false
+  stub kubectl 'echo "error: no matching resources found" >&2; exit 1'
+  check_pods
+  [[ ${CHECK_RESULTS[*]} == "pods|ok|all pods in storages are ready" ]]
+}
+
+@test "FTR.INFRA.INST-0001 R17: removing observability deletes the secrets of Grafana" {
+  load_script
+  OBSERVABILITY=false
+  stub helm 'exit 1'
+  run deploy_observability
+  [ "$status" -eq 0 ]
+  called "delete secret grafana-admin grafana-github-oauth --ignore-not-found"
+}

@@ -110,7 +110,7 @@ collect_diagnostics() {
   mkdir -p "$dir"
   kc get events -A --sort-by=.lastTimestamp >"$dir/events.txt" 2>&1 || true
   kc get pods -A -o wide >"$dir/pods.txt" 2>&1 || true
-  for ns in "$NS_STORAGES" "$NS_OBSERVABILITY"; do
+  for ns in $(stand_namespaces); do
     while read -r pod; do
       [[ -n $pod ]] || continue
       kc -n "$ns" describe pod "$pod" >"$dir/describe-$ns-$pod.txt" 2>&1 || true
@@ -147,7 +147,7 @@ Ready in $(human_duration "$took"). Version: ${DEPLOYED_TAG:-dev}.
 Cluster       minikube $MK_PROFILE (Kubernetes $K8S_VERSION), $MK_CPUS CPU / ${MK_MEMORY^^}
 Storages      postgres.$ns.svc:5432  kafka.$ns.svc:9092  s3.$ns.svc:9000
               ($mode)
-Observability Grafana, VictoriaMetrics, VictoriaLogs in namespace $NS_OBSERVABILITY
+Observability $(if observability_enabled; then echo "Grafana, VictoriaMetrics, VictoriaLogs in namespace $NS_OBSERVABILITY"; else echo off; fi)
 Resources     $res
 
 Versions      Kafka $KAFKA_VERSION, Postgres ${POSTGRES_IMAGE##*:}, VictoriaLogs Grafana plugin $VL_PLUGIN_VERSION
@@ -156,20 +156,19 @@ EOF
     read -r name ver <<<"$r"
     printf '              %-20s %s\n' "$name" "$ver"
   done
-  cat <<EOF
+  observability_enabled && cat <<EOF
 
 Grafana:
   on your computer: ssh -L $GRAFANA_LOCAL_PORT:localhost:$GRAFANA_LOCAL_PORT $(id -un)@<machine address>
   on this machine:  kubectl --context $(kube_context) -n $NS_OBSERVABILITY port-forward svc/grafana $GRAFANA_LOCAL_PORT:80
   then open http://localhost:$GRAFANA_LOCAL_PORT
-
-Passwords: ./installer creds
 EOF
+  printf '\nPasswords: ./installer creds\n'
   if public_enabled; then
     cat <<EOF
 
 Public access (certificate ${ACME_ISSUER:-letsencrypt}):
-  https://grafana.$PUBLIC_DOMAIN   https://${HAMMURAPI_WEB_HOST:-hammurapi}.$PUBLIC_DOMAIN   https://${HAMMURAPI_API_HOST:-hammurapi-api}.$PUBLIC_DOMAIN
+  $(if observability_enabled; then echo "https://grafana.$PUBLIC_DOMAIN   "; fi)https://${HAMMURAPI_WEB_HOST:-hammurapi}.$PUBLIC_DOMAIN   https://${HAMMURAPI_API_HOST:-hammurapi-api}.$PUBLIC_DOMAIN
   ports 80/443 of this machine → Traefik $LB_IP; open them in your cloud firewall
 EOF
   fi
@@ -259,10 +258,10 @@ checks_json() {
 }
 
 status_json() {
-  local profile_status=$1 running=$2 releases='[]' pods='[]' version=null public='{"enabled":false}'
+  local profile_status=$1 running=$2 releases='[]' pods='[]' version=null public='{"enabled":false}' ns
   if [[ $running == 1 ]]; then
     releases=$(hm list -A -o json 2>/dev/null | jq -c '[.[] | {name, namespace, chart, app_version, status, revision}]' || echo '[]')
-    pods=$(kc get pods -n "$NS_STORAGES" -o json 2>/dev/null; kc get pods -n "$NS_OBSERVABILITY" -o json 2>/dev/null)
+    pods=$(for ns in $(stand_namespaces); do kc get pods -n "$ns" -o json 2>/dev/null; done)
     pods=$(jq -cs '[.[].items[] | {namespace: .metadata.namespace, name: .metadata.name, phase: .status.phase,
       ready: ([.status.containerStatuses[]?.ready] | all)}]' <<<"$pods")
     version=$(deployed_version)
@@ -273,8 +272,9 @@ status_json() {
     --argjson checks "$(checks_json)" --argjson req "$MEM_REQUESTED" --argjson alloc "$MEM_ALLOCATABLE" \
     --argjson mcp "$(mcp_status_json)" \
     --arg pg "$POSTGRES_MODE" --arg kafka "$KAFKA_MODE" --arg s3 "$S3_MODE" \
+    --argjson observability "$(if observability_enabled; then echo true; else echo false; fi)" \
     '{profile: {name: $profile, status: $st, kubernetes: $k8s}, version: $version,
-      storages: {postgres: $pg, kafka: $kafka, s3: $s3}, public: $public, mcp: $mcp,
+      storages: {postgres: $pg, kafka: $kafka, s3: $s3}, observability: $observability, public: $public, mcp: $mcp,
       releases: $releases, pods: $pods, checks: $checks,
       resources: {requestedMemoryBytes: $req, allocatableMemoryBytes: $alloc,
         requestedPercent: (if $alloc > 0 then ($req * 100 / $alloc | floor) else 0 end)},
@@ -290,7 +290,7 @@ status_text() {
     hm list -A 2>/dev/null | sed 's/^/  /' || true
     printf '\nPods\n'
     kc get pods -n "$NS_STORAGES" 2>/dev/null | sed 's/^/  /' || true
-    kc get pods -n "$NS_OBSERVABILITY" --no-headers 2>/dev/null | sed 's/^/  /' || true
+    if observability_enabled; then kc get pods -n "$NS_OBSERVABILITY" --no-headers 2>/dev/null | sed 's/^/  /' || true; fi
     mcp_enabled && { kc get pods -n "$NS_MCP" --no-headers 2>/dev/null | sed 's/^/  /' || true; }
     printf '\nResources  %s\n' "$(resources_line)"
   fi
@@ -316,9 +316,11 @@ cmd_creds() {
   for k in host port database username password sslmode uri; do pg[$k]=$(secret_key "$ns" postgres-conn "$k"); done
   for k in bootstrap_servers security_protocol sasl_mechanism username password; do kafka[$k]=$(secret_key "$ns" kafka-conn "$k"); done
   for k in endpoint region bucket access_key secret_key path_style; do s3[$k]=$(secret_key "$ns" s3-conn "$k"); done
-  local gf_user gf_pass
-  gf_user=$(secret_key "$NS_OBSERVABILITY" grafana-admin admin-user)
-  gf_pass=$(secret_key "$NS_OBSERVABILITY" grafana-admin admin-password)
+  local gf_user="" gf_pass=""
+  if observability_enabled; then
+    gf_user=$(secret_key "$NS_OBSERVABILITY" grafana-admin admin-user || true)
+    gf_pass=$(secret_key "$NS_OBSERVABILITY" grafana-admin admin-password || true)
+  fi
   if [[ $JSON == 1 ]]; then
     jq -n \
       --arg pgsvc "postgres.$ns.svc:5432" --arg pghost "${pg[host]}" --arg pgport "${pg[port]}" --arg pgdb "${pg[database]}" \
@@ -329,13 +331,14 @@ cmd_creds() {
       --arg sa "${s3[access_key]}" --arg ss "${s3[secret_key]}" --arg sp "${s3[path_style]}" \
       --arg gu "$gf_user" --arg gp "$gf_pass" --arg ns "$ns" --arg obs "$NS_OBSERVABILITY" --arg pgm "$POSTGRES_MODE" \
       --arg km2 "$KAFKA_MODE" --arg sm "$S3_MODE" --argjson mcp "$(mcp_creds_json)" \
+      --argjson obs_on "$(if observability_enabled; then echo true; else echo false; fi)" \
       '{postgres: {mode: $pgm, service: $pgsvc, secret: "\($ns)/postgres-conn", host: $pghost, port: $pgport, database: $pgdb,
           username: $pguser, password: $pgpass, sslmode: $pgssl, uri: $pguri},
         kafka: {mode: $km2, service: $ksvc, secret: "\($ns)/kafka-conn", bootstrap_servers: $kb, security_protocol: $kp,
           sasl_mechanism: $km, username: $ku, password: $kpass},
         s3: {mode: $sm, service: $ssvc, secret: "\($ns)/s3-conn", endpoint: $se, region: $sr, bucket: $sb,
           access_key: $sa, secret_key: $ss, path_style: $sp},
-        grafana: {service: "grafana.\($obs).svc:80", secret: "\($obs)/grafana-admin", user: $gu, password: $gp},
+        grafana: (if $obs_on then {service: "grafana.\($obs).svc:80", secret: "\($obs)/grafana-admin", user: $gu, password: $gp} else null end),
         mcp: $mcp}'
     return
   fi
@@ -358,6 +361,8 @@ S3 ($(mode_label "$S3_MODE"))
   endpoint  ${s3[endpoint]}   region ${s3[region]}   bucket ${s3[bucket]}   path_style ${s3[path_style]}
   key       ${s3[access_key]}
   secret    ${s3[secret_key]}
+EOF
+  observability_enabled && cat <<EOF
 
 Grafana
   service   grafana.$NS_OBSERVABILITY.svc:80   secret $NS_OBSERVABILITY/grafana-admin

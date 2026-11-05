@@ -50,7 +50,7 @@ cluster_up() {
     die "$E_CLUSTER" "the cluster node is not ready"
   kubelet_gc
   ensure_namespace "$NS_STORAGES"
-  ensure_namespace "$NS_OBSERVABILITY"
+  if observability_enabled; then ensure_namespace "$NS_OBSERVABILITY"; fi
   if [[ ${STAND_AUTOSTART:-true} == true ]]; then
     install_autostart
   else

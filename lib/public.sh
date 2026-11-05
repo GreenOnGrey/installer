@@ -91,7 +91,7 @@ grafana_public_values() {
 # ensure_public_secrets — the GitHub OAuth app for Grafana (the secret comes from
 # GRAFANA_GITHUB_CLIENT_SECRET or the *_FILE file; refreshed on every up).
 ensure_public_secrets() {
-  public_enabled || return 0
+  public_enabled && observability_enabled || return 0
   [[ -n ${GRAFANA_GITHUB_CLIENT_ID:-} ]] || return 0
   put_secret "$NS_OBSERVABILITY" grafana-github-oauth Opaque \
     GF_AUTH_GITHUB_CLIENT_ID "$GRAFANA_GITHUB_CLIENT_ID" \
@@ -165,9 +165,11 @@ EOF
   done
 }
 
-# public_hosts — host names of the certificate without the domain: Hammurapi, Grafana and PUBLIC_EXTRA_HOSTS (Nabu).
+# public_hosts — host names of the certificate without the domain: Hammurapi, Grafana if it is on, and PUBLIC_EXTRA_HOSTS (Nabu).
 public_hosts() {
-  echo "${HAMMURAPI_WEB_HOST:-hammurapi} ${HAMMURAPI_API_HOST:-hammurapi-api} grafana${PUBLIC_EXTRA_HOSTS:+ $PUBLIC_EXTRA_HOSTS}"
+  local grafana=""
+  if observability_enabled; then grafana=" grafana"; fi
+  echo "${HAMMURAPI_WEB_HOST:-hammurapi} ${HAMMURAPI_API_HOST:-hammurapi-api}$grafana${PUBLIC_EXTRA_HOSTS:+ $PUBLIC_EXTRA_HOSTS}"
 }
 
 public_certificate() {
@@ -286,10 +288,16 @@ public_curl() {
 
 check_public() {
   public_enabled || return 0
-  local host="grafana.$PUBLIC_DOMAIN" code insecure=() redirect
+  local host code insecure=() redirect hosts
   LB_IP=${LB_IP:-$(kc -n "$NS_INGRESS" get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)}
   PUBLIC_DOMAIN=${PUBLIC_DOMAIN:-$(state_public | jq -r '.baseDomain // empty' 2>/dev/null || true)}
   host="grafana.$PUBLIC_DOMAIN"
+  hosts=$(public_hosts)
+  # Without Grafana the stand has no host of its own, and a product fault must not stop rollouts of
+  # products: the certificate and the redirect of Traefik are what the stand answers for.
+  if ! observability_enabled; then
+    host="${hosts%% *}.$PUBLIC_DOMAIN"
+  fi
   if [[ -z $LB_IP || -z $PUBLIC_DOMAIN ]]; then
     record public fail "public access is not configured: no Traefik address or domain"
     return
@@ -298,11 +306,20 @@ check_public() {
   [[ ${ACME_ISSUER:-letsencrypt} == letsencrypt-staging ]] && insecure=(-k)
   code=$(public_curl "$host" https "${insecure[@]}" -o /dev/null -w '%{http_code}' 2>/dev/null || true)
   redirect=$(public_curl "$host" http -o /dev/null -w '%{http_code} %{redirect_url}' 2>/dev/null || true)
-  if [[ $code != 200 && $code != 302 ]]; then
+  if ! observability_enabled; then
+    code=$(kc -n "$NS_INGRESS" get certificate "$CERT_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+    if [[ $code != True ]]; then
+      record public fail "certificate $NS_INGRESS/$CERT_NAME is not ready ('${code:-no status}', ${ACME_ISSUER:-letsencrypt})"
+    elif [[ ! $redirect =~ ^30[178]\ https:// ]]; then
+      record public fail "http://$host does not redirect to HTTPS: '${redirect:-no answer}'"
+    else
+      record public ok "certificate $CERT_NAME is ready for {${hosts// /,}}.$PUBLIC_DOMAIN, HTTP → HTTPS through $LB_IP"
+    fi
+  elif [[ $code != 200 && $code != 302 ]]; then
     record public fail "https://$host answers '${code:-no answer}' (expected 200 or a 302 to sign-in; certificate ${ACME_ISSUER:-letsencrypt})"
   elif [[ ! $redirect =~ ^30[178]\ https:// ]]; then
     record public fail "http://$host does not redirect to HTTPS: '${redirect:-no answer}'"
   else
-    record public ok "https://{${HAMMURAPI_WEB_HOST:-hammurapi},${HAMMURAPI_API_HOST:-hammurapi-api},grafana}.$PUBLIC_DOMAIN through $LB_IP, HTTP → HTTPS"
+    record public ok "https://{${hosts// /,}}.$PUBLIC_DOMAIN through $LB_IP, HTTP → HTTPS"
   fi
 }

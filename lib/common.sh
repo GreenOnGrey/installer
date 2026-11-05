@@ -151,7 +151,14 @@ require_secret() {
   fi
 }
 
-# validate_config — modes and required parameters of external storages.
+observability_enabled() { [[ ${OBSERVABILITY:-true} == true ]]; }
+
+# stand_namespaces — the namespaces with the stand's own pods.
+stand_namespaces() {
+  echo "$NS_STORAGES"
+  if observability_enabled; then echo "$NS_OBSERVABILITY"; fi
+}
+
 # validate_names — these names go into paths of files written and deleted as root.
 validate_names() {
   local key
@@ -161,11 +168,16 @@ validate_names() {
   done
 }
 
+# validate_config — modes and required parameters of external storages.
 validate_config() {
   local m
   case ${STAND_AUTOSTART:-true} in
     true | false) ;;
     *) die "$E_USAGE" "STAND_AUTOSTART must be true or false" ;;
+  esac
+  case ${OBSERVABILITY:-true} in
+    true | false) ;;
+    *) die "$E_USAGE" "OBSERVABILITY must be true or false" ;;
   esac
   if ! [[ ${IMAGE_GC_HIGH:-85} =~ ^[0-9]+$ && ${IMAGE_GC_LOW:-80} =~ ^[0-9]+$ ]] ||
     ((${IMAGE_GC_LOW:-80} >= ${IMAGE_GC_HIGH:-85} || ${IMAGE_GC_HIGH:-85} > 100)); then
@@ -242,7 +254,7 @@ validate_public_config() {
   if [[ -n ${PUBLIC_IP:-} && ! $PUBLIC_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     die "$E_USAGE" "PUBLIC_IP: an IPv4 address is required"
   fi
-  if [[ -n ${GRAFANA_GITHUB_CLIENT_ID:-} ]]; then
+  if [[ -n ${GRAFANA_GITHUB_CLIENT_ID:-} ]] && observability_enabled; then
     require_secret PUBLIC_ACCESS=true GRAFANA_GITHUB_CLIENT_SECRET
     require_param PUBLIC_ACCESS=true GRAFANA_GITHUB_ORG
   fi

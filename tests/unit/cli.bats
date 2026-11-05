@@ -102,3 +102,14 @@ setup() {
   echo "$output" | jq -e '.profile.name == "greenongrey" and .version.tag == "v1.4.0" and (.releases | length) == 1
     and .pods[0].ready == true and .checks[1].ok == false and .resources.requestedPercent == 25 and .ok == false'
 }
+
+@test "FTR.INFRA.INST-0001 R17: creds and the summary with observability off: no Grafana" {
+  stub kubectl 'exit 0'
+  OBSERVABILITY=false run bash "$SCRIPT" creds --json --no-color
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.grafana == null and .postgres != null'
+  not_called grafana-admin
+  OBSERVABILITY=false run bash "$SCRIPT" creds --no-color
+  [ "$status" -eq 0 ]
+  [[ $output != *Grafana* ]]
+}
