@@ -146,12 +146,16 @@ An example for Google Cloud (Cloud SQL, Managed Service for Apache Kafka, Cloud 
 
 ## Products
 
-`PRODUCTS=nabu` (the default) rolls out Nabu after the stand passes its checks, through the same `bin/nabu-deploy` that the CI of Nabu runs, at the versions of `config/versions.env` (`NABU_CORE_VERSION`, `NABU_WEB_VERSION`, `NABU_CHART_VERSION`). An empty `PRODUCTS` installs the stand only. Hammurapi follows in a later release.
+`PRODUCTS=nabu` (the default) rolls out Nabu after the stand passes its checks, through the same `bin/nabu-deploy` that the CI of Nabu runs, at the versions of `config/versions.env` (`NABU_*_VERSION`). `PRODUCTS=nabu,hammurapi` adds Hammurapi through `bin/hammurapi-deploy` (`HAMMURAPI_*_VERSION`); `hammurapi` alone adds Nabu, unless `NABU_MODE=external`. An empty `PRODUCTS` installs the stand only.
 
 Nabu needs `PUBLIC_ACCESS=true`, `AUTH_PROVIDER` and `BOOTSTRAP_ADMINS`:
 
 - `github`: an OAuth App with the callback `https://nabu-api.<domain>/auth/callback`, `NABU_GITHUB_CLIENT_ID` and the secret `NABU_GITHUB_CLIENT_SECRET`; `GITHUB_ALLOWED_ORG` limits sign-in to an organization;
 - `oidc`: `OIDC_ISSUER`, `OIDC_CLIENT_ID` and the secret `OIDC_CLIENT_SECRET`.
+
+Hammurapi needs its GitHub App: `HAMMURAPI_GITHUB_APP_ID`, `HAMMURAPI_GITHUB_CLIENT_ID`, the secrets `HAMMURAPI_GITHUB_APP_PRIVATE_KEY_FILE` (the `.pem`) and `HAMMURAPI_GITHUB_CLIENT_SECRET`, and the repository of specifications `HAMMURAPI_SPEC_REPO` (`owner/name`) with the app installed on it (contents and pull requests: write; events push and pull_request). With `AUTH_PROVIDER=github` users sign in to Hammurapi through this app. The webhook secret and the token key are generated once.
+
+The Nabu of the same install creates the service client of Hammurapi itself (`BOOTSTRAP_CLIENTS`, from nabu-core `v0.3.5`); allow its service agents afterwards in **Nabu → Admin → Clients**. With `NABU_MODE=external`, register the client in that Nabu and set `NABU_URL` (the `https://` address of its API), `NABU_CLIENT_ID` and the secret `NABU_CLIENT_SECRET`; `install` checks that this Nabu answers before anything changes (code 14).
 
 `BOOTSTRAP_LLM_API_KEY` is optional. Without it, add a model connection in the admin area of Nabu. Secrets come from the environment or `<key>_FILE`, never from the config file. The first `install` keeps them in the secret `installer/product-inputs`, so a later run needs them only to change them. `SECRETS_KEY` of Nabu is generated once and never changes on a rollout.
 

@@ -246,7 +246,7 @@ EOF
     cat <<EOF
 
 Public access (certificate ${ACME_ISSUER:-letsencrypt}):
-  $(if observability_enabled; then echo "https://grafana.$PUBLIC_DOMAIN   "; fi)https://${HAMMURAPI_WEB_HOST:-hammurapi}.$PUBLIC_DOMAIN   https://${HAMMURAPI_API_HOST:-hammurapi-api}.$PUBLIC_DOMAIN
+  $(if observability_enabled; then echo "https://grafana.$PUBLIC_DOMAIN"; else echo "*.$PUBLIC_DOMAIN"; fi)
   $(if ingress_external; then echo "ingress class $INGRESS_CLASS; point the hosts to its load balancer"; elif target_external; then echo "point the hosts to the load balancer $LB_IP"; else echo "ports 80/443 of this machine → Traefik $LB_IP; open them in your cloud firewall"; fi)
 EOF
   fi
@@ -263,6 +263,7 @@ resources_line() {
 cmd_install() {
   start_run_log
   trap 'on_install_exit $?' EXIT
+  products_preflight
   if target_external; then
     acquire_lock
     preflight
