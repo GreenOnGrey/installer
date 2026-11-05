@@ -283,3 +283,13 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   # The certificate of the Ingress is not ready: a warning, the release stays.
   [[ $output == *"certificate hammurapi/api-tls is not ready"* ]]
 }
+
+@test "FTR.INFRA.INST-0001 arch §1: no GHCR token: no pull secret, no registry login, the chart downloads anonymously" {
+  need_linux
+  PAYLOAD=$(printf '%s' "$PAYLOAD" | jq -c 'del(.ghcrPullToken)')
+  run deploy hammurapi-core v1.8.0 0.4.0
+  [ "$status" -eq 0 ]
+  not_called "registry login"
+  not_grep -q dockerconfigjson "$APPLIED/manifests"
+  called "upgrade --install hammurapi-core"
+}
