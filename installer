@@ -30,6 +30,8 @@ source "$ROOT/lib/public.sh"
 source "$ROOT/lib/mcp.sh"
 # shellcheck source=lib/uninstall.sh
 source "$ROOT/lib/uninstall.sh"
+# shellcheck source=lib/product.sh
+source "$ROOT/lib/product.sh"
 
 usage() {
   cat <<'EOF'
@@ -238,6 +240,7 @@ Grafana:
   on this machine:  kubectl --context $(kube_context) -n $NS_OBSERVABILITY port-forward svc/grafana $GRAFANA_LOCAL_PORT:80
   then open http://localhost:$GRAFANA_LOCAL_PORT
 EOF
+  products_summary
   printf '\nPasswords: ./installer creds\n'
   if public_enabled; then
     cat <<EOF
@@ -280,7 +283,9 @@ cmd_install() {
   if ! run_checks; then
     die "$E_CHECKS" "checks failed: $(first_failure)"
   fi
+  # The stand is recorded first: a failed product leaves the stand as deployed.
   write_version
+  deploy_products
   print_summary
 }
 
@@ -503,7 +508,8 @@ main() {
   mkdir -p "$WORK_DIR"
   case $COMMAND in
     install)
-      validate_config
+      # Products only here: status serves the rollouts of every product (lib/product.sh).
+      validate_config products
       cmd_install
       ;;
     status)

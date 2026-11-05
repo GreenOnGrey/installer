@@ -10,7 +10,8 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 SCENARIO=${1:?scenario}
 CLUSTER=installer-$SCENARIO
-export INSTALL_TARGET=external KUBE_CONTEXT=kind-$CLUSTER
+# The products need sign-in and public access, which this scenario has not: the stand only.
+export INSTALL_TARGET=external KUBE_CONTEXT=kind-$CLUSTER PRODUCTS=
 : "${KIND_NODE:=kindest/node:v1.37.0}"
 FLANNEL_VERSION=v0.28.10
 K=(kubectl --context "$KUBE_CONTEXT")

@@ -158,7 +158,7 @@ if [[ $MODE == forward ]]; then exit 0; fi
 
 # TGT-02, TGT-03
 on_vm 'sudo systemctl disable --now greenongrey-ingress-forward >/dev/null; sudo rm -f /etc/systemd/system/greenongrey-ingress-forward.service; sudo systemctl daemon-reload; sudo docker rm -f whoami >/dev/null; sudo docker network rm minikube >/dev/null'
-FULL="HOST_MIN_MEMORY_GB=10 HOST_MIN_DISK_GB=20 MK_MEMORY=11g MK_CPUS=3 OBSERVABILITY=false"
+FULL="HOST_MIN_MEMORY_GB=10 HOST_MIN_DISK_GB=20 MK_MEMORY=11g MK_CPUS=3 OBSERVABILITY=false PRODUCTS="
 on_vm "cd installer && env $FULL bash ./installer up --no-color" >"$WORK/up.log" 2>&1 || { tail -30 "$WORK/up.log"; fail "TGT-02: up failed"; }
 [[ $(on_vm getenforce) == Enforcing ]] || fail "TGT-02: SELinux left enforcing"
 on_vm "cd installer && env $FULL sg docker -c 'bash ./installer status --json --no-color'" 2>/dev/null | jq -e '.ok' >/dev/null || fail "TGT-02: the checks did not pass"

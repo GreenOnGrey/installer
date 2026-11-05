@@ -145,10 +145,8 @@ apply_json() { kc apply -f - >/dev/null; }
 ghcr_pull() {
   local token
   token=$(payload .ghcrPullToken)
-  if [[ -z $token ]]; then
-    kc -n "$NS" get secret ghcr-pull >/dev/null 2>&1 || fail "$E_SECRETS" "neither ghcrPullToken nor the secret ghcr-pull exists"
-    return
-  fi
+  # The images are public (FTR.INFRA.INST-0001 arch §1): without a token they pull anonymously.
+  [[ -n $token ]] || return 0
   printf '%s' "$token" | jq -Rc --arg ns "$NS" --arg reg "$REGISTRY" '
     {auths: {($reg): {username: "hammurapi", password: ., auth: ("hammurapi:" + . | @base64)}}} as $cfg
     | {apiVersion: "v1", kind: "Secret", type: "kubernetes.io/dockerconfigjson",

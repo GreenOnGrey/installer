@@ -11,7 +11,10 @@ COLOR=${COLOR:-auto}
 RUN_DIR=${RUN_DIR:-}
 
 # Keys whose values must not be written directly into local.env (tech, §2).
-readonly SECRET_KEYS=(POSTGRES_PASSWORD KAFKA_PASSWORD S3_ACCESS_KEY S3_SECRET_KEY GRAFANA_GITHUB_CLIENT_SECRET)
+# Secrets of the products given by the user (lib/product.sh keeps them in installer/product-inputs).
+readonly PRODUCT_SECRET_KEYS=(NABU_GITHUB_CLIENT_SECRET OIDC_CLIENT_SECRET BOOTSTRAP_LLM_API_KEY)
+readonly SECRET_KEYS=(POSTGRES_PASSWORD KAFKA_PASSWORD S3_ACCESS_KEY S3_SECRET_KEY GRAFANA_GITHUB_CLIENT_SECRET
+  "${PRODUCT_SECRET_KEYS[@]}")
 
 setup_color() {
   if [[ $COLOR == auto ]]; then
@@ -248,7 +251,8 @@ validate_target() {
   esac
 }
 
-# validate_config — modes and required parameters of external storages.
+# validate_config [products] — modes and required parameters of external storages; with products
+# (install) also the products and their sign-in.
 validate_config() {
   local m
   CONFIG_MISSING=()
@@ -315,6 +319,7 @@ validate_config() {
   esac
   [[ ${NABU_WHISPER_MODEL:-small} =~ ^(tiny|base|small|medium|large-v3|large-v3-turbo|turbo)$ ]] ||
     die "$E_USAGE" "NABU_WHISPER_MODEL must be tiny, base, small, medium, large-v3 or large-v3-turbo"
+  if [[ ${1:-} == products ]]; then validate_products; fi
   die_if_missing
 }
 
