@@ -3,7 +3,7 @@
 # rolls the tag out to production.
 # To repeat a rollout or return to an earlier version, run it manually from a tag:
 # published chart versions are not overwritten. There is no automatic rollback.
-# Production configuration and secrets stay on the machine (/opt/hammurapi-infra) and do not
+# Production configuration and secrets stay on the machine (/opt/installer) and do not
 # pass through the workflow; GitHub keeps only the access to the machine.
 name: deploy-prod
 on:
@@ -17,7 +17,7 @@ permissions: { contents: read, id-token: write }   # id-token for gcp-iap
 
 env:
   DEPLOY_TRANSPORT: ${{ vars.DEPLOY_TRANSPORT || 'ssh' }}
-  PROD_DIR: /opt/hammurapi-infra
+  PROD_DIR: /opt/installer
 
 jobs:
   # Charts hammurapi-core, hammurapi-web, nabu-core, nabu-web and landing in oci://ghcr.io/<organization>/charts:

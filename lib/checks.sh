@@ -6,7 +6,7 @@
 VM_URL="http://victoria-metrics-victoria-metrics-single-server:8428"
 VL_URL="http://victoria-logs-victoria-logs-single-server:9428"
 GRAFANA_URL="http://grafana"
-PROBE_TOPIC=hammurapi-infra-probe
+PROBE_TOPIC=installer-probe
 
 # Check results: name|ok|message or name|fail|message.
 CHECK_RESULTS=()
@@ -46,7 +46,7 @@ kind: Pod
 metadata:
   name: $CHECKS_PROBE
   namespace: $NS_OBSERVABILITY
-  labels: { app.kubernetes.io/name: checks-probe, app.kubernetes.io/managed-by: hammurapi-infra }
+  labels: { app.kubernetes.io/name: checks-probe, app.kubernetes.io/managed-by: installer }
 spec:
   restartPolicy: Never
   activeDeadlineSeconds: 900
@@ -69,7 +69,7 @@ kind: Pod
 metadata:
   name: $LOG_PROBE
   namespace: $NS_STORAGES
-  labels: { app.kubernetes.io/name: log-probe, app.kubernetes.io/managed-by: hammurapi-infra }
+  labels: { app.kubernetes.io/name: log-probe, app.kubernetes.io/managed-by: installer }
 spec:
   restartPolicy: Never
   activeDeadlineSeconds: 900
@@ -77,7 +77,7 @@ spec:
   containers:
     - name: probe
       image: $PROBE_BUSYBOX_IMAGE
-      command: ["sh", "-c", "while true; do echo hammurapi-infra-probe-$1; sleep 5; done"]
+      command: ["sh", "-c", "while true; do echo installer-probe-$1; sleep 5; done"]
 $(probe_resources 32Mi)
 EOF
 }
@@ -139,7 +139,7 @@ if [ "$MODE" = check ]; then
   s3 s3api head-bucket --bucket "$S3_bucket" >/dev/null 2>/tmp/err || { echo "S3: bucket $S3_bucket at $S3_endpoint is unreachable: $(tail -1 /tmp/err)"; exit 1; }
   exit 0
 fi
-key="hammurapi-infra-probe/$PROBE_ID"
+key="installer-probe/$PROBE_ID"
 echo "$PROBE_ID" | s3 s3 cp - "s3://$S3_bucket/$key" >/dev/null 2>/tmp/err || { echo "S3: write failed: $(tail -1 /tmp/err)"; exit 1; }
 s3 s3 cp "s3://$S3_bucket/$key" - 2>/tmp/err | grep -q "$PROBE_ID" || { echo "S3: read failed: $(tail -1 /tmp/err)"; exit 1; }
 s3 s3 rm "s3://$S3_bucket/$key" >/dev/null 2>/tmp/err || { echo "S3: delete failed: $(tail -1 /tmp/err)"; exit 1; }
@@ -158,7 +158,7 @@ kind: Job
 metadata:
   name: $name-$PROBE_RUN
   namespace: $NS_STORAGES
-  labels: { app.kubernetes.io/name: $name, app.kubernetes.io/managed-by: hammurapi-infra }
+  labels: { app.kubernetes.io/name: $name, app.kubernetes.io/managed-by: installer }
 spec:
   backoffLimit: 0
   activeDeadlineSeconds: 180
@@ -166,7 +166,7 @@ spec:
   template:
     metadata:
       # A label on the pod itself: check_pods of another run skips probes by it.
-      labels: { app.kubernetes.io/name: $name, app.kubernetes.io/managed-by: hammurapi-infra }
+      labels: { app.kubernetes.io/name: $name, app.kubernetes.io/managed-by: installer }
     spec:
       restartPolicy: Never
       containers:
@@ -254,7 +254,7 @@ check_pods() {
     # Pods of finished Jobs and probe pods do not count.
     if ! out=$(kc -n "$ns" wait --for=condition=Ready pod \
       --field-selector=status.phase!=Succeeded,status.phase!=Failed \
-      -l 'app.kubernetes.io/managed-by!=hammurapi-infra' --timeout="$CHECK_TIMEOUT" 2>&1); then
+      -l 'app.kubernetes.io/managed-by notin (installer,hammurapi-infra)' --timeout="$CHECK_TIMEOUT" 2>&1); then
       record pods fail "$ns: not all pods are ready: $(echo "$out" | grep -v 'condition met' | head -3 | tr '\n' ' ')"
       failed=1
     fi
@@ -304,7 +304,7 @@ check_logs() {
   # Time for Vector to find the new file and flush to VictoriaLogs.
   deadline=$((SECONDS + 120))
   while ((SECONDS < deadline)); do
-    found=$(probe_curl "$VL_URL/select/logsql/query" --data-urlencode "query=\"hammurapi-infra-probe-$id\"" \
+    found=$(probe_curl "$VL_URL/select/logsql/query" --data-urlencode "query=\"installer-probe-$id\"" \
       --data-urlencode limit=1 2>/dev/null | head -1 || true)
     [[ -n $found ]] && break
     sleep 5

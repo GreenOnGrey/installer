@@ -32,8 +32,8 @@ esac'
   iptables_stub
   LB_IP=192.168.49.200 EXT_IF=ens4 run bash "$FORWARD" apply
   [ "$status" -eq 0 ]
-  grep -q "^nat PREROUTING -i ens4 -p tcp -m multiport --dports 80,443 -m comment --comment hammurapi-ingress -j DNAT --to-destination 192.168.49.200$" "$RULES"
-  grep -q "^filter DOCKER-USER -d 192.168.49.200 -p tcp -m multiport --dports 80,443 -m comment --comment hammurapi-ingress -j ACCEPT$" "$RULES"
+  grep -q "^nat PREROUTING -i ens4 -p tcp -m multiport --dports 80,443 -m comment --comment greenongrey-ingress -j DNAT --to-destination 192.168.49.200$" "$RULES"
+  grep -q "^filter DOCKER-USER -d 192.168.49.200 -p tcp -m multiport --dports 80,443 -m comment --comment greenongrey-ingress -j ACCEPT$" "$RULES"
 }
 
 @test "PUB-08: a repeated apply (a Docker restart) creates no duplicates" {
@@ -41,7 +41,7 @@ esac'
   LB_IP=192.168.49.200 EXT_IF=ens4 bash "$FORWARD" apply
   LB_IP=192.168.49.200 EXT_IF=ens4 bash "$FORWARD" apply
   LB_IP=192.168.49.200 EXT_IF=ens4 bash "$FORWARD" apply
-  [ "$(grep -c hammurapi-ingress "$RULES")" -eq 2 ]
+  [ "$(grep -c greenongrey-ingress "$RULES")" -eq 2 ]
 }
 
 @test "PUB-07: after a reboot the address comes from the cache of up" {
@@ -68,7 +68,7 @@ esac'
   LB_IP=192.168.49.200 EXT_IF=ens4 bash "$FORWARD" apply
   run bash "$FORWARD" remove
   [ "$status" -eq 0 ]
-  not_grep -q hammurapi-ingress "$RULES"
+  not_grep -q greenongrey-ingress "$RULES"
   grep -q -- "--dport 22" "$RULES"
 }
 
@@ -83,9 +83,9 @@ esac'
 
 # mk_profile <start> <end> — a minikube profile with a MetalLB pool.
 mk_profile() {
-  mkdir -p "$MINIKUBE_HOME/profiles/hammurapi"
+  mkdir -p "$MINIKUBE_HOME/profiles/greenongrey"
   printf '{"KubernetesConfig":{"LoadBalancerStartIP":"%s","LoadBalancerEndIP":"%s"}}\n' "$1" "$2" \
-    >"$MINIKUBE_HOME/profiles/hammurapi/config.json"
+    >"$MINIKUBE_HOME/profiles/greenongrey/config.json"
 }
 
 @test "AUTO-10: the MetalLB pool is saved in the profile: answers to minikube prompts one by one" {
@@ -95,11 +95,11 @@ mk_profile() {
   stub minikube 'case "$*" in
     *"addons configure metallb"*) read -r s; read -r e
       printf "{\"KubernetesConfig\":{\"LoadBalancerStartIP\":\"%s\",\"LoadBalancerEndIP\":\"%s\"}}" "$s" "$e" \
-        >"$MINIKUBE_HOME/profiles/hammurapi/config.json" ;;
+        >"$MINIKUBE_HOME/profiles/greenongrey/config.json" ;;
   esac'
   run metallb_addon 192.168.49.200 192.168.49.209
   [ "$status" -eq 0 ]
-  called "minikube addons configure metallb -p hammurapi"
+  called "minikube addons configure metallb -p greenongrey"
   [ "$(metallb_pool)" = 192.168.49.200-192.168.49.209 ]
 }
 
@@ -108,7 +108,7 @@ mk_profile() {
   mk_profile 192.168.49.200 192.168.49.209
   run metallb_addon 192.168.49.200 192.168.49.209
   [ "$status" -eq 0 ]
-  called "minikube addons enable metallb -p hammurapi"
+  called "minikube addons enable metallb -p greenongrey"
   not_called "addons configure"
 }
 
@@ -256,4 +256,24 @@ config_step() {
   [[ -f $wf ]] && files+=("$wf")
   bad=$(grep -hE '^\s*(-\s*)?uses:\s*[^./]' "${files[@]}" | grep -vE '@[0-9a-f]{40}(\s|$)' || true)
   [ -z "$bad" ] || { echo "$bad"; return 1; }
+}
+
+@test "FTR.INFRA.INST-0001 R28: the rule comment follows UNIT_PREFIX: an upgrade of prod replaces its rules" {
+  iptables_stub
+  export FORWARD_STATE=$BATS_TEST_TMPDIR/state
+  mkdir -p "$FORWARD_STATE"
+  echo hammurapi >"$FORWARD_STATE/unit-prefix"
+  LB_IP=192.168.49.200 EXT_IF=ens4 run bash "$FORWARD" apply
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -- '--comment hammurapi-ingress' "$RULES")" -eq 2 ]
+  LB_IP=192.168.49.200 EXT_IF=ens4 run bash "$FORWARD" apply
+  [ "$(grep -c -- '--comment hammurapi-ingress' "$RULES")" -eq 2 ]
+  not_grep -q greenongrey-ingress "$RULES"
+}
+
+@test "FTR.INFRA.INST-0001 R28: CERT_NAME names the certificate and its secret" {
+  load_script
+  CERT_NAME=hammurapi-public PUBLIC_DOMAIN=x.example run public_certificate
+  [ "$status" -eq 0 ]
+  [[ $output == *"name: hammurapi-public"* && $output == *"secretName: hammurapi-public"* ]]
 }

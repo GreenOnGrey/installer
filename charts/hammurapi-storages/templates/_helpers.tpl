@@ -1,5 +1,5 @@
 {{- define "storages.labels" -}}
-app.kubernetes.io/part-of: hammurapi-infra
+app.kubernetes.io/part-of: installer
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 {{- end }}
@@ -41,7 +41,7 @@ metadata:
   labels:
     {{- include "storages.labels" $root | nindent 4 }}
     kubernetes.io/service-name: {{ .name }}
-    endpointslice.kubernetes.io/managed-by: hammurapi-infra
+    endpointslice.kubernetes.io/managed-by: installer
 addressType: IPv4
 ports:
   - { name: {{ .portName }}, port: {{ $v.external.port }}, protocol: TCP }

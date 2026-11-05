@@ -8,7 +8,7 @@ DEPLOY="$BATS_TEST_DIRNAME/../../bin/hammurapi-deploy"
 
 setup() {
   setup_stubs
-  export DEPLOY_LOCK_DIR=$BATS_TEST_TMPDIR/lock HAMMURAPI_INFRA_CONFIG=/dev/null
+  export DEPLOY_LOCK_DIR=$BATS_TEST_TMPDIR/lock INSTALLER_CONFIG=/dev/null
   export DEPLOY_LOGS=$BATS_TEST_TMPDIR/logs APPLIED=$BATS_TEST_TMPDIR/applied
   mkdir -p "$DEPLOY_LOCK_DIR" "$DEPLOY_LOGS" "$APPLIED"
   # An empty TMPDIR: no files with secrets may stay in it after a rollout.

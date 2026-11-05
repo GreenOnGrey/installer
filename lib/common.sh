@@ -74,6 +74,9 @@ env_keys() {
   sed -nE 's/^[[:space:]]*([A-Z_][A-Z0-9_]*)=.*/\1/p' "$1"
 }
 
+# installer_config — the config file of bin/*-deploy; HAMMURAPI_INFRA_CONFIG is its old name.
+installer_config() { echo "${INSTALLER_CONFIG:-${HAMMURAPI_INFRA_CONFIG:-/opt/installer/local.env}}"; }
+
 # load_config — defaults.env → local.env → environment (flags apply earlier,
 # by exporting variables at the entry point).
 load_config() {
@@ -149,6 +152,15 @@ require_secret() {
 }
 
 # validate_config — modes and required parameters of external storages.
+# validate_names — these names go into paths of files written and deleted as root.
+validate_names() {
+  local key
+  for key in UNIT_PREFIX CERT_NAME; do
+    [[ ${!key} =~ ^[a-z0-9][a-z0-9-]*$ ]] ||
+      die "$E_USAGE" "$key must hold lowercase letters, digits and hyphens, not '${!key}'"
+  done
+}
+
 validate_config() {
   local m
   case ${STAND_AUTOSTART:-true} in
@@ -159,6 +171,7 @@ validate_config() {
     ((${IMAGE_GC_LOW:-80} >= ${IMAGE_GC_HIGH:-85} || ${IMAGE_GC_HIGH:-85} > 100)); then
     die "$E_USAGE" "IMAGE_GC_LOW and IMAGE_GC_HIGH are percentages, IMAGE_GC_LOW < IMAGE_GC_HIGH ≤ 100"
   fi
+  validate_names
   [[ ${IMAGE_GC_MAX_AGE:-336h} =~ ^[0-9]+[hms]$ ]] ||
     die "$E_USAGE" "IMAGE_GC_MAX_AGE must be a duration like 336h, not '$IMAGE_GC_MAX_AGE'"
   for m in POSTGRES_MODE KAFKA_MODE S3_MODE; do

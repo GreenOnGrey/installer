@@ -36,7 +36,23 @@ write_config() {
   done < <({ env_keys "$ROOT/config/defaults.env"; printf '%s\n' "${MCP_OPTIONS[@]}"; } | sort -u)
   jq -n --arg ns "$NS_STATE" --arg name "$STATE_CONFIG_CM" --argjson data "$data" \
     '{apiVersion: "v1", kind: "ConfigMap", metadata: {name: $name, namespace: $ns,
-      labels: {"app.kubernetes.io/managed-by": "hammurapi-infra"}}, data: $data}' | apply_stdin
+      labels: {"app.kubernetes.io/managed-by": "installer"}}, data: $data}' | apply_stdin
+}
+
+# migrate_names — what an older tag labelled gets the current label (FTR.INFRA.INST-0001 tech §9).
+# deploy_public applies certificates and issuers again; nothing reads the label on them.
+migrate_names() {
+  local out kind ns name
+  if ! out=$(kc get secret,configmap -A -l app.kubernetes.io/managed-by=hammurapi-infra -o json 2>/dev/null |
+    jq -r '.items[] | "\(.kind) \(.metadata.namespace) \(.metadata.name)"'); then
+    warn "failed to list resources with the old label, the next up tries again"
+    return 0
+  fi
+  while read -r kind ns name; do
+    [[ -n $kind ]] || continue
+    kc -n "$ns" label --overwrite "$kind/$name" app.kubernetes.io/managed-by=installer >/dev/null ||
+      warn "failed to relabel $ns/$kind/$name, the next up tries again"
+  done <<<"$out"
 }
 
 # restore_config [strict] — MCP settings from the cluster where this run does not set them: keys of

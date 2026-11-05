@@ -87,6 +87,8 @@ parse_args() {
 
 # --- up ---
 
+OLD_LOCK_FILE=${OLD_LOCK_FILE:-/var/lock/hammurapi-infra.lock}
+
 acquire_lock() {
   if [[ ! -w $LOCK_FILE ]]; then
     as_root touch "$LOCK_FILE"
@@ -94,6 +96,11 @@ acquire_lock() {
   fi
   exec 9>>"$LOCK_FILE"
   flock -n 9 || die "$E_LOCKED" "another up is already running on this machine ($LOCK_FILE)"
+  # An up of a tag before the rename holds the old file (FTR.INFRA.INST-0001 tech §9).
+  if [[ -w $OLD_LOCK_FILE ]]; then
+    exec 8>>"$OLD_LOCK_FILE"
+    flock -n 8 || die "$E_LOCKED" "another up is already running on this machine ($OLD_LOCK_FILE)"
+  fi
 }
 
 collect_diagnostics() {
@@ -183,10 +190,12 @@ cmd_up() {
   exec > >(tee -a "$RUN_DIR/run.log") 2>&1
   trap 'on_up_exit $?' EXIT
   log "run log: $RUN_DIR/run.log"
+  check_single_profile
   check_host
   acquire_lock
   install_prereqs
   cluster_up
+  migrate_names
   restore_config strict
   validate_config
   deploy_all
@@ -394,7 +403,10 @@ main() {
       cmd_status
       ;;
     creds) cmd_creds ;;
-    down) cmd_down ;;
+    down)
+      validate_names
+      cmd_down
+      ;;
   esac
 }
 

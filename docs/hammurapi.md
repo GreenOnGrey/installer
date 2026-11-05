@@ -53,7 +53,7 @@ In production, public access parameters are GitHub variables of the repository `
 
 A manual `up` on the machine does not get these values and takes them from `local.env`. If they are not there, such an `up` skips the step `public`, and Traefik and the certificate already deployed stay.
 
-`/opt/hammurapi-infra/local.env` (or `config/local.env` of a working copy) for a manual `up`:
+`/opt/installer/local.env` (or `config/local.env` of a working copy) for a manual `up`:
 
 ```bash
 PUBLIC_ACCESS=true
@@ -70,10 +70,10 @@ The next `up` (or a rollout of an `installer` tag) adds the step `public`:
 
 1. MetalLB (a minikube addon) with the pool `<minikube subnet>.200–.209`.
 2. cert-manager and the `ClusterIssuer`s `letsencrypt` and `letsencrypt-staging` (HTTP-01 through Traefik).
-3. Traefik in the namespace `ingress`: a `LoadBalancer` service, HTTP → HTTPS, the default certificate `hammurapi-public`.
+3. Traefik in the namespace `ingress`: a `LoadBalancer` service, HTTP → HTTPS, the default certificate `greenongrey-public`.
 4. One certificate for `web.`, `api.`, `grafana.<domain>`: issued once and renewed by cert-manager.
 5. Ingress of Grafana and sign-in through GitHub: organization members get the role Editor and others cannot sign in. The local administrator (`creds`) stays for emergency access.
-6. The systemd unit `hammurapi-ingress-forward`: iptables rules forward 80/443 of the external interface to the Traefik address. The rules come back after a machine reboot and a Docker restart and create no duplicates.
+6. The systemd unit `greenongrey-ingress-forward`: iptables rules forward 80/443 of the external interface to the Traefik address. The rules come back after a machine reboot and a Docker restart and create no duplicates.
 
 `up` checks that `https://grafana.<domain>` answers with a certificate from `ACME_ISSUER` and that HTTP redirects to HTTPS. The summary and `status --json` show the domain and the Traefik address.
 
@@ -126,7 +126,7 @@ The reusable workflow `deploy-component.yml` lives in the public repository `ham
 
 ## 4. Releases and rollout
 
-1. A release tag `vX.Y.Z` in `installer` runs `deploy-prod.yml`. First the charts `oci://ghcr.io/greenongrey/charts/{hammurapi,nabu}-{core,web}:X.Y.Z` are published (the chart version equals the stand's version). Then, only on success, the tag rolls out to the stand with `bin/hammurapi-deploy` and `bin/nabu-deploy`, and the machine takes the scripts from `/opt/hammurapi-infra/current`. A manual run from a tag (a repeat or a rollback) does not overwrite published chart versions.
+1. A release tag `vX.Y.Z` in `installer` runs `deploy-prod.yml`. First the charts `oci://ghcr.io/greenongrey/charts/{hammurapi,nabu}-{core,web}:X.Y.Z` are published (the chart version equals the stand's version). Then, only on success, the tag rolls out to the stand with `bin/hammurapi-deploy` and `bin/nabu-deploy`, and the machine takes the scripts from `/opt/installer/current`. A manual run from a tag (a repeat or a rollback) does not overwrite published chart versions.
 2. A tag `vX.Y.Z` in `hammurapi`, if `deploy-component.yml` changed.
 3. In `hammurapi-core` and `hammurapi-web`, set `DEPLOY_WORKFLOW_REF` (the `hammurapi` tag from step 2) and `CHART_VERSION` (step 1) in `deploy/versions.env`, and run `deploy/sync-ref.sh`.
 4. A tag `vX.Y.Z` in `hammurapi-core`, then in `hammurapi-web`.

@@ -5,9 +5,8 @@
 # Enabled by PUBLIC_ACCESS=true; without it the stand works as in FTR.HMR.INFRA-0001.
 
 readonly NS_INGRESS=ingress NS_CERT_MANAGER=cert-manager
-FORWARD_BIN=${FORWARD_BIN:-/usr/local/lib/hammurapi-infra/ingress-forward}
-FORWARD_UNIT=${FORWARD_UNIT:-/etc/systemd/system/hammurapi-ingress-forward.service}
-FORWARD_STATE=${FORWARD_STATE:-/var/lib/hammurapi-infra}
+FORWARD_BIN=${FORWARD_BIN:-/usr/local/lib/installer/ingress-forward}
+FORWARD_STATE=${FORWARD_STATE:-/var/lib/installer}
 
 PUBLIC_IP_RESOLVED="" PUBLIC_DOMAIN="" LB_IP=""
 
@@ -154,7 +153,7 @@ apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
   name: $name
-  labels: { app.kubernetes.io/managed-by: hammurapi-infra }
+  labels: { app.kubernetes.io/managed-by: installer }
 spec:
   acme:
     email: $ACME_EMAIL
@@ -176,11 +175,11 @@ public_certificate() {
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: hammurapi-public
+  name: $CERT_NAME
   namespace: $NS_INGRESS
-  labels: { app.kubernetes.io/managed-by: hammurapi-infra }
+  labels: { app.kubernetes.io/managed-by: installer }
 spec:
-  secretName: hammurapi-public
+  secretName: $CERT_NAME
   issuerRef: { kind: ClusterIssuer, name: ${ACME_ISSUER:-letsencrypt} }
   dnsNames:
 EOF
@@ -199,14 +198,16 @@ public_state_manifest() {
 
 # install_forward — the script and systemd unit forwarding 80/443 to the Traefik address.
 install_forward() {
+  local unit=$UNIT_PREFIX-ingress-forward
   as_root install -d -m 755 "$(dirname "$FORWARD_BIN")" "$FORWARD_STATE"
   as_root install -m 755 "$ROOT/bin/ingress-forward" "$FORWARD_BIN"
   echo "$LB_IP" | as_root tee "$FORWARD_STATE/lb-ip" >/dev/null
-  as_root tee "$FORWARD_UNIT" >/dev/null <<EOF
+  echo "$UNIT_PREFIX" | as_root tee "$FORWARD_STATE/unit-prefix" >/dev/null
+  as_root tee "$UNIT_DIR/$unit.service" >/dev/null <<EOF
 # Forwards TCP 80/443 of the external interface to the Traefik address in the minikube network
 # (FTR.HMR.INFRA-0002). Installed by installer up.
 [Unit]
-Description=Hammurapi: forwarding of 80/443 to the minikube ingress
+Description=GreenOnGrey: forwarding of 80/443 to the minikube ingress
 After=docker.service
 Requires=docker.service
 PartOf=docker.service
@@ -223,10 +224,10 @@ ExecStop=$FORWARD_BIN remove
 WantedBy=multi-user.target docker.service
 EOF
   as_root systemctl daemon-reload
-  as_root systemctl enable hammurapi-ingress-forward.service >/dev/null 2>&1
+  as_root systemctl enable "$unit.service" >/dev/null 2>&1
   # restart: rules are recreated with the current address.
-  as_root systemctl restart hammurapi-ingress-forward.service ||
-    die "$E_DEPLOY" "failed to apply the forwarding rules, see journalctl -u hammurapi-ingress-forward"
+  as_root systemctl restart "$unit.service" ||
+    die "$E_DEPLOY" "failed to apply the forwarding rules, see journalctl -u $unit"
 }
 
 deploy_public() {
@@ -254,7 +255,8 @@ deploy_public() {
   cluster_issuers | apply_stdin
 
   release traefik "$NS_INGRESS" traefik/traefik "$TRAEFIK_CHART_VERSION" traefik.yaml \
-    --set-string "service.spec.loadBalancerIP=$first"
+    --set-string "service.spec.loadBalancerIP=$first" \
+    --set-string "tlsStore.default.defaultCertificate.secretName=$CERT_NAME"
   LB_IP=$(kc -n "$NS_INGRESS" get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
   [[ -n $LB_IP ]] || die "$E_DEPLOY" "MetalLB gave no address to the traefik service"
   log "Traefik: $LB_IP"
@@ -265,8 +267,8 @@ deploy_public() {
   local hosts
   hosts=$(public_hosts)
   log "certificate for ${hosts// /., }.$PUBLIC_DOMAIN (${ACME_ISSUER:-letsencrypt})"
-  if ! kc -n "$NS_INGRESS" wait certificate/hammurapi-public --for=condition=Ready --timeout=5m >/dev/null 2>&1; then
-    kc -n "$NS_INGRESS" describe certificate hammurapi-public >"$RUN_DIR/certificate.txt" 2>&1 || true
+  if ! kc -n "$NS_INGRESS" wait "certificate/$CERT_NAME" --for=condition=Ready --timeout=5m >/dev/null 2>&1; then
+    kc -n "$NS_INGRESS" describe certificate "$CERT_NAME" >"$RUN_DIR/certificate.txt" 2>&1 || true
     kc get challenges -A -o wide >>"$RUN_DIR/certificate.txt" 2>&1 || true
     die "$E_DEPLOY" "the certificate was not issued in 5 minutes: check that ports 80/443 of the machine are open from outside and *.$PUBLIC_DOMAIN points to $PUBLIC_IP_RESOLVED (see $RUN_DIR/certificate.txt)"
   fi

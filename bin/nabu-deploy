@@ -6,7 +6,7 @@
 # FTR.NAB.CMN-0004), shared storages of the stand with a
 # separate database, bucket and topic prefix. Run by the reusable
 # workflow deploy-component.yml of the repository nabu over SSH on the machine, like
-# hammurapi-deploy: both scripts are in /opt/hammurapi-infra/current/bin and take
+# hammurapi-deploy: both scripts are in /opt/installer/current/bin and take
 # stand functions (kc, hm, logging, configuration) from lib/ of the same release.
 #   stdin   JSON with configuration and secrets; read into memory, it never reaches disk,
 #           command arguments or logs
@@ -31,7 +31,6 @@ REGISTRY=${REGISTRY:-ghcr.io}
 DEPLOY_LOCK_DIR=${DEPLOY_LOCK_DIR:-/var/lock}
 STATUS_CMD=${STATUS_CMD:-"$ROOT/installer"}
 NS_INGRESS=${NS_INGRESS:-ingress}
-CERT_NAME=${CERT_NAME:-hammurapi-public}
 WEB_HOST=${NABU_WEB_HOST:-nabu}
 API_HOST=${NABU_API_HOST:-nabu-api}
 PG_ROLE=${NABU_PG_ROLE:-nabu}
@@ -107,7 +106,7 @@ gen_secret() { openssl rand -hex 32; }
 check_stand() {
   step stand
   local st cfg=()
-  [[ -f ${HAMMURAPI_INFRA_CONFIG:-} ]] && cfg=(--config "$HAMMURAPI_INFRA_CONFIG")
+  [[ -f ${INSTALLER_CONFIG:-} ]] && cfg=(--config "$INSTALLER_CONFIG")
   st=$(INSTALLER_STAND_ONLY=1 bash "$STATUS_CMD" status --json --no-color "${cfg[@]}" 2>/dev/null) || true
   jq -e . >/dev/null 2>&1 <<<"$st" || fail "$E_STAND" "the stand does not answer: installer status --json"
   if [[ $(jq -r '.ok' <<<"$st") != true ]]; then
@@ -327,7 +326,7 @@ diagnostics() {
   for d in api worker agent relay web; do
     kc -n "$NS" logs "deploy/$d" --all-containers --tail=300 >"$dir/$d.log" 2>&1 || true
   done
-  logs=${DEPLOY_LOGS:-/opt/hammurapi-infra/logs}
+  logs=${DEPLOY_LOGS:-/opt/installer/logs}
   [[ -d $logs && -w $logs ]] || logs=$ROOT/logs
   mkdir -p "$logs"
   DIAG=$logs/deploy-$COMPONENT-$ts.tar.gz
@@ -392,8 +391,8 @@ main() {
   COLOR=0
   setup_color
   parse_args "$@"
-  HAMMURAPI_INFRA_CONFIG=${HAMMURAPI_INFRA_CONFIG:-/opt/hammurapi-infra/local.env}
-  load_config "$ROOT" "$HAMMURAPI_INFRA_CONFIG"
+  INSTALLER_CONFIG=$(installer_config)
+  load_config "$ROOT" "$INSTALLER_CONFIG"
   acquire_deploy_lock
   read_payload
   check_stand

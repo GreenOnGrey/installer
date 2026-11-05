@@ -52,7 +52,7 @@ Grafana opens through an SSH tunnel, since nothing is published outside:
 # on your computer
 ssh -L 3000:localhost:3000 <user>@<machine address>
 # on the machine, in this session
-kubectl --context hammurapi -n observability port-forward svc/grafana 3000:80
+kubectl --context greenongrey -n observability port-forward svc/grafana 3000:80
 # then open http://localhost:3000; the username and password are in ./installer creds
 ```
 
@@ -69,9 +69,9 @@ Flags: `--config <file>` (default: `config/local.env`), `--verbose`, `--no-color
 
 Exit codes: `0` success, `2` wrong call or configuration, `10` unsuitable machine, `11` a dependency is not installed or its checksum does not match, `12` the cluster did not start, `13` a release was not deployed, `14` an external storage is unreachable, `15` checks failed, `16` cancelled, `17` another `up` is running.
 
-**Machine reboots.** `up` installs the systemd unit `hammurapi-stand`. At boot it starts the minikube profile (its container has no restart policy) and waits for the pods. Components come back on their own, since their objects and volumes live in the profile. At shutdown the unit stops the cluster cleanly. See the outcome with `journalctl -u hammurapi-stand`. The unit `hammurapi-ingress-forward` restores port forwarding for public access. To turn autostart off, set `STAND_AUTOSTART=false` and run `up`. `down` removes the unit.
+**Machine reboots.** `up` installs the systemd unit `greenongrey-stand`. At boot it starts the minikube profile (its container has no restart policy) and waits for the pods. Components come back on their own, since their objects and volumes live in the profile. At shutdown the unit stops the cluster cleanly. See the outcome with `journalctl -u greenongrey-stand`. The unit `hammurapi-ingress-forward` restores port forwarding for public access. To turn autostart off, set `STAND_AUTOSTART=false` and run `up`. `down` removes the unit.
 
-**Old images.** minikube turns off image garbage collection in kubelet, so old tags of Nabu and Hammurapi pile up on the node's disk. `up` and the unit `hammurapi-stand` turn it back on in the kubelet configuration after every cluster start. When image disk usage goes above `IMAGE_GC_HIGH` % (85), unused images are removed down to `IMAGE_GC_LOW` % (80), and an unused image older than `IMAGE_GC_MAX_AGE` (`336h`, 14 days) is removed in any case. Images of running pods stay, including those preloaded by DaemonSets. Kubelet restarts only if the setting changed, and pods keep running.
+**Old images.** minikube turns off image garbage collection in kubelet, so old tags of Nabu and Hammurapi pile up on the node's disk. `up` and the unit `greenongrey-stand` turn it back on in the kubelet configuration after every cluster start. When image disk usage goes above `IMAGE_GC_HIGH` % (85), unused images are removed down to `IMAGE_GC_LOW` % (80), and an unused image older than `IMAGE_GC_MAX_AGE` (`336h`, 14 days) is removed in any case. Images of running pods stay, including those preloaded by DaemonSets. Kubelet restarts only if the setting changed, and pods keep running.
 
 The log of each `up` is `logs/<time>/run.log`. On failure `diagnostics/` sits next to it, with events, `describe` of failing pods and `helm status` of releases.
 
@@ -112,7 +112,7 @@ Set `POSTGRES_MODE`, `KAFKA_MODE` or `S3_MODE` to `external`, separately for eac
 
 Passwords and keys go only through files (`POSTGRES_PASSWORD_FILE=/secure/pg-password`) or environment variables. A password written directly in `local.env` stops the script with code 2.
 
-For an external Kafka, the write and read check uses the topic `hammurapi-infra-probe`. Create it in advance if automatic topic creation is off. With `OAUTHBEARER` the probe checks only the TCP connection, because the application obtains the token itself.
+For an external Kafka, the write and read check uses the topic `installer-probe`. Create it in advance if automatic topic creation is off. With `OAUTHBEARER` the probe checks only the TCP connection, because the application obtains the token itself.
 
 An example for Google Cloud (Cloud SQL, Managed Service for Apache Kafka, Cloud Storage) is in [docs/gcp.md](docs/gcp.md).
 
@@ -165,9 +165,9 @@ While access is off, the tools answer with an error saying what to turn on.
 Production is a stand in Google Cloud. The workflow [`deploy-prod`](.github/workflows/deploy-prod.yml) rolls out a release tag:
 
 - it runs on a push of a tag `vX.Y.Z`. A manual run from a tag repeats a rollout or returns to an earlier version (there is no automatic rollback), and `production` accepts only tags, so choose the tag under **Use workflow from**;
-- it hands the production machine an export of the tag (`git archive`) over the same SSH, unpacks it into `/opt/hammurapi-infra/releases/<tag>` and runs `up`. After a success `current` points to that tag, and the last 5 exports are kept. The production machine needs no access to GitHub, because deploy keys are forbidden by the organization's policy;
-- `/opt/hammurapi-infra/local.env` and secret files stay on the machine and are not passed through the workflow. The exceptions are public access, Grafana sign-in through GitHub and MCP servers (below): their parameters reach `up` through the stdin of the SSH session and are not written to disk. Logs of all runs are in `/opt/hammurapi-infra/logs`;
-- rollouts run one at a time (`concurrency`), and `/var/lock/hammurapi-infra.lock` blocks a parallel `up` on the machine (code 17);
+- it hands the production machine an export of the tag (`git archive`) over the same SSH, unpacks it into `/opt/installer/releases/<tag>` and runs `up`. After a success `current` points to that tag, and the last 5 exports are kept. The production machine needs no access to GitHub, because deploy keys are forbidden by the organization's policy;
+- `/opt/installer/local.env` and secret files stay on the machine and are not passed through the workflow. The exceptions are public access, Grafana sign-in through GitHub and MCP servers (below): their parameters reach `up` through the stdin of the SSH session and are not written to disk. Logs of all runs are in `/opt/installer/logs`;
+- rollouts run one at a time (`concurrency`), and `/var/lock/installer.lock` blocks a parallel `up` on the machine (code 17);
 - the outcome is the `status` summary in the run's report. The deployed tag shows in `status` (ConfigMap `installer/installer-version`). The log of each run stays on the machine: the repository is public, so logs are not uploaded as artifacts.
 
 Settings of the GitHub environment `production`:

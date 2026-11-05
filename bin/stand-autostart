@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # stand-autostart start | stop — the minikube cluster of the stand on machine boot and
-# shutdown. Run by the systemd unit hammurapi-stand as the user of the stand;
+# shutdown. Run by the systemd unit <prefix>-stand as the user of the stand;
 # `installer up` installs the unit.
 #   start — minikube start of the profile (the minikube container has no restart policy,
 #           so it stays stopped after a reboot); components of the stand come back on
@@ -12,7 +12,7 @@
 # the profile is gone (down), both modes do nothing.
 set -euo pipefail
 
-MK_PROFILE=${MK_PROFILE:-hammurapi}
+MK_PROFILE=${MK_PROFILE:-greenongrey}
 DOCKER_WAIT=${DOCKER_WAIT:-120}     # seconds: docker.service is active before its API answers
 PODS_TIMEOUT=${PODS_TIMEOUT:-15m}
 IMAGE_GC_HIGH=${IMAGE_GC_HIGH:-85}

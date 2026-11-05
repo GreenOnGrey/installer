@@ -55,7 +55,7 @@ setup() {
 @test "CMD-04 (U): down --yes: minikube delete without a question" {
   run bash "$SCRIPT" down --yes --no-color
   [ "$status" -eq 0 ]
-  called "minikube delete -p hammurapi"
+  called "minikube delete -p greenongrey"
 }
 
 @test "CMD-06: the summary of up: versions, addresses, tunnel, port-forward, creds" {
@@ -99,6 +99,6 @@ setup() {
   MEM_REQUESTED=100 MEM_ALLOCATABLE=400
   run status_json Running 1
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.profile.name == "hammurapi" and .version.tag == "v1.4.0" and (.releases | length) == 1
+  echo "$output" | jq -e '.profile.name == "greenongrey" and .version.tag == "v1.4.0" and (.releases | length) == 1
     and .pods[0].ready == true and .checks[1].ok == false and .resources.requestedPercent == 25 and .ok == false'
 }
