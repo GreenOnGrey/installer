@@ -82,12 +82,31 @@ $(probe_resources 32Mi)
 EOF
 }
 
-# Container scripts of the storage probe. MODE=check tests access only
-# (before the deploy, external mode), MODE=full writes and reads.
+# Kubernetes reduces $$ to $ in container arguments, so the scripts have none.
+# Container scripts of the storage probe. MODE=check tests what products need before the deploy
+# (external mode, FTR.INFRA.INST-0001 R15, R16), MODE=full writes and reads.
 readonly PG_PROBE='
 export PGHOST="$PG_host" PGPORT="$PG_port" PGUSER="$PG_username" PGPASSWORD="$PG_password" PGDATABASE="$PG_database" PGSSLMODE="$PG_sslmode" PGCONNECT_TIMEOUT=10
 if [ "$MODE" = check ]; then
   pg_isready -q -t 10 || { echo "Postgres: $PG_host:$PG_port is unreachable"; exit 1; }
+  # bin/nabu-deploy creates the database of Nabu unless it exists, and always sets the password of its role.
+  out=$(psql -tA -F" " -v ext=vector -v db="$NABU_DB" 2>&1 <<"SQL"
+select (select count(*) from pg_available_extensions where name = :'"'"'ext'"'"'),
+  (select rolcreatedb or rolsuper from pg_roles where rolname = current_user),
+  (select rolcreaterole or rolsuper from pg_roles where rolname = current_user),
+  exists (select from pg_database where datname = :'"'"'db'"'"');
+SQL
+  )
+  case "$out" in
+    [01]" "[tf]" "[tf]" "[tf]) ;;
+    *"authentication failed"*) echo "Postgres: authentication failed"; exit 1 ;;
+    *) echo "Postgres: $(echo "$out" | head -1)"; exit 1 ;;
+  esac
+  set -- $out
+  [ "$1" = 1 ] || { echo "Postgres: the extension vector is not available at $PG_host: install pgvector"; exit 1; }
+  [ "$2" = t ] || [ "$4" = t ] || { echo "Postgres: $PG_username cannot create databases and database $NABU_DB does not exist: grant CREATEDB or create it"; exit 1; }
+  [ "$3" = t ] || { echo "Postgres: $PG_username has no CREATEROLE: the rollout of Nabu creates role $NABU_ROLE and sets its password"; exit 1; }
+  echo "Postgres: vector, database and role of Nabu — ok"
   exit 0
 fi
 out=$(psql -tAc "select 1" 2>&1)
@@ -136,7 +155,18 @@ export HOME=/tmp AWS_ACCESS_KEY_ID="$S3_access_key" AWS_SECRET_ACCESS_KEY="$S3_s
 [ "$S3_path_style" = true ] && aws configure set default.s3.addressing_style path
 s3() { aws --endpoint-url "$S3_endpoint" "$@"; }
 if [ "$MODE" = check ]; then
-  s3 s3api head-bucket --bucket "$S3_bucket" >/dev/null 2>/tmp/err || { echo "S3: bucket $S3_bucket at $S3_endpoint is unreachable: $(tail -1 /tmp/err)"; exit 1; }
+  key=".installer-check/$PROBE_ID"
+  for b in $S3_BUCKETS; do
+    s3 s3api head-bucket --bucket "$b" >/dev/null 2>/tmp/err || { echo "S3: bucket $b at $S3_endpoint does not exist or is unreachable: $(tail -1 /tmp/err)"; exit 1; }
+    echo "$PROBE_ID" | s3 s3 cp - "s3://$b/$key" >/dev/null 2>/tmp/err || { echo "S3: bucket $b: write failed: $(tail -1 /tmp/err)"; exit 1; }
+    if ! s3 s3 cp "s3://$b/$key" - 2>/tmp/err | grep -q "$PROBE_ID"; then
+      s3 s3 rm "s3://$b/$key" >/dev/null 2>&1 || stays=", $key stays"
+      echo "S3: bucket $b: read failed$stays: $(tail -1 /tmp/err)"
+      exit 1
+    fi
+    s3 s3 rm "s3://$b/$key" >/dev/null 2>/tmp/err || { echo "S3: bucket $b: delete failed, $key stays: $(tail -1 /tmp/err)"; exit 1; }
+  done
+  echo "S3: write, read and delete in $S3_BUCKETS — ok"
   exit 0
 fi
 key="installer-probe/$PROBE_ID"
@@ -179,7 +209,10 @@ EOF
           args:
           - |
 $(yaml_block "$PG_PROBE")
-          env: [{ name: MODE, value: $mode }]
+          env:
+            - { name: MODE, value: $mode }
+            - { name: NABU_DB, value: "${NABU_PG_DB:-nabu}" }
+            - { name: NABU_ROLE, value: "${NABU_PG_ROLE:-nabu}" }
           envFrom: [{ prefix: PG_, secretRef: { name: postgres-conn } }]
           resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { cpu: 200m, memory: 128Mi } }
 EOF
@@ -205,7 +238,10 @@ EOF
           args:
           - |
 $(yaml_block "$S3_PROBE")
-          env: [{ name: MODE, value: $mode }, { name: PROBE_ID, value: "$id" }]
+          env:
+            - { name: MODE, value: $mode }
+            - { name: PROBE_ID, value: "$id" }
+            - { name: S3_BUCKETS, value: "$S3_BUCKET $(nabu_bucket)" }
           envFrom: [{ prefix: S3_, secretRef: { name: s3-conn } }]
           resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
 EOF

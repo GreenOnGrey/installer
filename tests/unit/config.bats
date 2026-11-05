@@ -220,3 +220,108 @@ setup() {
   [ "$status" -eq 2 ]
   [[ $output == *OBSERVABILITY* ]]
 }
+
+# --- Probes of external storages: the container scripts with stubs (R15, R16) ---
+
+# probe <script> — runs a container script as the Job does.
+probe() { MODE=check sh -c "$1"; }
+
+s3_stub() {
+  stub aws '
+case "$*" in
+  *configure*) exit 0 ;;
+  *"head-bucket --bucket ${NO_BUCKET:-none}"*) echo "An error occurred (404)" >&2; exit 1 ;;
+  *head-bucket*) exit 0 ;;
+  *"s3 cp - s3://"*) cat >/dev/null; [[ -z $NO_WRITE ]] || { echo "AccessDenied" >&2; exit 1; } ;;
+  *"s3 cp s3://"*) [[ -z $NO_READ ]] || exit 1; echo "$PROBE_ID" ;;
+  *"s3 rm"*) [[ -z $NO_DELETE ]] || { echo "AccessDenied" >&2; exit 1; } ;;
+esac'
+  export S3_endpoint=https://s3.example S3_access_key=a S3_secret_key=b S3_region=r S3_path_style=true PROBE_ID=id1 S3_BUCKETS="b1 b2"
+}
+
+@test "RES-03 (U): writes, reads and deletes the object in each bucket, nothing stays" {
+  s3_stub
+  run probe "$S3_PROBE"
+  [ "$status" -eq 0 ]
+  called "s3 cp - s3://b1/.installer-check/id1"
+  called "s3 rm s3://b1/.installer-check/id1"
+  called "s3 rm s3://b2/.installer-check/id1"
+}
+
+@test "RES-03 (U): no bucket: the bucket is named" {
+  s3_stub
+  NO_BUCKET=b2 run probe "$S3_PROBE"
+  [ "$status" -eq 1 ]
+  [[ $output == *"bucket b2 at https://s3.example does not exist"* ]]
+}
+
+@test "RES-03 (U): read-only keys: the bucket and the operation are named" {
+  s3_stub
+  NO_WRITE=1 run probe "$S3_PROBE"
+  [ "$status" -eq 1 ]
+  [[ $output == *"bucket b1: write failed: AccessDenied"* ]]
+}
+
+@test "RES-04 (U): a failed read still removes the object; a failed delete is reported" {
+  s3_stub
+  NO_READ=1 run probe "$S3_PROBE"
+  [ "$status" -eq 1 ]
+  [[ $output == *"bucket b1: read failed"* && $output != *stays* ]]
+  called "s3 rm s3://b1/.installer-check/id1"
+  NO_DELETE=1 run probe "$S3_PROBE"
+  [ "$status" -eq 1 ]
+  [[ $output == *"bucket b1: delete failed, .installer-check/id1 stays"* ]]
+}
+
+pg_stub() {
+  stub pg_isready 'exit 0'
+  stub psql 'cat >/dev/null; echo "$PG_ANSWER"'
+  export PG_host=db PG_port=5432 PG_username=owner PG_password=p PG_database=d PG_sslmode=require NABU_DB=nabu NABU_ROLE=nabu
+}
+
+@test "RES-05 (U): Postgres with vector and the rights: passes" {
+  pg_stub
+  PG_ANSWER="1 t t f" run probe "$PG_PROBE"
+  [ "$status" -eq 0 ]
+}
+
+@test "RES-05 (U): no vector: the reason is named" {
+  pg_stub
+  PG_ANSWER="0 t t f" run probe "$PG_PROBE"
+  [ "$status" -eq 1 ]
+  [[ $output == *"extension vector is not available at db"* ]]
+}
+
+@test "RES-05 (U): no rights and no database: fails; a database created in advance passes" {
+  pg_stub
+  PG_ANSWER="1 f t f" run probe "$PG_PROBE"
+  [ "$status" -eq 1 ]
+  [[ $output == *"owner cannot create databases and database nabu does not exist"* ]]
+  PG_ANSWER="1 f t t" run probe "$PG_PROBE"
+  [ "$status" -eq 0 ]
+}
+
+@test "RES-05 (U): no CREATEROLE fails even with the database in advance: the rollout sets the password of the role" {
+  pg_stub
+  PG_ANSWER="1 t f t" run probe "$PG_PROBE"
+  [ "$status" -eq 1 ]
+  [[ $output == *"owner has no CREATEROLE"* ]]
+}
+
+@test "RES-05 (U): a wrong password or an unknown answer is not taken for a pass" {
+  pg_stub
+  PG_ANSWER='psql: FATAL: password authentication failed' run probe "$PG_PROBE"
+  [ "$status" -eq 1 ]
+  [[ $output == "Postgres: authentication failed" ]]
+  PG_ANSWER='ERROR: permission denied' run probe "$PG_PROBE"
+  [ "$status" -eq 1 ]
+  [[ $output == *"permission denied"* ]]
+}
+
+@test "R15: the Job checks the buckets of both products" {
+  run probe_job_manifest external-check check - - s3
+  [ "$status" -eq 0 ]
+  [[ $output == *'S3_BUCKETS, value: "hammurapi nabu"'* ]]
+  NABU_S3_BUCKET=old run probe_job_manifest external-check check - - s3
+  [[ $output == *'S3_BUCKETS, value: "hammurapi old"'* ]]
+}

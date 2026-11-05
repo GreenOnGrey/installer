@@ -27,7 +27,7 @@ kubectl --context greenongrey -n observability port-forward svc/grafana 3000:80
 
 ## Cloud SQL for PostgreSQL
 
-An instance with a private IP in the machine's VPC, and the database and user `hammurapi`.
+An instance with a private IP in the machine's VPC, the `vector` extension, and the database and user `hammurapi`. The user needs `CREATEROLE` and `CREATEDB` for the database and role of Nabu.
 
 ```bash
 POSTGRES_MODE=external
@@ -61,13 +61,14 @@ gcloud managed-kafka topics create installer-probe --cluster hammurapi \
 
 ## Cloud Storage through the S3-compatible interface
 
-A bucket and an HMAC key of a service account with access to it (`gcloud storage hmac create SA_EMAIL`).
+Two buckets, for Hammurapi and for Nabu, and an HMAC key of a service account with access to them (`gcloud storage hmac create SA_EMAIL`). Bucket names are global, so the default `nabu` will not do.
 
 ```bash
 S3_MODE=external
 S3_ENDPOINT=https://storage.googleapis.com
 S3_REGION=europe-west1
 S3_BUCKET=hammurapi-demo
+S3_BUCKET_NABU=nabu-demo
 S3_ACCESS_KEY_FILE=/secure/s3-access-key
 S3_SECRET_KEY_FILE=/secure/s3-secret-key
 S3_PATH_STYLE=false

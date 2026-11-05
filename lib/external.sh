@@ -2,7 +2,8 @@
 # External storage mode (R12). The built-in storage is not installed; a service of the
 # same name (chart hammurapi-storages) points to the external host, and the *-conn secret
 # is filled from the configuration. Before consumers deploy, the Job
-# external-check verifies access: pg_isready, Kafka metadata, HEAD of the bucket.
+# external-check verifies what products need (FTR.INFRA.INST-0001 R15, R16): the vector extension and the
+# rights of the Postgres owner, Kafka metadata, write, read and delete in each bucket.
 
 any_external() {
   [[ $POSTGRES_MODE == external || $KAFKA_MODE == external || $S3_MODE == external ]]
@@ -49,14 +50,14 @@ check_external() {
   [[ $POSTGRES_MODE == external ]] && pg=pg
   [[ $KAFKA_MODE == external ]] && kafka=kafka
   [[ $S3_MODE == external ]] && s3=s3
-  log "checking access to external storages"
-  out=$(probe_job_manifest external-check check "$pg" "$kafka" "$s3" | run_probe_job external-check 90) || rc=$?
+  log "checking external storages"
+  out=$(probe_job_manifest external-check check "$pg" "$kafka" "$s3" | run_probe_job external-check 170) || rc=$?
   if ((rc != 0)); then
     local msgs=""
     while IFS= read -r line; do
       [[ $line == fail\|* ]] && msgs+="${line#fail|}; "
     done <<<"$out"
-    die "$E_EXTERNAL" "external storage is not reachable from the cluster: ${msgs:-$out}"
+    die "$E_EXTERNAL" "an external storage did not pass the check from the cluster: ${msgs:-$out}"
   fi
-  ok "external storages are reachable"
+  ok "external storages passed the check"
 }

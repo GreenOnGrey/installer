@@ -74,6 +74,9 @@ env_keys() {
   sed -nE 's/^[[:space:]]*([A-Z_][A-Z0-9_]*)=.*/\1/p' "$1"
 }
 
+# nabu_bucket — the bucket of Nabu; NABU_S3_BUCKET is its old name.
+nabu_bucket() { echo "${NABU_S3_BUCKET:-$S3_BUCKET_NABU}"; }
+
 # installer_config — the config file of bin/*-deploy; HAMMURAPI_INFRA_CONFIG is its old name.
 installer_config() { echo "${INSTALLER_CONFIG:-${HAMMURAPI_INFRA_CONFIG:-/opt/installer/local.env}}"; }
 
