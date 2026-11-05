@@ -132,7 +132,9 @@ check_order() {
 
 ensure_namespaces() {
   step namespaces
-  kc create namespace "$NS" --dry-run=client -o yaml | apply_stdin || fail "$E_NS" "failed to create namespace $NS"
+  # The label by which uninstall of the installer finds the namespace.
+  kc create namespace "$NS" --dry-run=client -o json | jq '.metadata.labels["app.kubernetes.io/part-of"] = "hammurapi"' |
+    apply_stdin || fail "$E_NS" "failed to create namespace $NS"
 }
 
 # --- 4. Secrets and configuration ---

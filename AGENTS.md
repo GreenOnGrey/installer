@@ -22,7 +22,7 @@ its charts and `bin/nabu-deploy` live here too, exactly like those of Hammurapi.
 ## Contents
 
 ```text
-installer       CLI: up | status | creds | down — a minikube stand with storages,
+installer       CLI: install | status | creds | uninstall — a stand on minikube or an existing cluster with storages,
                          observability, public access (MetalLB, Traefik, cert-manager)
 lib/*.sh                 functions sourced by the CLI (common, host, prereqs, cluster, deploy, public, …)
 bin/hammurapi-deploy     deploys hammurapi-core/web on the stand; reads one JSON from stdin
@@ -38,6 +38,7 @@ charts/nabu-core         Nabu: api, worker, agent, relay, egress, migrate, clean
 charts/nabu-web          the SPA of Nabu
 charts/landing           the site of GreenOnGrey: nginx with static pages
 lib/preflight.sh         checks of an external cluster before anything changes in it (INSTALL_TARGET=external)
+lib/uninstall.sh         uninstall: on minikube the profile; on a cluster the labelled namespaces and their releases
 lib/mcp.sh               optional MCP servers (FTR.NAB.CMN-0006): enabled by MCP_* options; the chart mcp-servers and
                          the descriptions of servers come from a release of `mcps` (MCP_CHART_VERSION)
 config/                  defaults.env, versions.env (chart and tool versions)

@@ -136,7 +136,7 @@ stage CHK-04 "after the checks probe pods and Jobs are gone" \
   "sleep 15; ! kubectl --context greenongrey get pods -A -l app.kubernetes.io/managed-by=installer --no-headers 2>/dev/null | grep -q ."
 stage UP-04 "up restores the stand after failures" "$H up --no-color"
 
-stage CMD-04 "down --yes: the profile is deleted" "$H down --yes --no-color && ! minikube profile list 2>/dev/null | grep -q greenongrey"
+stage CMD-04 "uninstall --yes: the profile is deleted" "$H uninstall --yes --no-color && ! minikube profile list 2>/dev/null | grep -q greenongrey"
 stage PERS-03 "down and up: a clean stand, new passwords" \
   "$H up --no-color && kubectl --context greenongrey get secret -A -l app.kubernetes.io/managed-by=installer -o json | jq -S '[.items[] | {n: .metadata.name, d: .data}]' | ! diff -q - /tmp/secrets-before.json >/dev/null"
 

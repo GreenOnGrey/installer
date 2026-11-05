@@ -35,9 +35,11 @@ release() {
   [[ $values != - ]] && args+=(-f "$ROOT/values/$values")
   if [[ $version == - ]]; then log "release $name (local chart)"; else log "release $name ($chart $version)"; fi
   if ! run_cmd hm "${args[@]}" "$@" >"$RUN_DIR/helm-$name.log" 2>&1; then
+    RESULT_FAILED+=("$name")
     die "$E_DEPLOY" "release $name was not deployed, see $RUN_DIR/helm-$name.log"
   fi
   RELEASES+=("$name $version")
+  RESULT_UPDATED+=("$name")
 }
 
 # release_local <release> <ns> <chart directory> [helm arguments…] — a release
@@ -206,9 +208,12 @@ deploy_all() {
 # write_version — the deployed tag and commit in a ConfigMap (R18). Prod has no
 # git checkout (the workflow unpacks the tag), so they come in INFRA_TAG and
 # INFRA_COMMIT; a git working copy provides them itself.
+# installer_version — the tag of this code, or dev.
+installer_version() { echo "${INFRA_TAG:-$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null || echo dev)}"; }
+
 write_version() {
   local tag commit
-  tag=${INFRA_TAG:-$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null || echo dev)}
+  tag=$(installer_version)
   commit=${INFRA_COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)}
   commit=${commit:0:7}
   kc -n "$NS_STATE" create configmap "$STATE_VERSION_CM" \

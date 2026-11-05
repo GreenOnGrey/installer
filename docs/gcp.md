@@ -21,7 +21,7 @@ Without public access no ports need opening, because Grafana opens through an SS
 ```sh
 gcloud compute ssh hammurapi-demo --zone europe-west1-b -- -L 3000:localhost:3000
 git clone https://github.com/GreenOnGrey/installer.git && cd installer
-./installer up
+./installer install
 kubectl --context greenongrey -n observability port-forward svc/grafana 3000:80
 ```
 

@@ -78,7 +78,17 @@ env_keys() {
 nabu_bucket() { echo "${NABU_S3_BUCKET:-$S3_BUCKET_NABU}"; }
 
 # installer_config — the config file of bin/*-deploy; HAMMURAPI_INFRA_CONFIG is its old name.
-installer_config() { echo "${INSTALLER_CONFIG:-${HAMMURAPI_INFRA_CONFIG:-/opt/installer/local.env}}"; }
+# Without either, the system file of the installer, then the file of the production machine.
+installer_config() {
+  local system=${SYSTEM_CONFIG:-/etc/greenongrey/installer.env}
+  if [[ -n ${INSTALLER_CONFIG:-${HAMMURAPI_INFRA_CONFIG:-}} ]]; then
+    echo "${INSTALLER_CONFIG:-$HAMMURAPI_INFRA_CONFIG}"
+  elif [[ -f $system ]]; then
+    echo "$system"
+  else
+    echo /opt/installer/local.env
+  fi
+}
 
 # load_config — defaults.env → local.env → environment (flags apply earlier,
 # by exporting variables at the entry point).
@@ -138,11 +148,15 @@ secret_value() {
   fi
 }
 
+# require_param, require_secret: a missing value is recorded in CONFIG_MISSING, and validate_config
+# names them all at once (FTR.INFRA.INST-0001 R6), so a CI run does not fix them one by one.
+CONFIG_MISSING=()
+
 require_param() {
   local mode_name=$1 key=$2
   [[ $mode_name == *=* ]] || mode_name+="=external"
   if [[ -z ${!key:-} ]]; then
-    die "$E_USAGE" "$mode_name: parameter $key is not set"
+    CONFIG_MISSING+=("$mode_name: parameter $key is not set")
   fi
 }
 
@@ -150,8 +164,16 @@ require_secret() {
   local mode_name=$1 key=$2
   [[ $mode_name == *=* ]] || mode_name+="=external"
   if [[ -z $(secret_value "$key") ]]; then
-    die "$E_USAGE" "$mode_name: neither $key (environment variable) nor ${key}_FILE is set"
+    CONFIG_MISSING+=("$mode_name: neither $key (environment variable) nor ${key}_FILE is set")
   fi
+}
+
+# die_if_missing — code 2 with every missing parameter, one per line.
+die_if_missing() {
+  ((${#CONFIG_MISSING[@]} == 0)) && return 0
+  local list
+  list=$(printf '  %s\n' "${CONFIG_MISSING[@]}")
+  die "$E_USAGE" "missing parameters:"$'\n'"$list"
 }
 
 target_external() { [[ ${INSTALL_TARGET:-minikube} == external ]]; }
@@ -214,21 +236,27 @@ validate_names() {
   done
 }
 
-# validate_config — modes and required parameters of external storages.
-validate_config() {
-  local m
-  case ${STAND_AUTOSTART:-true} in
-    true | false) ;;
-    *) die "$E_USAGE" "STAND_AUTOSTART must be true or false" ;;
-  esac
+# validate_target — the target and, for an existing cluster, its context: never the default one.
+validate_target() {
   case ${INSTALL_TARGET:-minikube} in
     minikube) ;;
     external)
       [[ -n ${CONFIG_EXPLICIT[KUBE_CONTEXT]+x} && -n ${KUBE_CONTEXT:-} ]] ||
-        die "$E_USAGE" "INSTALL_TARGET=external: set KUBE_CONTEXT to a context of kubeconfig"
+        CONFIG_MISSING+=("INSTALL_TARGET=external: set KUBE_CONTEXT to a context of kubeconfig")
       ;;
     *) die "$E_USAGE" "INSTALL_TARGET must be minikube or external" ;;
   esac
+}
+
+# validate_config — modes and required parameters of external storages.
+validate_config() {
+  local m
+  CONFIG_MISSING=()
+  case ${STAND_AUTOSTART:-true} in
+    true | false) ;;
+    *) die "$E_USAGE" "STAND_AUTOSTART must be true or false" ;;
+  esac
+  validate_target
   case ${OBSERVABILITY:-true} in
     true | false) ;;
     *) die "$E_USAGE" "OBSERVABILITY must be true or false" ;;
@@ -256,12 +284,12 @@ validate_config() {
   if [[ $KAFKA_MODE == external ]]; then
     require_param KAFKA_MODE KAFKA_BOOTSTRAP
     require_param KAFKA_MODE KAFKA_SECURITY_PROTOCOL
-    case $KAFKA_SECURITY_PROTOCOL in
-      PLAINTEXT) ;;
+    case ${KAFKA_SECURITY_PROTOCOL:-} in
+      PLAINTEXT | "") ;;
       SASL_SSL)
         require_param KAFKA_MODE KAFKA_SASL_MECHANISM
-        case $KAFKA_SASL_MECHANISM in
-          PLAIN | SCRAM-SHA-512 | OAUTHBEARER) ;;
+        case ${KAFKA_SASL_MECHANISM:-} in
+          PLAIN | SCRAM-SHA-512 | OAUTHBEARER | "") ;;
           *) die "$E_USAGE" "KAFKA_SASL_MECHANISM must be PLAIN, SCRAM-SHA-512 or OAUTHBEARER" ;;
         esac
         require_param KAFKA_MODE KAFKA_USERNAME
@@ -287,13 +315,14 @@ validate_config() {
   esac
   [[ ${NABU_WHISPER_MODEL:-small} =~ ^(tiny|base|small|medium|large-v3|large-v3-turbo|turbo)$ ]] ||
     die "$E_USAGE" "NABU_WHISPER_MODEL must be tiny, base, small, medium, large-v3 or large-v3-turbo"
+  die_if_missing
 }
 
 validate_ingress_internal() {
   [[ ${INGRESS_CLASS:-traefik} == traefik ]] ||
     die "$E_USAGE" "INGRESS_MODE=internal installs Traefik, so INGRESS_CLASS must be traefik or INGRESS_MODE external"
   require_param PUBLIC_ACCESS=true ACME_EMAIL
-  [[ $ACME_EMAIL == *@*.* ]] || die "$E_USAGE" "ACME_EMAIL: an email address is required"
+  [[ -z ${ACME_EMAIL:-} || $ACME_EMAIL == *@*.* ]] || die "$E_USAGE" "ACME_EMAIL: an email address is required"
   case ${ACME_ISSUER:-letsencrypt} in
     letsencrypt | letsencrypt-staging) ;;
     *) die "$E_USAGE" "ACME_ISSUER must be letsencrypt or letsencrypt-staging" ;;
@@ -304,8 +333,11 @@ validate_ingress_internal() {
 validate_ingress_external() {
   local key
   for key in INGRESS_CLASS ACME_ISSUER; do
-    [[ -n ${CONFIG_EXPLICIT[$key]+x} && ${!key} =~ ^[a-z0-9][a-z0-9.-]*$ ]] ||
-      die "$E_USAGE" "INGRESS_MODE=external: set $key to the name of an existing object of the cluster"
+    if [[ -z ${CONFIG_EXPLICIT[$key]+x} || -z ${!key} ]]; then
+      CONFIG_MISSING+=("INGRESS_MODE=external: set $key to the name of an existing object of the cluster")
+    elif ! [[ ${!key} =~ ^[a-z0-9][a-z0-9.-]*$ ]]; then
+      die "$E_USAGE" "INGRESS_MODE=external: $key must be the name of an object of the cluster, not '${!key}'"
+    fi
   done
   require_param INGRESS_MODE=external PUBLIC_BASE_DOMAIN
 }
