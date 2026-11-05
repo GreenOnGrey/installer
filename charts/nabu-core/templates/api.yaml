@@ -35,10 +35,14 @@ metadata:
   labels:
     {{- include "nabu.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
+  {{- with .Values.ingress.clusterIssuer }}
+  annotations: { cert-manager.io/cluster-issuer: {{ . | quote }} }
+  {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
-  # The default Traefik certificate (the stand's shared certificate with nabu. and nabu-api.).
-  tls: [{ hosts: [{{ include "nabu.api" . | quote }}] }]
+  # The default Traefik certificate (the stand's shared one, with nabu. and nabu-api.), or with
+  # clusterIssuer a secret of its own.
+  tls: [{ hosts: [{{ include "nabu.api" . | quote }}]{{ if .Values.ingress.clusterIssuer }}, secretName: api-tls{{ end }} }]
   rules:
     - host: {{ include "nabu.api" . | quote }}
       http:

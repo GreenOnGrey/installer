@@ -113,6 +113,7 @@ check_stand() {
     fail "$E_STAND" "the stand is not ready: $(jq -r '[.checks[] | select(.ok | not) | "\(.name): \(.message)"] | join("; ")' <<<"$st")"
   fi
   [[ $(jq -r '.public.enabled' <<<"$st") == true ]] || fail "$E_STAND" "public access of the stand is off (PUBLIC_ACCESS=true)"
+  ingress_from_status "$st"
   BASE_DOMAIN=$(jq -r '.public.baseDomain // empty' <<<"$st")
   [[ -n $BASE_DOMAIN ]] || fail "$E_STAND" "the stand did not report a base domain"
   ok "the stand is ready, domain $BASE_DOMAIN"
@@ -281,6 +282,8 @@ sync_core_config() {
 # ensure_certificate — nabu. and nabu-api. in the shared Traefik certificate.
 ensure_certificate() {
   step certificate
+  # An external controller reads the secret of each Ingress, issued by the annotation of the chart.
+  if ingress_external; then return 0; fi
   local names want missing=()
   names=$(kc -n "$NS_INGRESS" get certificate "$CERT_NAME" -o json 2>/dev/null | jq -r '.spec.dnsNames[]?') ||
     fail "$E_STAND" "certificate $NS_INGRESS/$CERT_NAME does not exist"
@@ -358,11 +361,15 @@ helm_deploy() {
     [[ -n ${NABU_SANDBOX_PULL_SECRETS:-} ]] &&
       args+=(--set "sandboxes.customImages.pullSecrets={${NABU_SANDBOX_PULL_SECRETS}}")
   fi
+  local ingress=()
+  mapfile -t ingress < <(ingress_helm_args)
+  args+=("${ingress[@]}")
   log "helm upgrade --install $COMPONENT $TAG (chart $CHART_VERSION)"
   if ! hm "${args[@]}" >&2; then
     diagnostics
     fail "$E_HELM" "release $COMPONENT $TAG was not deployed, Helm restored the previous revision; diagnostics: $DIAG"
   fi
+  wait_product_certificate "$NS" "$COMPONENT"
   REVISION=$(hm status "$COMPONENT" -n "$NS" -o json 2>/dev/null | jq -r '.version // empty')
 }
 

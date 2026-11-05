@@ -108,6 +108,7 @@ check_stand() {
   if [[ $(jq -r '.public.enabled' <<<"$st") != true ]]; then
     fail "$E_STAND" "public access of the stand is off: set PUBLIC_ACCESS=true in the installer configuration and run up"
   fi
+  ingress_from_status "$st"
   BASE_DOMAIN=$(jq -r '.public.baseDomain // empty' <<<"$st")
   [[ -n $BASE_DOMAIN ]] || fail "$E_STAND" "the stand did not report a base domain"
   ok "the stand is ready, domain $BASE_DOMAIN"
@@ -317,12 +318,16 @@ helm_deploy() {
     -n "$NS" --set-string "image.tag=$TAG" --set-string "publicBaseDomain=$BASE_DOMAIN"
     --set-string "hosts.web=${HAMMURAPI_WEB_HOST:-hammurapi}" --set-string "hosts.api=${HAMMURAPI_API_HOST:-hammurapi-api}"
     --atomic --wait --timeout "${HELM_TIMEOUT:-10m}")
+  local ingress=()
+  mapfile -t ingress < <(ingress_helm_args)
+  args+=("${ingress[@]}")
   [[ -n $image ]] && args+=(--set-string "image.repository=$image")
   log "helm upgrade --install $COMPONENT $TAG (chart $CHART_VERSION)"
   if ! hm "${args[@]}" >&2; then
     diagnostics
     fail "$E_HELM" "release $COMPONENT $TAG was not deployed, Helm restored the previous revision; diagnostics: $DIAG"
   fi
+  wait_product_certificate "$NS" "$COMPONENT"
   REVISION=$(hm status "$COMPONENT" -n "$NS" -o json 2>/dev/null | jq -r '.version // empty')
 }
 

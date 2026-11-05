@@ -9,6 +9,7 @@ FORWARD_BIN=${FORWARD_BIN:-/usr/local/lib/installer/ingress-forward}
 FORWARD_STATE=${FORWARD_STATE:-/var/lib/installer}
 
 PUBLIC_IP_RESOLVED="" PUBLIC_DOMAIN="" LB_IP=""
+readonly GRAFANA_TLS_SECRET=grafana-tls
 
 public_enabled() { [[ ${PUBLIC_ACCESS:-false} == true ]]; }
 
@@ -54,6 +55,11 @@ metallb_range() {
 public_prepare() {
   public_enabled || return 0
   step public
+  if ingress_external; then
+    PUBLIC_DOMAIN=$PUBLIC_BASE_DOMAIN
+    log "base domain: $PUBLIC_DOMAIN (ingress class $INGRESS_CLASS, issuer $ACME_ISSUER)"
+    return 0
+  fi
   PUBLIC_IP_RESOLVED=$(detect_public_ip) || die "$E_DEPLOY" "failed to detect the external IP of the machine; set PUBLIC_IP"
   PUBLIC_DOMAIN=$(public_domain "$PUBLIC_IP_RESOLVED")
   log "base domain: $PUBLIC_DOMAIN (external IP $PUBLIC_IP_RESOLVED)"
@@ -65,9 +71,14 @@ grafana_public_values() {
   {
     echo "ingress:"
     echo "  enabled: true"
-    echo "  ingressClassName: traefik"
+    echo "  ingressClassName: ${INGRESS_CLASS:-traefik}"
     echo "  hosts: [\"grafana.$PUBLIC_DOMAIN\"]"
-    echo "  tls: [{ hosts: [\"grafana.$PUBLIC_DOMAIN\"] }]"
+    if ingress_external; then
+      echo "  annotations: { cert-manager.io/cluster-issuer: \"$ACME_ISSUER\" }"
+      echo "  tls: [{ hosts: [\"grafana.$PUBLIC_DOMAIN\"], secretName: $GRAFANA_TLS_SECRET }]"
+    else
+      echo "  tls: [{ hosts: [\"grafana.$PUBLIC_DOMAIN\"] }]"
+    fi
     echo "grafana.ini:"
     echo "  server: { root_url: \"https://grafana.$PUBLIC_DOMAIN\" }"
     if [[ -n ${GRAFANA_GITHUB_CLIENT_ID:-} ]]; then
@@ -195,6 +206,7 @@ public_state_manifest() {
   kc -n "$NS_STATE" create configmap "$STATE_PUBLIC_CM" \
     --from-literal="baseDomain=$PUBLIC_DOMAIN" --from-literal="publicIp=$PUBLIC_IP_RESOLVED" \
     --from-literal="lbIp=$LB_IP" --from-literal="issuer=${ACME_ISSUER:-letsencrypt}" \
+    --from-literal="ingressMode=${INGRESS_MODE:-internal}" --from-literal="ingressClass=${INGRESS_CLASS:-traefik}" \
     --dry-run=client -o yaml
 }
 
@@ -232,6 +244,16 @@ EOF
     die "$E_DEPLOY" "failed to apply the forwarding rules, see journalctl -u $unit"
 }
 
+# deploy_public_external — nothing to install: the cluster has the controller and the issuer (R17).
+deploy_public_external() {
+  public_state_manifest | apply_stdin
+  if observability_enabled && ! wait_certificate "$NS_OBSERVABILITY" "$GRAFANA_TLS_SECRET"; then
+    kc -n "$NS_OBSERVABILITY" describe certificate "$GRAFANA_TLS_SECRET" >"$RUN_DIR/certificate.txt" 2>&1 || true
+    die "$E_DEPLOY" "issuer $ACME_ISSUER did not issue the certificate of Grafana in 5 minutes, see $RUN_DIR/certificate.txt"
+  fi
+  ok "public access: *.$PUBLIC_DOMAIN through ingress class $INGRESS_CLASS, issuer $ACME_ISSUER"
+}
+
 deploy_public() {
   if ! public_enabled; then
     # Otherwise status would find the old ConfigMap and report an old domain.
@@ -242,6 +264,10 @@ deploy_public() {
     return 0
   fi
   step public
+  if ingress_external; then
+    deploy_public_external
+    return 0
+  fi
   local range first
   range=$(metallb_range) || die "$E_DEPLOY" "failed to detect the minikube subnet for MetalLB"
   first=${range%-*}
@@ -286,8 +312,35 @@ public_curl() {
   curl -sS --max-time 15 --resolve "$host:$port:$LB_IP" "$@" "$scheme://$host/"
 }
 
+# check_public_external — what the stand relies on in the cluster. No request to a host: DNS and the
+# load balancer are not the stand's, and a failure here stops rollouts of products.
+check_public_external() {
+  local ready
+  if ! kc get ingressclass "$INGRESS_CLASS" >/dev/null 2>&1; then
+    record public fail "ingress class $INGRESS_CLASS does not exist"
+    return
+  fi
+  ready=$(resource_ready clusterissuer "$ACME_ISSUER")
+  if [[ $ready != True ]]; then
+    record public fail "ClusterIssuer $ACME_ISSUER is not ready ('${ready:-does not exist}')"
+    return
+  fi
+  if observability_enabled; then
+    ready=$(resource_ready -n "$NS_OBSERVABILITY" certificate "$GRAFANA_TLS_SECRET")
+    if [[ $ready != True ]]; then
+      record public fail "the certificate of Grafana is not ready ('${ready:-does not exist}')"
+      return
+    fi
+  fi
+  record public ok "ingress class $INGRESS_CLASS, ClusterIssuer $ACME_ISSUER"
+}
+
 check_public() {
   public_enabled || return 0
+  if ingress_external; then
+    check_public_external
+    return 0
+  fi
   local host code insecure=() redirect hosts
   LB_IP=${LB_IP:-$(kc -n "$NS_INGRESS" get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)}
   PUBLIC_DOMAIN=${PUBLIC_DOMAIN:-$(state_public | jq -r '.baseDomain // empty' 2>/dev/null || true)}
@@ -307,7 +360,7 @@ check_public() {
   code=$(public_curl "$host" https "${insecure[@]}" -o /dev/null -w '%{http_code}' 2>/dev/null || true)
   redirect=$(public_curl "$host" http -o /dev/null -w '%{http_code} %{redirect_url}' 2>/dev/null || true)
   if ! observability_enabled; then
-    code=$(kc -n "$NS_INGRESS" get certificate "$CERT_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+    code=$(resource_ready -n "$NS_INGRESS" certificate "$CERT_NAME")
     if [[ $code != True ]]; then
       record public fail "certificate $NS_INGRESS/$CERT_NAME is not ready ('${code:-no status}', ${ACME_ISSUER:-letsencrypt})"
     elif [[ ! $redirect =~ ^30[178]\ https:// ]]; then

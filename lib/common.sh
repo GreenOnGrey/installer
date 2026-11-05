@@ -151,6 +151,47 @@ require_secret() {
   fi
 }
 
+ingress_external() { [[ ${INGRESS_MODE:-internal} == external ]]; }
+
+# ingress_from_status <status JSON> — the ingress recorded by `up`: a rollout follows the stand, whatever
+# its own config says.
+ingress_from_status() {
+  INGRESS_MODE=$(jq -r '.public.ingressMode // "internal"' <<<"$1")
+  INGRESS_CLASS=$(jq -r '.public.ingressClass // "traefik"' <<<"$1")
+  ACME_ISSUER=$(jq -r '.public.issuer // "letsencrypt"' <<<"$1")
+}
+
+# resource_ready <kubectl get arguments…> — True when the condition Ready of the object holds.
+resource_ready() {
+  kc get "$@" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true
+}
+
+# wait_certificate <ns> <name> — waits until Ready. cert-manager creates the certificate of an Ingress
+# some time after the Ingress, and kubectl wait stops at once on a missing object.
+wait_certificate() {
+  local deadline=$((SECONDS + ${CERT_TIMEOUT:-300}))
+  until [[ $(resource_ready -n "$1" certificate "$2") == True ]]; do
+    ((SECONDS < deadline)) || return 1
+    sleep 5
+  done
+}
+
+# wait_product_certificate <ns> <component> — external ingress: the certificate of a product's Ingress.
+# A warning only: a pending certificate is not a failed release, and DNS may still be on its way.
+wait_product_certificate() {
+  ingress_external || return 0
+  local secret=web-tls
+  [[ $2 == *-core ]] && secret=api-tls
+  wait_certificate "$1" "$secret" ||
+    warn "certificate $1/$secret is not ready: check DNS of the host and the issuer $ACME_ISSUER, and that the chart has ingress.clusterIssuer"
+}
+
+# ingress_helm_args — chart values of a product's Ingress, one per line.
+ingress_helm_args() {
+  printf '%s\n' --set-string "ingress.className=${INGRESS_CLASS:-traefik}"
+  if ingress_external; then printf '%s\n' --set-string "ingress.clusterIssuer=$ACME_ISSUER"; fi
+}
+
 observability_enabled() { [[ ${OBSERVABILITY:-true} == true ]]; }
 
 # stand_namespaces — the namespaces with the stand's own pods.
@@ -235,6 +276,27 @@ validate_config() {
     die "$E_USAGE" "NABU_WHISPER_MODEL must be tiny, base, small, medium, large-v3 or large-v3-turbo"
 }
 
+validate_ingress_internal() {
+  [[ ${INGRESS_CLASS:-traefik} == traefik ]] ||
+    die "$E_USAGE" "INGRESS_MODE=internal installs Traefik, so INGRESS_CLASS must be traefik or INGRESS_MODE external"
+  require_param PUBLIC_ACCESS=true ACME_EMAIL
+  [[ $ACME_EMAIL == *@*.* ]] || die "$E_USAGE" "ACME_EMAIL: an email address is required"
+  case ${ACME_ISSUER:-letsencrypt} in
+    letsencrypt | letsencrypt-staging) ;;
+    *) die "$E_USAGE" "ACME_ISSUER must be letsencrypt or letsencrypt-staging" ;;
+  esac
+}
+
+# validate_ingress_external — the defaults name what the stand installs, so they do not count here.
+validate_ingress_external() {
+  local key
+  for key in INGRESS_CLASS ACME_ISSUER; do
+    [[ -n ${CONFIG_EXPLICIT[$key]+x} && ${!key} =~ ^[a-z0-9][a-z0-9.-]*$ ]] ||
+      die "$E_USAGE" "INGRESS_MODE=external: set $key to the name of an existing object of the cluster"
+  done
+  require_param INGRESS_MODE=external PUBLIC_BASE_DOMAIN
+}
+
 # validate_public_config — public access parameters (FTR.HMR.INFRA-0002, R21).
 validate_public_config() {
   case ${PUBLIC_ACCESS:-false} in
@@ -242,11 +304,10 @@ validate_public_config() {
     false) return 0 ;;
     *) die "$E_USAGE" "PUBLIC_ACCESS must be true or false" ;;
   esac
-  require_param PUBLIC_ACCESS=true ACME_EMAIL
-  [[ $ACME_EMAIL == *@*.* ]] || die "$E_USAGE" "ACME_EMAIL: an email address is required"
-  case ${ACME_ISSUER:-letsencrypt} in
-    letsencrypt | letsencrypt-staging) ;;
-    *) die "$E_USAGE" "ACME_ISSUER must be letsencrypt or letsencrypt-staging" ;;
+  case ${INGRESS_MODE:-internal} in
+    internal) validate_ingress_internal ;;
+    external) validate_ingress_external ;;
+    *) die "$E_USAGE" "INGRESS_MODE must be internal or external" ;;
   esac
   if [[ -n ${PUBLIC_BASE_DOMAIN:-} && ! $PUBLIC_BASE_DOMAIN =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$ ]]; then
     die "$E_USAGE" "PUBLIC_BASE_DOMAIN: invalid name '$PUBLIC_BASE_DOMAIN'"

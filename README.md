@@ -106,6 +106,12 @@ Overrides go in `config/local.env` (ignored by git), with an example in [`config
 
 The main settings are minikube resources (`MK_CPUS`, `MK_MEMORY`, `MK_DISK`, applied when the profile is created), retention (`VM_RETENTION`, `VL_RETENTION`), volume sizes and storage modes.
 
+### Ingress
+
+`INGRESS_MODE=internal` (the default) installs Traefik and cert-manager, and MetalLB and port forwarding on minikube.
+
+`INGRESS_MODE=external` installs none of them, and uses what the cluster has. Set `INGRESS_CLASS`, `ACME_ISSUER` (a `ClusterIssuer` of cert-manager) and `PUBLIC_BASE_DOMAIN`. Each Ingress gets a certificate of its own in its namespace. Switching an existing stand to this mode does not remove its Traefik and cert-manager. Product Ingresses move on their next release, so release each product after switching. Set these keys in the config file: the keys passed from GitHub reach only `up`, not `status`. The site (`bin/landing-deploy`) needs the built-in Traefik.
+
 ### Observability
 
 `OBSERVABILITY=false` installs no VictoriaMetrics, VictoriaLogs, collectors or Grafana: `up` removes them if they are installed. The volumes of metrics and logs stay, the data of Grafana is deleted, and the checks of Grafana, metrics and logs are skipped.

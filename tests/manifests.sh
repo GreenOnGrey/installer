@@ -392,6 +392,30 @@ hammurapi_charts() {
   fi
 }
 
+# product_ingress — the Ingress of each product chart in both modes (FTR.INFRA.INST-0001 R17).
+product_ingress() {
+  printf '\nproduct ingress\n'
+  local c f base=(--set image.tag=v1.0.0 --set publicBaseDomain=x.example)
+  f=$OUT/ingress.yaml
+  for c in hammurapi-core hammurapi-web nabu-core nabu-web; do
+    helm template "$c" "$ROOT/charts/$c" -n products --kube-version "$KUBE_VERSION" "${base[@]}" >"$f" 2>&1 || { fail "R17 $c: helm template"; continue; }
+    if docs_json "$f" | jq -se '[.[] | select(.kind == "Ingress")] | length > 0 and all(.spec.ingressClassName == "traefik"
+        and (.metadata.annotations // {} | has("cert-manager.io/cluster-issuer") | not) and all(.spec.tls[]; has("secretName") | not))' >/dev/null; then
+      pass "R17 $c: by default Traefik and its default certificate"
+    else
+      fail "R17 $c: the default Ingress changed"
+    fi
+    helm template "$c" "$ROOT/charts/$c" -n products --kube-version "$KUBE_VERSION" "${base[@]}" \
+      --set-string ingress.className=nginx --set-string ingress.clusterIssuer=corp >"$f" 2>&1 || { fail "R17 $c: helm template external"; continue; }
+    if docs_json "$f" | jq -se '[.[] | select(.kind == "Ingress")] | length > 0 and all(.spec.ingressClassName == "nginx"
+        and .metadata.annotations["cert-manager.io/cluster-issuer"] == "corp" and all(.spec.tls[]; (.secretName // "") != ""))' >/dev/null; then
+      pass "R17 $c: an external class, issuer and a secret of its own"
+    else
+      fail "R17 $c: the external Ingress"
+    fi
+  done
+}
+
 public_access_charts() {
   printf '\npublic access\n'
   local dir=$OUT/public
@@ -502,6 +526,7 @@ main() {
   nabu_charts
   landing_chart
   public_access_charts
+  product_ingress
   mcp_chart
 
   if ((FAILURES)); then

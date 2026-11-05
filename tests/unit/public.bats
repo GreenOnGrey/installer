@@ -281,7 +281,7 @@ config_step() {
 @test "FTR.INFRA.INST-0001 R17: without Grafana a fault of a product does not fail the stand" {
   load_script
   OBSERVABILITY=false PUBLIC_ACCESS=true PUBLIC_DOMAIN=x.example LB_IP=192.168.49.200
-  stub kubectl '[[ $* == *"get certificate"* ]] && echo True; exit 0'
+  stub kubectl '[[ $* == *" certificate "* ]] && echo True; exit 0'
   public_curl() { [[ $2 == http ]] && echo "308 https://$1/" || echo 503; }
   check_public
   [[ ${CHECK_RESULTS[*]} == "public|ok|certificate greenongrey-public is ready"* ]]
@@ -290,7 +290,7 @@ config_step() {
 @test "FTR.INFRA.INST-0001 R17: without Grafana a certificate that is not ready fails the check" {
   load_script
   OBSERVABILITY=false PUBLIC_ACCESS=true PUBLIC_DOMAIN=x.example LB_IP=192.168.49.200
-  stub kubectl '[[ $* == *"get certificate"* ]] && echo False; exit 0'
+  stub kubectl '[[ $* == *" certificate "* ]] && echo False; exit 0'
   public_curl() { echo "308 https://$1/"; }
   check_public
   [[ ${CHECK_RESULTS[*]} == "public|fail|certificate ingress/greenongrey-public is not ready"* ]]
@@ -302,4 +302,108 @@ config_step() {
   public_curl() { [[ $1 == grafana.x.example ]] || return 1; [[ $2 == http ]] && echo "308 https://$1/" || echo 503; }
   check_public
   [[ ${CHECK_RESULTS[*]} == "public|fail|https://grafana.x.example answers '503'"* ]]
+}
+
+# --- INGRESS_MODE (FTR.INFRA.INST-0001 R17, RES-06) ---
+
+external_ingress() {
+  INGRESS_MODE=external INGRESS_CLASS=nginx ACME_ISSUER=corp PUBLIC_ACCESS=true PUBLIC_BASE_DOMAIN=x.example
+  CONFIG_EXPLICIT[INGRESS_CLASS]=1 CONFIG_EXPLICIT[ACME_ISSUER]=1
+}
+
+@test "RES-06 (U): external needs a class, an issuer and a domain; no ACME_EMAIL" {
+  load_script
+  external_ingress
+  ACME_EMAIL=
+  run validate_public_config
+  [ "$status" -eq 0 ]
+  unset 'CONFIG_EXPLICIT[INGRESS_CLASS]'
+  run validate_public_config
+  [ "$status" -eq 2 ]
+  [[ $output == *INGRESS_CLASS* ]]
+  external_ingress
+  PUBLIC_BASE_DOMAIN=
+  run validate_public_config
+  [ "$status" -eq 2 ]
+  [[ $output == *PUBLIC_BASE_DOMAIN* ]]
+}
+
+@test "RES-06 (U): internal installs Traefik: another class or mode is an error" {
+  load_script
+  PUBLIC_ACCESS=true ACME_EMAIL=a@b.example INGRESS_CLASS=nginx
+  run validate_public_config
+  [ "$status" -eq 2 ]
+  INGRESS_CLASS=traefik INGRESS_MODE=other
+  run validate_public_config
+  [ "$status" -eq 2 ]
+  [[ $output == *INGRESS_MODE* ]]
+}
+
+@test "RES-06 (U): external installs no Traefik, cert-manager, MetalLB or forwarding" {
+  load_script
+  external_ingress
+  PUBLIC_DOMAIN=x.example
+  stub kubectl '[[ $* == *" certificate "* ]] && echo True; exit 0'
+  run deploy_public
+  [ "$status" -eq 0 ]
+  not_called "upgrade --install"
+  not_called "minikube"
+  not_called "systemctl"
+  called "certificate grafana-tls"
+}
+
+@test "RES-06 (U): Grafana in external mode: the class, the issuer and a secret of its own" {
+  load_script
+  external_ingress
+  PUBLIC_DOMAIN=x.example
+  grafana_public_values "$BATS_TEST_TMPDIR/g.yaml"
+  grep -q 'ingressClassName: nginx' "$BATS_TEST_TMPDIR/g.yaml"
+  grep -q 'cert-manager.io/cluster-issuer: "corp"' "$BATS_TEST_TMPDIR/g.yaml"
+  grep -q 'secretName: grafana-tls' "$BATS_TEST_TMPDIR/g.yaml"
+}
+
+@test "RES-06 (U): a certificate that appears later is waited for, one that never does is an error" {
+  load_script
+  external_ingress
+  PUBLIC_DOMAIN=x.example
+  stub kubectl '[[ $* == *" certificate "* ]] && { n=$(cat "$BATS_TEST_TMPDIR/n" 2>/dev/null || echo 0); echo $((n + 1)) >"$BATS_TEST_TMPDIR/n"; ((n >= 1)) && echo True; }; exit 0'
+  sleep() { :; }
+  run wait_certificate observability grafana-tls
+  [ "$status" -eq 0 ]
+  stub kubectl 'exit 1'
+  CERT_TIMEOUT=0 run deploy_public
+  [ "$status" -eq 13 ]
+  [[ $output == *"did not issue the certificate of Grafana"* ]]
+}
+
+@test "RES-06 (U): a rollout takes the ingress from what up recorded; an older record means internal" {
+  load_script
+  ingress_from_status '{"public":{"enabled":true,"ingressMode":"external","ingressClass":"nginx","issuer":"corp"}}'
+  [ "$INGRESS_MODE" = external ] && [ "$INGRESS_CLASS" = nginx ] && [ "$ACME_ISSUER" = corp ]
+  ingress_from_status '{"public":{"enabled":true,"issuer":"letsencrypt"}}'
+  [ "$INGRESS_MODE" = internal ] && [ "$INGRESS_CLASS" = traefik ] && [ "$ACME_ISSUER" = letsencrypt ]
+}
+
+@test "RES-06 (U): values of a product chart follow the mode" {
+  load_script
+  [ "$(ingress_helm_args | paste -sd' ')" = "--set-string ingress.className=traefik" ]
+  external_ingress
+  [ "$(ingress_helm_args | paste -sd' ')" = "--set-string ingress.className=nginx --set-string ingress.clusterIssuer=corp" ]
+}
+
+@test "RES-06 (U): the check of external mode looks at the class, the issuer and the certificate" {
+  load_script
+  external_ingress
+  stub kubectl '[[ $* == *"get ingressclass"* ]] && exit 0; [[ $* == *"get clusterissuer"* ]] && echo True; [[ $* == *" certificate "* ]] && echo True; exit 0'
+  curl() { echo "unexpected curl" >&2; return 1; }
+  check_public
+  [[ ${CHECK_RESULTS[*]} == "public|ok|ingress class nginx, ClusterIssuer corp" ]]
+  CHECK_RESULTS=()
+  stub kubectl '[[ $* == *"get ingressclass"* ]] && exit 1; exit 0'
+  check_public
+  [[ ${CHECK_RESULTS[*]} == "public|fail|ingress class nginx does not exist" ]]
+  CHECK_RESULTS=()
+  stub kubectl '[[ $* == *"get clusterissuer"* ]] && echo False; exit 0'
+  check_public
+  [[ ${CHECK_RESULTS[*]} == "public|fail|ClusterIssuer corp is not ready ('False')" ]]
 }

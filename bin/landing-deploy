@@ -111,6 +111,9 @@ check_stand() {
     fail "$E_STAND" "the stand is not ready: $(jq -r '[.checks[] | select(.ok | not) | "\(.name): \(.message)"] | join("; ")' <<<"$st")"
   fi
   [[ $(jq -r '.public.enabled' <<<"$st") == true ]] || fail "$E_STAND" "public access of the stand is off (PUBLIC_ACCESS=true)"
+  ingress_from_status "$st"
+  # The chart redirects www. through a Middleware of Traefik.
+  if ingress_external; then fail "$E_STAND" "the site needs Traefik of the stand: INGRESS_MODE=internal"; fi
   BASE_DOMAIN=$(jq -r '.public.baseDomain // empty' <<<"$st")
   [[ -n $BASE_DOMAIN ]] || fail "$E_STAND" "the stand did not report a base domain"
   PUBLIC_IP_STAND=$(jq -r '.public.publicIp // empty' <<<"$st")
