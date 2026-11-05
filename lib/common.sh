@@ -81,7 +81,6 @@ load_config() {
   local -A from_env=()
   # Keys set by this run through the file or the environment (restore_config leaves them alone).
   declare -gA CONFIG_EXPLICIT=()
-  CONFIG_LOADED_FILE=$local_file
   local files=("$root/config/versions.env" "$root/config/defaults.env")
   [[ -f $local_file ]] && files+=("$local_file")
   for f in "${files[@]}"; do

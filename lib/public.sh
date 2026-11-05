@@ -232,8 +232,10 @@ EOF
 deploy_public() {
   if ! public_enabled; then
     # Otherwise status would find the old ConfigMap and report an old domain.
-    kc -n "$NS_STATE" delete configmap "$STATE_PUBLIC_CM" --ignore-not-found >/dev/null || true
-    kc -n "$NS_INGRESS" delete configmap hammurapi-infra-public --ignore-not-found >/dev/null || true
+    kc -n "$NS_STATE" delete configmap "$STATE_PUBLIC_CM" --ignore-not-found >/dev/null ||
+      warn "failed to delete $NS_STATE/$STATE_PUBLIC_CM: status may report an old domain"
+    kc -n "$NS_INGRESS" delete configmap hammurapi-infra-public --ignore-not-found >/dev/null ||
+      warn "failed to delete $NS_INGRESS/hammurapi-infra-public: status may report an old domain"
     return 0
   fi
   step public

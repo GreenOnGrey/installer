@@ -136,6 +136,14 @@ put_cm() { jq -n --argjson d "$3" '{data: $d}' >"$CM_DIR/$1_$2.json"; }
   called "-n ingress delete configmap hammurapi-infra-public --ignore-not-found"
 }
 
+@test "CFG-12: выкатка компонента не проверяет MCP-серверы, даже заданные в файле" {
+  MCP_SEARCH=true INSTALLER_STAND_ONLY=1
+  CHECK_RESULTS=()
+  check_mcp
+  [ "${#CHECK_RESULTS[@]}" -eq 0 ]
+  not_called "get pods"
+}
+
 @test "CFG-07: выкатки компонентов проверяют только стенд" {
   grep -q 'INSTALLER_STAND_ONLY=1 bash "$STATUS_CMD" status' "$ROOT/bin/hammurapi-deploy"
   grep -q 'INSTALLER_STAND_ONLY=1 bash "$STATUS_CMD" status' "$ROOT/bin/nabu-deploy"

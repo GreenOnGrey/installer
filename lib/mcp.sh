@@ -504,6 +504,8 @@ check_mcp_docgen() {
 
 # check_mcp — readiness of pods and checks of enabled servers.
 check_mcp() {
+  # Component rollouts check only the stand (see cmd_status).
+  [[ ${INSTALLER_STAND_ONLY:-} != 1 ]] || return 0
   mcp_enabled || return 0
   if ! mcp_try_load; then
     record mcp fail "$MCP_FETCH_ERROR"
