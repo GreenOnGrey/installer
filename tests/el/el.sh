@@ -24,7 +24,9 @@ log() { echo "=== $*"; }
 pass() { echo "✓ $*"; }
 fail() {
   echo "✗ $*" >&2
-  on_vm 'sudo ausearch -m avc -ts recent 2>/dev/null | tail -20; sudo journalctl -u "*ingress-forward*" -u "*-stand" --no-pager -n 30; sudo firewall-cmd --list-all' >&2 || true
+  on_vm 'sudo ausearch -m avc -ts boot 2>/dev/null | tail -20
+    for u in docker containerd greenongrey-ingress-forward greenongrey-stand; do sudo journalctl -u "$u" --no-pager -n 25 2>/dev/null; done
+    sudo firewall-cmd --list-all; uname -r; sudo lsmod | grep -E "ip_tables|iptable|nf_tables|br_netfilter" | head' >&2 || true
   exit 1
 }
 
