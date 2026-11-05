@@ -29,7 +29,7 @@ bin/hammurapi-deploy     deploys hammurapi-core/web on the stand; reads one JSON
 bin/nabu-deploy          deploys nabu-core/web (namespaces nabu, nabu-sandboxes; its DB, bucket, hosts)
 bin/landing-deploy       deploys the site of GreenOnGrey (namespace landing, host web.<domain>; no storages;
                          an optional domain of its own with a certificate and a redirect from www.)
-bin/stand-autostart      systemd unit hammurapi-stand: the stand starts after a VM reboot; kubelet-gc mode
+bin/stand-autostart      systemd unit <prefix>-stand: the stand starts after a VM reboot; kubelet-gc mode
                          turns on kubelet image garbage collection (IMAGE_GC_* options)
 charts/hammurapi-core    api, worker, migrate, cleaner, network policies; no agent or runner — code tasks run in Nabu
 charts/hammurapi-web     the SPA
@@ -88,6 +88,6 @@ at the pinned version. Name any job you could not run in your report, with the r
 
 A tag `vX.Y.Z` (`deploy-prod.yml`) publishes the charts with version `X.Y.Z` to
 `oci://ghcr.io/greenongrey/charts` (existing versions are skipped), then deploys the stand: the code
-is copied over SSH to `/opt/hammurapi-infra/releases/<tag>`, `up` runs, and `current` switches to the
+is copied over SSH to `/opt/installer/releases/<tag>`, `up` runs, and `current` switches to the
 tag only after `up` succeeds. Core and web install a chart by `CHART_VERSION` in their
 `deploy/versions.env`. A broken tag is fixed by a new tag, not by moving the old one.

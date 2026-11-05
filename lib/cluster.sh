@@ -75,24 +75,24 @@ kubelet_gc() {
   fi
 }
 
-AUTOSTART_BIN=${AUTOSTART_BIN:-/usr/local/lib/hammurapi-infra/stand-autostart}
-AUTOSTART_UNIT=${AUTOSTART_UNIT:-/etc/systemd/system/hammurapi-stand.service}
+AUTOSTART_BIN=${AUTOSTART_BIN:-/usr/local/lib/installer/stand-autostart}
+UNIT_DIR=${UNIT_DIR:-/etc/systemd/system}
 
-# install_autostart — the systemd unit hammurapi-stand: after a reboot the cluster and
+# install_autostart — the systemd unit <prefix>-stand: after a reboot the cluster and
 # components come back on their own, and on shutdown the cluster stops
 # cleanly. The unit runs as the user who ran up.
 install_autostart() {
-  local user group path
+  local user group path unit=$UNIT_PREFIX-stand
   user=$(id -un) group=$(id -gn)
   # PATH of the unit: the directories where up found minikube and kubectl.
   path="$(dirname "$(command -v minikube)"):$(dirname "$(command -v kubectl)"):/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   as_root install -d -m 755 "$(dirname "$AUTOSTART_BIN")"
   as_root install -m 755 "$ROOT/bin/stand-autostart" "$AUTOSTART_BIN"
-  as_root tee "$AUTOSTART_UNIT" >/dev/null <<EOF
+  as_root tee "$UNIT_DIR/$unit.service" >/dev/null <<EOF
 # The minikube cluster of the stand on machine boot and shutdown
 # (FTR.HMR.INFRA-0001). Installed by installer up; STAND_AUTOSTART=false skips it.
 [Unit]
-Description=Hammurapi: minikube cluster of the stand
+Description=GreenOnGrey: minikube cluster of the stand
 After=docker.service network-online.target
 Wants=network-online.target
 Requires=docker.service
@@ -118,25 +118,36 @@ TimeoutStopSec=5min
 WantedBy=multi-user.target
 EOF
   as_root systemctl daemon-reload
-  as_root systemctl enable hammurapi-stand.service >/dev/null 2>&1 ||
-    die "$E_CLUSTER" "failed to enable autostart of the stand (systemctl enable hammurapi-stand)"
+  as_root systemctl enable "$unit.service" >/dev/null 2>&1 ||
+    die "$E_CLUSTER" "failed to enable autostart of the stand (systemctl enable $unit)"
   # start: the cluster is already running, so the unit only becomes active, and a
   # machine shutdown then stops it cleanly.
-  as_root systemctl start hammurapi-stand.service ||
-    die "$E_CLUSTER" "the autostart unit did not start, see journalctl -u hammurapi-stand"
-  ok "autostart after a machine reboot: hammurapi-stand.service"
+  as_root systemctl start "$unit.service" ||
+    die "$E_CLUSTER" "the autostart unit did not start, see journalctl -u $unit"
+  ok "autostart after a machine reboot: $unit.service"
 }
 
 # remove_autostart — removes the unit (down or STAND_AUTOSTART=false); the cluster stays:
 # the unit is stopped (ExecStop: minikube stop) only when the profile is already gone.
 remove_autostart() {
-  [[ -f $AUTOSTART_UNIT ]] || return 0
-  local now=()
+  local unit=$UNIT_PREFIX-stand now=()
+  [[ -f $UNIT_DIR/$unit.service ]] || return 0
   profile_exists || now=(--now)
-  as_root systemctl disable "${now[@]}" hammurapi-stand.service >/dev/null 2>&1 || true
-  as_root rm -f "$AUTOSTART_UNIT" "$AUTOSTART_BIN"
+  as_root systemctl disable "${now[@]}" "$unit.service" >/dev/null 2>&1 || true
+  as_root rm -f "$UNIT_DIR/$unit.service" "$AUTOSTART_BIN"
   as_root systemctl daemon-reload
   log "autostart of the stand is disabled"
+}
+
+# check_single_profile — a second cluster next to the first is not created (FTR.INFRA.INST-0001 R28).
+check_single_profile() {
+  profile_exists && return 0
+  local f others=()
+  for f in "${MINIKUBE_HOME:-$HOME/.minikube}"/profiles/*/config.json; do
+    [[ -f $f ]] && others+=("$(basename "$(dirname "$f")")")
+  done
+  ((${#others[@]} == 0)) ||
+    die "$E_USAGE" "minikube already has the profile ${others[*]}, while MK_PROFILE=$MK_PROFILE. To keep that stand, set MK_PROFILE, UNIT_PREFIX and CERT_NAME to its names in the config; otherwise delete the profile"
 }
 
 ensure_namespace() {

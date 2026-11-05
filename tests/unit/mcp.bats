@@ -183,7 +183,7 @@ esac'
   run deploy_all
   [ "$status" -eq 2 ]
   [[ $output == *"MK_MEMORY="* ]]
-  not_called "helm --kube-context hammurapi upgrade"
+  not_called "helm --kube-context greenongrey upgrade"
   not_called "repo add"
   not_called "create -f -"
   not_called "apply -f -"
@@ -200,8 +200,8 @@ esac'
 @test "STD-04: all off: the release and namespace are removed" {
   HAS_RELEASE=true
   deploy_mcp
-  called "helm --kube-context hammurapi uninstall mcp-servers -n mcp"
-  called "kubectl --context hammurapi delete ns mcp"
+  called "helm --kube-context greenongrey uninstall mcp-servers -n mcp"
+  called "kubectl --context greenongrey delete ns mcp"
 }
 
 @test "STD-01: all off and no release: nothing installs" {

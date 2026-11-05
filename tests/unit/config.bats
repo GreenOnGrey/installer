@@ -95,8 +95,8 @@ setup() {
   stub kubectl 'exit 0'
   run ensure_secret storages postgres-credentials kubernetes.io/basic-auth username hammurapi password x
   [ "$status" -eq 0 ]
-  called "kubectl --context hammurapi -n storages get secret postgres-credentials"
-  not_called "kubectl --context hammurapi create"
+  called "kubectl --context greenongrey -n storages get secret postgres-credentials"
+  not_called "kubectl --context greenongrey create"
 }
 
 @test "SEC-02: a missing secret is created, the value goes through stdin" {
@@ -105,7 +105,7 @@ setup() {
   [ "$status" -eq 0 ]
   not_called topsecret
   grep -q "admin-password: $(printf topsecret | base64)" "$BATS_TEST_TMPDIR/created.yaml"
-  grep -q "app.kubernetes.io/managed-by: hammurapi-infra" "$BATS_TEST_TMPDIR/created.yaml"
+  grep -q "app.kubernetes.io/managed-by: installer" "$BATS_TEST_TMPDIR/created.yaml"
 }
 
 @test "SEC: a generated password has 32 alphanumeric characters" {
@@ -145,10 +145,15 @@ setup() {
   [[ $output == *"IMAGE_GC_MAX_AGE"* ]]
 }
 
+@test "FTR.INFRA.INST-0001 R28: check_pods skips probes of this release and of an older tag" {
+  run grep -c "managed-by notin (installer,hammurapi-infra)" "$ROOT/lib/checks.sh"
+  [ "$output" -eq 1 ]
+}
+
 @test "probes: a label on the Job and the pod, check_pods of other runs skips them" {
   run bash -c 'source "$1"; probe_job_manifest storage-probe check - - -' _ "$ROOT/lib/checks.sh"
   [ "$status" -eq 0 ]
-  [ "$(grep -c 'app.kubernetes.io/managed-by: hammurapi-infra' <<<"$output")" -eq 2 ]
+  [ "$(grep -c 'app.kubernetes.io/managed-by: installer' <<<"$output")" -eq 2 ]
 }
 
 @test "FTR.INFRA.INST-0001 R8: all cluster access goes to KUBE_CONTEXT, by default the context of the profile" {
@@ -167,4 +172,45 @@ setup() {
 
 @test "FTR.INFRA.INST-0001 R8: the context is set only through kc and hm" {
   not_grep -nE '(kubectl|helm) +--(kube-)?context' "$ROOT"/lib/[a-bd-z]*.sh "$ROOT"/lib/cluster.sh "$ROOT"/lib/checks.sh
+}
+
+@test "FTR.INFRA.INST-0001 R28: a new install has the names of the installer" {
+  [ "$MK_PROFILE" = greenongrey ]
+  [ "$UNIT_PREFIX" = greenongrey ]
+  [ "$CERT_NAME" = greenongrey-public ]
+  [ "$LOCK_FILE" = /var/lock/installer.lock ]
+  [ "$(kube_context)" = greenongrey ]
+}
+
+@test "FTR.INFRA.INST-0001 R28: another profile exists: code 2, no second cluster" {
+  mkdir -p "$MINIKUBE_HOME/profiles/hammurapi"
+  : >"$MINIKUBE_HOME/profiles/hammurapi/config.json"
+  run check_single_profile
+  [ "$status" -eq 2 ]
+  [[ $output == *"profile hammurapi"* && $output == *"MK_PROFILE=greenongrey"* ]]
+  [[ $output == *UNIT_PREFIX* && $output == *CERT_NAME* ]]
+}
+
+@test "FTR.INFRA.INST-0001 R28: the profile of the config exists, or none exists: no error" {
+  run check_single_profile
+  [ "$status" -eq 0 ]
+  mkdir -p "$MINIKUBE_HOME/profiles/hammurapi" "$MINIKUBE_HOME/profiles/other"
+  : >"$MINIKUBE_HOME/profiles/hammurapi/config.json"
+  : >"$MINIKUBE_HOME/profiles/other/config.json"
+  MK_PROFILE=hammurapi run check_single_profile
+  [ "$status" -eq 0 ]
+}
+
+@test "FTR.INFRA.INST-0001 R28: an invalid UNIT_PREFIX or CERT_NAME: code 2" {
+  UNIT_PREFIX='a b;' run validate_config
+  [ "$status" -eq 2 ]
+  CERT_NAME='../x' run validate_config
+  [ "$status" -eq 2 ]
+}
+
+@test "FTR.INFRA.INST-0001 tech §3: the config file of deploy scripts, the old name still works" {
+  unset INSTALLER_CONFIG HAMMURAPI_INFRA_CONFIG
+  [ "$(installer_config)" = /opt/installer/local.env ]
+  [ "$(HAMMURAPI_INFRA_CONFIG=/old installer_config)" = /old ]
+  [ "$(INSTALLER_CONFIG=/new HAMMURAPI_INFRA_CONFIG=/old installer_config)" = /new ]
 }

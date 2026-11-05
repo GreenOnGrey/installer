@@ -404,8 +404,8 @@ public_access_charts() {
     local args
     args=$(docs_json "$dir/traefik.yaml" | jq -r 'select(.kind == "Deployment") | .spec.template.spec.containers[0].args[]')
     if grep -q 'redirections.entryPoint.scheme=https' <<<"$args" && grep -q 'allowACMEByPass=true' <<<"$args" &&
-      docs_json "$dir/traefik.yaml" | jq -e 'select(.kind == "TLSStore") | .spec.defaultCertificate.secretName == "hammurapi-public"' >/dev/null; then
-      pass "R19: HTTP → HTTPS, HTTP-01 bypasses the redirect, default certificate hammurapi-public"
+      docs_json "$dir/traefik.yaml" | jq -e 'select(.kind == "TLSStore") | .spec.defaultCertificate.secretName == "greenongrey-public"' >/dev/null; then
+      pass "R19: HTTP → HTTPS, HTTP-01 bypasses the redirect, default certificate greenongrey-public"
     else
       fail "R19: Traefik settings"
     fi

@@ -12,7 +12,7 @@ metadata:
   name: dashboard-{{ $name }}
   labels:
     grafana_dashboard: "1"
-    app.kubernetes.io/part-of: hammurapi-infra
+    app.kubernetes.io/part-of: installer
     app.kubernetes.io/managed-by: {{ $.Release.Service }}
   annotations:
     grafana_folder: {{ $folder | quote }}

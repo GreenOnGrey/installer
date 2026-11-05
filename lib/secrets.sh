@@ -17,7 +17,7 @@ secret_manifest() {
   local ns=$1 name=$2 type=$3
   shift 3
   printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: %s\n  namespace: %s\n' "$name" "$ns"
-  printf '  labels:\n    app.kubernetes.io/managed-by: hammurapi-infra\ntype: %s\ndata:\n' "$type"
+  printf '  labels:\n    app.kubernetes.io/managed-by: installer\ntype: %s\ndata:\n' "$type"
   while (($#)); do
     printf '  %s: %s\n' "$1" "$(printf '%s' "$2" | base64 -w0)"
     shift 2

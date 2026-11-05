@@ -67,8 +67,8 @@ setup() {
 
 @test "R4: a repeated up does not check disk space" {
   host_free_disk_gb() { echo 20; }
-  mkdir -p "$MINIKUBE_HOME/profiles/hammurapi"
-  echo '{}' >"$MINIKUBE_HOME/profiles/hammurapi/config.json"
+  mkdir -p "$MINIKUBE_HOME/profiles/greenongrey"
+  echo '{}' >"$MINIKUBE_HOME/profiles/greenongrey/config.json"
   run check_host
   [ "$status" -eq 0 ]
 }

@@ -22,7 +22,7 @@ Without public access no ports need opening, because Grafana opens through an SS
 gcloud compute ssh hammurapi-demo --zone europe-west1-b -- -L 3000:localhost:3000
 git clone https://github.com/GreenOnGrey/installer.git && cd installer
 ./installer up
-kubectl --context hammurapi -n observability port-forward svc/grafana 3000:80
+kubectl --context greenongrey -n observability port-forward svc/grafana 3000:80
 ```
 
 ## Cloud SQL for PostgreSQL
@@ -52,10 +52,10 @@ KAFKA_USERNAME=hammurapi-kafka@PROJECT.iam.gserviceaccount.com
 KAFKA_PASSWORD_FILE=/secure/kafka-password
 ```
 
-The stand's checks write and read a message in the topic `hammurapi-infra-probe`, so create it:
+The stand's checks write and read a message in the topic `installer-probe`, so create it:
 
 ```sh
-gcloud managed-kafka topics create hammurapi-infra-probe --cluster hammurapi \
+gcloud managed-kafka topics create installer-probe --cluster hammurapi \
   --location europe-west1 --partitions 1 --replication-factor 3
 ```
 
@@ -82,14 +82,14 @@ Production is the same kind of machine, to which the workflow `deploy-prod` roll
 1. The rollout user (such as `github`, created from a key in the VM metadata) has passwordless `sudo` and owns the production directory:
 
    ```sh
-   sudo install -d -o github -g github /opt/hammurapi-infra
+   sudo install -d -o github -g github /opt/installer
    ```
 
-   There is no need to clone the repository on the machine: the workflow passes an export of the tag over SSH and unpacks it into `/opt/hammurapi-infra/releases/<tag>` (the link `current` points to the deployed one). The machine needs no access to GitHub, because deploy keys are forbidden by the organization's policy.
-2. `/opt/hammurapi-infra/local.env` and the secret files of external storages go on the machine once and do not change between rollouts. They are not kept in GitHub. Logs are in `/opt/hammurapi-infra/logs`.
+   There is no need to clone the repository on the machine: the workflow passes an export of the tag over SSH and unpacks it into `/opt/installer/releases/<tag>` (the link `current` points to the deployed one). The machine needs no access to GitHub, because deploy keys are forbidden by the organization's policy.
+2. `/opt/installer/local.env` and the secret files of external storages go on the machine once and do not change between rollouts. They are not kept in GitHub. Logs are in `/opt/installer/logs`.
 3. Access from GitHub Actions, in one of these ways:
    - **`ssh`** (default, independent of a cloud): the rollout user's key in the secret `PROD_SSH_KEY`, the host fingerprint in `PROD_KNOWN_HOSTS` (`ssh-keyscan -t ed25519 <address>`), and port 22 open to GitHub runners;
-   - **`gcp-iap`**: `gcloud compute ssh --tunnel-through-iap` with Workload Identity Federation. No service account keys are stored, and port 22 is closed outside, open only to the IAP range `35.235.240.0/20`. The service account needs `roles/iap.tunnelResourceAccessor`, `roles/compute.osAdminLogin` and `roles/iam.serviceAccountUser` on the machine. The rollout user is then the service account's OS Login user (`sa_<id>`), so make it the owner of `/opt/hammurapi-infra`.
+   - **`gcp-iap`**: `gcloud compute ssh --tunnel-through-iap` with Workload Identity Federation. No service account keys are stored, and port 22 is closed outside, open only to the IAP range `35.235.240.0/20`. The service account needs `roles/iap.tunnelResourceAccessor`, `roles/compute.osAdminLogin` and `roles/iam.serviceAccountUser` on the machine. The rollout user is then the service account's OS Login user (`sa_<id>`), so make it the owner of `/opt/installer`.
 
 Workload Identity Federation for the repository:
 

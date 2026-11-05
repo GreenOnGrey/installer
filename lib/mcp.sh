@@ -185,7 +185,7 @@ sync_preview_secret() {
     PREVIEW_KEY=$(secret_key "$NS_MCP" mcp-docgen-key key) \
     jq -cn --arg ns "$ns" --arg mcp "$NS_MCP" \
       '$ENV.PREVIEW_USER as $user | $ENV.PREVIEW_PASS as $pass | $ENV.PREVIEW_KEY as $key | {apiVersion: "v1", kind: "Secret", type: "Opaque",
-        metadata: {name: "nabu-docs-preview", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-infra"}},
+        metadata: {name: "nabu-docs-preview", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "installer"}},
         stringData: {PREVIEW_CONVERT_URL: "http://doc-convert.\($mcp).svc:3000", PREVIEW_CONVERT_USER: $user, PREVIEW_CONVERT_PASSWORD: $pass,
           PREVIEW_LEGACY_URL: "http://doc-convert.\($mcp).svc:3001", PREVIEW_DOCGEN_URL: "http://docgen.\($mcp).svc:8000", PREVIEW_DOCGEN_KEY: $key}}' |
       apply_stdin
@@ -218,7 +218,7 @@ copy_pull_secret() {
     return 0
   }
   jq -c --arg ns "$NS_MCP" '{apiVersion: "v1", kind: "Secret", type: .type, data: .data,
-    metadata: {name: "ghcr-pull", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-infra"}}}' <<<"$src" |
+    metadata: {name: "ghcr-pull", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "installer"}}}' <<<"$src" |
     apply_stdin
 }
 
@@ -288,7 +288,7 @@ deploy_mcp() {
   fi
   mcp_load
   kc create ns "$NS_MCP" --dry-run=client -o json |
-    jq '.metadata.labels["app.kubernetes.io/part-of"] = "hammurapi-stand"' | apply_stdin
+    jq '.metadata.labels["app.kubernetes.io/part-of"] = "installer"' | apply_stdin
   ensure_mcp_secrets
   copy_pull_secret
   local args=()
@@ -345,7 +345,7 @@ kind: Pod
 metadata:
   name: mcp-probe-$PROBE_RUN
   namespace: $NS_MCP
-  labels: { app.kubernetes.io/name: checks-probe, app.kubernetes.io/managed-by: hammurapi-infra }
+  labels: { app.kubernetes.io/name: checks-probe, app.kubernetes.io/managed-by: installer }
 spec:
   restartPolicy: Never
   terminationGracePeriodSeconds: 1

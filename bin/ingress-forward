@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ingress-forward apply | remove | status — forwards TCP 80/443 of the machine's external
 # interface to the Traefik address given by MetalLB in the minikube Docker network
-# (FTR.HMR.INFRA-0002, R17). Run by the systemd unit hammurapi-ingress-forward
+# (FTR.HMR.INFRA-0002, R17). Run by the systemd unit <prefix>-ingress-forward
 # after docker.service and by `up`.
 #   - DNAT in nat/PREROUTING: <external interface>:80,443 → LB_IP;
 #   - an allow rule in DOCKER-USER: Docker leaves this chain alone.
@@ -10,9 +10,10 @@
 # are removed before adding, so a Docker restart leaves no duplicates.
 set -euo pipefail
 
-COMMENT=hammurapi-ingress
 PORTS=80,443
-FORWARD_STATE=${FORWARD_STATE:-/var/lib/hammurapi-infra}
+FORWARD_STATE=${FORWARD_STATE:-/var/lib/installer}
+# The prefix is in the state of `up`: the comment is the same in the unit and in a manual run.
+COMMENT=$(cat "$FORWARD_STATE/unit-prefix" 2>/dev/null || echo greenongrey)-ingress
 IPTABLES=${IPTABLES:-iptables}
 
 log() { echo "ingress-forward: $*" >&2; }

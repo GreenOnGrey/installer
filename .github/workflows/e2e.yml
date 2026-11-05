@@ -6,6 +6,7 @@ on:
     inputs:
       zone: { description: "Google Cloud zone", default: europe-west1-b, type: string }
       keep: { description: "Keep the machine after the run", default: false, type: boolean }
+      upgrade_from: { description: "Only the upgrade from this tag (PROD-01)", default: "", type: string }
 concurrency: { group: e2e, cancel-in-progress: false }
 permissions: { contents: read, id-token: write }
 
@@ -16,6 +17,7 @@ jobs:
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }  # the tag of upgrade_from
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
@@ -26,6 +28,7 @@ jobs:
           GCP_PROJECT: ${{ vars.GCP_PROJECT }}
           GCP_ZONE: ${{ inputs.zone }}
           KEEP: ${{ inputs.keep && '1' || '0' }}
+          E2E_UPGRADE_FROM: ${{ inputs.upgrade_from }}
           REPORT: ${{ github.workspace }}/e2e-report.md
         run: |
           mkdir -p .work

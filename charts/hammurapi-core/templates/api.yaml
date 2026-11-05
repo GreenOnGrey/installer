@@ -60,7 +60,7 @@ metadata:
     app.kubernetes.io/component: api
 spec:
   ingressClassName: {{ .Values.ingress.className }}
-  # The default Traefik certificate (hammurapi-public), no secret of its own.
+  # The default Traefik certificate, no secret of its own.
   tls: [{ hosts: [{{ include "core.apiHost" . | quote }}] }]
   rules:
     - host: {{ include "core.apiHost" . | quote }}

@@ -88,12 +88,12 @@ mk_state() {
   load_script
   as_root() { "$@"; }
   stub minikube 'exit 0'
-  AUTOSTART_UNIT=$BATS_TEST_TMPDIR/hammurapi-stand.service
+  UNIT_DIR=$BATS_TEST_TMPDIR
   AUTOSTART_BIN=$BATS_TEST_TMPDIR/lib/stand-autostart
   run install_autostart
   [ "$status" -eq 0 ]
   [ -x "$AUTOSTART_BIN" ]
-  local u=$AUTOSTART_UNIT
+  local u=$UNIT_DIR/greenongrey-stand.service
   grep -qx "User=$(id -un)" "$u"
   grep -qx 'Requires=docker.service' "$u"
   grep -q '^After=docker.service' "$u"
@@ -105,22 +105,35 @@ mk_state() {
   grep -qx "Environment=IMAGE_GC_LOW=80" "$u"
   grep -qx "Environment=IMAGE_GC_MAX_AGE=336h" "$u"
   grep -q "^Environment=PATH=$STUBS:" "$u"
-  called "systemctl enable hammurapi-stand.service"
+  called "systemctl enable greenongrey-stand.service"
+  called "systemctl start greenongrey-stand.service"
+}
+
+@test "FTR.INFRA.INST-0001 R28: UNIT_PREFIX names the unit, the name pinned on prod stays" {
+  load_script
+  as_root() { "$@"; }
+  stub minikube 'exit 0'
+  UNIT_DIR=$BATS_TEST_TMPDIR
+  AUTOSTART_BIN=$BATS_TEST_TMPDIR/lib/stand-autostart
+  UNIT_PREFIX=hammurapi run install_autostart
+  [ "$status" -eq 0 ]
+  [ -f "$UNIT_DIR/hammurapi-stand.service" ]
   called "systemctl start hammurapi-stand.service"
 }
 
 @test "AUTO-08: STAND_AUTOSTART=false: the unit is removed, the cluster does not stop" {
   load_script
   as_root() { "$@"; }
-  AUTOSTART_UNIT=$BATS_TEST_TMPDIR/hammurapi-stand.service
+  UNIT_DIR=$BATS_TEST_TMPDIR
   AUTOSTART_BIN=$BATS_TEST_TMPDIR/stand-autostart
-  : >"$AUTOSTART_UNIT"
+  local unit=$UNIT_DIR/greenongrey-stand.service
+  : >"$unit"
   : >"$AUTOSTART_BIN"
   export MINIKUBE_HOME=$HOME/.minikube
   run remove_autostart
   [ "$status" -eq 0 ]
-  [ ! -e "$AUTOSTART_UNIT" ] && [ ! -e "$AUTOSTART_BIN" ]
-  called "systemctl disable hammurapi-stand.service"
+  [ ! -e "$unit" ] && [ ! -e "$AUTOSTART_BIN" ]
+  called "systemctl disable greenongrey-stand.service"
   not_called "disable --now"
 }
 

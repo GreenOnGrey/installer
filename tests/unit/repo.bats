@@ -108,6 +108,19 @@ fake_release() {
   [[ $(uname) != Linux ]] || [ "$(readlink "$d/current")" = releases/v1.0.0 ]
 }
 
+@test "FTR.INFRA.INST-0001 tech §9: an up of a tag before the rename holds the old lock: code 17" {
+  load_script
+  LOCK_FILE=$BATS_TEST_TMPDIR/lock
+  OLD_LOCK_FILE=$BATS_TEST_TMPDIR/old-lock
+  : >"$LOCK_FILE"
+  : >"$OLD_LOCK_FILE"
+  flock "$OLD_LOCK_FILE" sleep 5 &
+  sleep 0.2
+  run acquire_lock
+  [ "$status" -eq 17 ]
+  [[ $output == *"$OLD_LOCK_FILE"* ]]
+}
+
 @test "FTR.INFRA.INST-0001 R26: a rollback to a tag before the rename: up and status through hammurapi-infra.sh" {
   local d=$BATS_TEST_TMPDIR/prod
   fake_release "$d"

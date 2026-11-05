@@ -3,7 +3,7 @@
 # It unpacks the tag export received from the workflow and runs `up`.
 # The machine needs no access to GitHub: the code comes from the runner over the same SSH.
 #
-#   /opt/hammurapi-infra/
+#   /opt/installer/
 #     local.env            production configuration (not from git, a rollout does not change it)
 #     logs/                logs of all up runs
 #     releases/<tag>/      tag exports, the last KEEP_RELEASES

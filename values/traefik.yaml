@@ -22,7 +22,7 @@ ports:
 # other namespaces turn TLS on without secrets of their own.
 tlsStore:
   default:
-    defaultCertificate: { secretName: hammurapi-public }
+    defaultCertificate: { secretName: greenongrey-public }
 service:
   spec:
     type: LoadBalancer
