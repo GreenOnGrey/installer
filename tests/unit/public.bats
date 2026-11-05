@@ -212,7 +212,8 @@ config_step() {
   cd "$BATS_TEST_TMPDIR/w"
   run bash -e "$BATS_TEST_TMPDIR/config.sh"
   [ "$status" -eq 1 ]
-  [[ $output == *"HAMMURAPI_WEBHOOK_SECRET (секрет)"* && $output == *"PROD_KNOWN_HOSTS (секрет)"* ]]
+  # Both languages until deploy-component.yml of every tag in use is in English.
+  [[ $output =~ HAMMURAPI_WEBHOOK_SECRET\ \((секрет|secret)\) && $output =~ PROD_KNOWN_HOSTS\ \((секрет|secret)\) ]]
 }
 
 @test "FTR.HMR.CMN-0007 R1: core without Nabu: an error before connecting, with the setting names" {
@@ -221,7 +222,7 @@ config_step() {
   cd "$BATS_TEST_TMPDIR/w"
   run bash -e "$BATS_TEST_TMPDIR/config.sh"
   [ "$status" -eq 1 ]
-  [[ $output == *"HAMMURAPI_NABU_URL (переменная)"* && $output == *"HAMMURAPI_NABU_CLIENT_ID (переменная)"* && $output == *"HAMMURAPI_NABU_CLIENT_SECRET (секрет)"* ]]
+  [[ $output =~ HAMMURAPI_NABU_URL\ \((переменная|variable)\) && $output =~ HAMMURAPI_NABU_CLIENT_ID\ \((переменная|variable)\) && $output =~ HAMMURAPI_NABU_CLIENT_SECRET\ \((секрет|secret)\) ]]
 }
 
 @test "INS-05: a complete core configuration: the chart version from deploy/versions.env" {
