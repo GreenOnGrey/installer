@@ -37,12 +37,14 @@ charts/nabu-core         Nabu: api, worker, agent, relay, egress, migrate, clean
                          DaemonSet of preloaded sandbox images; sandboxes.profiles — images of sandbox profiles
 charts/nabu-web          the SPA of Nabu
 charts/landing           the site of GreenOnGrey: nginx with static pages
+lib/preflight.sh         checks of an external cluster before anything changes in it (INSTALL_TARGET=external)
 lib/mcp.sh               optional MCP servers (FTR.NAB.CMN-0006): enabled by MCP_* options; the chart mcp-servers and
                          the descriptions of servers come from a release of `mcps` (MCP_CHART_VERSION)
 config/                  defaults.env, versions.env (chart and tool versions)
 values/                  Helm values of the stand's components
 dashboards/              Grafana dashboards; alert rules are in values/grafana.yaml (alerting)
-tests/unit/*.bats        unit tests (Linux); tests/manifests.sh — rendered manifests; tests/e2e
+tests/unit/*.bats        unit tests (Linux); tests/manifests.sh — rendered manifests; tests/kind — the external
+                         target on kind (CI job kind); tests/e2e
 ```
 
 ## Commands
@@ -52,6 +54,7 @@ shellcheck -x installer                       # CI pins shellcheck v0.11.0
 shellcheck -x tests/manifests.sh tests/e2e/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/landing-deploy bin/ingress-forward bin/stand-autostart
 bats tests/unit                                        # Linux; needs jq, yq for some tests
 bash tests/manifests.sh                                # helm, kubeconform, jq, yq, network
+bash tests/kind/kind.sh preflight                      # kind, kubectl, helm, Docker; install needs about 16 GB
 helm lint charts/hammurapi-core --set image.tag=v1 --set publicBaseDomain=x.example
 helm lint charts/landing --set image.tag=v1 --set publicBaseDomain=x.example
 ```

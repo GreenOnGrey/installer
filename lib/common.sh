@@ -3,7 +3,7 @@
 
 # Exit codes (technical specification, §1).
 readonly E_OK=0 E_UNKNOWN=1 E_USAGE=2 E_HOST=10 E_PREREQ=11 E_CLUSTER=12 E_DEPLOY=13 \
-  E_EXTERNAL=14 E_CHECKS=15 E_CANCELLED=16 E_LOCKED=17
+  E_EXTERNAL=14 E_CHECKS=15 E_CANCELLED=16 E_LOCKED=17 E_PREFLIGHT=18
 
 STEP=${STEP:-main}
 VERBOSE=${VERBOSE:-0}
@@ -154,6 +154,8 @@ require_secret() {
   fi
 }
 
+target_external() { [[ ${INSTALL_TARGET:-minikube} == external ]]; }
+
 ingress_external() { [[ ${INGRESS_MODE:-internal} == external ]]; }
 
 # ingress_from_status <status JSON> — the ingress recorded by `up`: a rollout follows the stand, whatever
@@ -218,6 +220,14 @@ validate_config() {
   case ${STAND_AUTOSTART:-true} in
     true | false) ;;
     *) die "$E_USAGE" "STAND_AUTOSTART must be true or false" ;;
+  esac
+  case ${INSTALL_TARGET:-minikube} in
+    minikube) ;;
+    external)
+      [[ -n ${CONFIG_EXPLICIT[KUBE_CONTEXT]+x} && -n ${KUBE_CONTEXT:-} ]] ||
+        die "$E_USAGE" "INSTALL_TARGET=external: set KUBE_CONTEXT to a context of kubeconfig"
+      ;;
+    *) die "$E_USAGE" "INSTALL_TARGET must be minikube or external" ;;
   esac
   case ${OBSERVABILITY:-true} in
     true | false) ;;
@@ -307,6 +317,7 @@ validate_public_config() {
     false) return 0 ;;
     *) die "$E_USAGE" "PUBLIC_ACCESS must be true or false" ;;
   esac
+  if target_external; then require_param INSTALL_TARGET=external PUBLIC_BASE_DOMAIN; fi
   case ${INGRESS_MODE:-internal} in
     internal) validate_ingress_internal ;;
     external) validate_ingress_external ;;

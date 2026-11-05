@@ -11,6 +11,8 @@ env:
   BATS_VERSION: v1.12.0
   KUBECONFORM_VERSION: v0.7.0
   YQ_VERSION: v4.47.2
+  KIND_VERSION: v0.33.0
+  KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
 
 jobs:
   shellcheck:
@@ -22,7 +24,7 @@ jobs:
           curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VERSION/shellcheck-$SHELLCHECK_VERSION.linux.x86_64.tar.xz" | tar -xJ
           sc=./shellcheck-$SHELLCHECK_VERSION/shellcheck
           $sc -x installer
-          $sc -x tests/manifests.sh tests/e2e/*.sh dashboards/normalize.sh .github/scripts/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/landing-deploy bin/ingress-forward bin/stand-autostart
+          $sc -x tests/manifests.sh tests/e2e/*.sh tests/kind/*.sh dashboards/normalize.sh .github/scripts/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/landing-deploy bin/ingress-forward bin/stand-autostart
           $sc -s bash tests/unit/*.bats tests/unit/helpers.bash
 
   actionlint:
@@ -67,3 +69,35 @@ jobs:
           sudo chmod +x /usr/local/bin/yq
       - name: Manifests for 8 combinations of storage modes
         run: bash tests/manifests.sh
+
+  # The external target on a real cluster: both bounds of Kubernetes (FTR.INFRA.INST-0001 tech §6.1).
+  kind:
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest is moving to Ubuntu 26
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { scenario: install, kubernetes: v1.35.8 }
+          - { scenario: install, kubernetes: v1.37.0 }
+          - { scenario: ingress, kubernetes: v1.37.0 }
+          - { scenario: external, kubernetes: v1.37.0 }
+          - { scenario: no-policy, kubernetes: v1.37.0 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Tools
+        env: { KUBERNETES: "${{ matrix.kubernetes }}" }
+        run: |
+          set -a; source config/versions.env; set +a
+          curl -fsSL "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz" -o /tmp/helm.tgz
+          echo "$HELM_SHA256  /tmp/helm.tgz" | sha256sum -c -
+          tar -xzf /tmp/helm.tgz -C /tmp && sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
+          curl -fsSL "https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION/kind-linux-amd64" -o /tmp/kind
+          echo "$KIND_SHA256  /tmp/kind" | sha256sum -c -
+          sudo install /tmp/kind /usr/local/bin/kind
+          # kubectl follows the server: the installer stops at two minor versions apart.
+          curl -fsSL "https://dl.k8s.io/release/$KUBERNETES/bin/linux/amd64/kubectl" -o /tmp/kubectl
+          sudo install /tmp/kubectl /usr/local/bin/kubectl
+      - name: ${{ matrix.scenario }} on Kubernetes ${{ matrix.kubernetes }}
+        env: { KIND_NODE: "kindest/node:${{ matrix.kubernetes }}" }
+        run: bash tests/kind/kind.sh "${{ matrix.scenario }}"
