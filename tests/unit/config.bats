@@ -150,3 +150,21 @@ setup() {
   [ "$status" -eq 0 ]
   [ "$(grep -c 'app.kubernetes.io/managed-by: hammurapi-infra' <<<"$output")" -eq 2 ]
 }
+
+@test "FTR.INFRA.INST-0001 R8: все обращения к кластеру идут в KUBE_CONTEXT; по умолчанию — контекст профиля" {
+  stub kubectl 'exit 0'
+  stub helm 'exit 0'
+  kc get ns
+  hm list
+  called "kubectl --context $MK_PROFILE get ns"
+  called "helm --kube-context $MK_PROFILE list"
+  KUBE_CONTEXT=other
+  kc get pods
+  hm status x
+  called "kubectl --context other get pods"
+  called "helm --kube-context other status x"
+}
+
+@test "FTR.INFRA.INST-0001 R8: контекст задан только через kc и hm" {
+  not_grep -nE '(kubectl|helm) +--(kube-)?context' "$ROOT"/lib/[a-bd-z]*.sh "$ROOT"/lib/cluster.sh "$ROOT"/lib/checks.sh
+}

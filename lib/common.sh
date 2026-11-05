@@ -267,8 +267,10 @@ human_duration() {
   if ((s >= 60)); then printf '%d мин %d с' $((s / 60)) $((s % 60)); else printf '%d с' "$s"; fi
 }
 
-kc() { kubectl --context "$MK_PROFILE" "$@"; }
-hm() { helm --kube-context "$MK_PROFILE" "$@"; }
+# kube_context — контекст kubeconfig: KUBE_CONTEXT или контекст профиля minikube.
+kube_context() { echo "${KUBE_CONTEXT:-$MK_PROFILE}"; }
+kc() { kubectl --context "$(kube_context)" "$@"; }
+hm() { helm --kube-context "$(kube_context)" "$@"; }
 
 # apply_stdin — kubectl apply из stdin (манифест не попадает в аргументы).
 apply_stdin() { kc apply -f - >/dev/null; }
