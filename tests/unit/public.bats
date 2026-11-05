@@ -119,7 +119,7 @@ mk_profile() {
   export -f sleep
   run metallb_addon 192.168.49.200 192.168.49.209
   [ "$status" -eq "$E_DEPLOY" ]
-  [[ $output == *"не удалось сохранить пул MetalLB 192.168.49.200-192.168.49.209"* ]]
+  [[ $output == *"failed to save the MetalLB pool 192.168.49.200-192.168.49.209"* ]]
 }
 
 # --- Конфигурация публичного доступа (R18, R21) ---

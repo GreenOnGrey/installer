@@ -14,8 +14,8 @@ setup() {
 @test "CMD-05: неизвестная команда — код 2 и справка" {
   run bash "$SCRIPT" deploy
   [ "$status" -eq 2 ]
-  [[ $output == *"неизвестная команда или флаг: deploy"* ]]
-  [[ $output == *"Использование"* ]]
+  [[ $output == *"unknown command or flag: deploy"* ]]
+  [[ $output == *"Usage"* ]]
 }
 
 @test "CMD-05: неизвестный флаг — код 2" {
@@ -48,7 +48,7 @@ setup() {
 @test "CMD-03: down, ответ «нет» — код 16, профиль не удалён" {
   run bash -c "echo no | bash '$SCRIPT' down --no-color"
   [ "$status" -eq 16 ]
-  [[ $output == *"ничего не удалено"* ]]
+  [[ $output == *"nothing was deleted"* ]]
   not_called "minikube delete"
 }
 
@@ -67,14 +67,14 @@ setup() {
   run print_summary
   [ "$status" -eq 0 ]
   # Время считается от SECONDS: на медленной машине тест идёт дольше секунды.
-  [[ $output =~ Стенд\ готов\ за\ 14\ мин\ 3[2-9]\ с ]]
+  [[ $output =~ Ready\ in\ 14m\ 3[2-9]s ]]
   [[ $output == *"v1.4.0"* ]]
   [[ $output == *"postgres.storages.svc:5432"* && $output == *"kafka.storages.svc:9092"* && $output == *"s3.storages.svc:9000"* ]]
   [[ $output == *"Kafka $KAFKA_VERSION"* && $output == *"grafana"*"13.2.7"* ]]
   [[ $output == *"ssh -L 3000:localhost:3000"* ]]
   [[ $output == *"port-forward svc/grafana 3000:80"* ]]
   [[ $output == *"./installer creds"* ]]
-  [[ $output == *"(25 %)"* ]]
+  [[ $output == *"(25%)"* ]]
 }
 
 @test "CMD-01: status --json без кластера — валидный JSON и код 15" {

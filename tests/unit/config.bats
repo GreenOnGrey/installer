@@ -13,7 +13,7 @@ setup() {
   printf 'POSTGRES_MODE=external\nPOSTGRES_PASSWORD=s3cret\n' >"$BATS_TEST_TMPDIR/local.env"
   run load_config "$ROOT" "$BATS_TEST_TMPDIR/local.env"
   [ "$status" -eq 2 ]
-  [[ $output == *"POSTGRES_PASSWORD записан прямо"* ]]
+  [[ $output == *"POSTGRES_PASSWORD is written directly"* ]]
   [[ $output != *"s3cret"* ]]
 }
 

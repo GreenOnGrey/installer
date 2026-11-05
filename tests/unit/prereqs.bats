@@ -36,7 +36,7 @@ setup() {
   stub curl 'while (($#)); do [[ $1 == -o ]] && echo corrupted >"$2"; shift; done'
   run install_minikube
   [ "$status" -eq 11 ]
-  [[ $output == *"контрольная сумма minikube"* ]]
+  [[ $output == *"checksum of minikube"* ]]
   not_called "as_root install"
 }
 

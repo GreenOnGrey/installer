@@ -88,7 +88,7 @@ esac'
   ROOT=$BATS_TEST_TMPDIR
   run mcp_load
   [ "$status" -eq 13 ]
-  [[ $output == *"не удалось загрузить чарт"* ]]
+  [[ $output == *"failed to download chart"* ]]
 }
 
 @test "FTR.INFRA.INST-0001 R21: включённая опция без сервера в чарте — код 2" {
@@ -119,7 +119,7 @@ esac'
   ROOT=$BATS_TEST_TMPDIR
   run mcp_status_json
   [ "$status" -eq 0 ]
-  jq -e '.error | test("не удалось загрузить чарт")' <<<"$output"
+  jq -e '.error | test("failed to download chart")' <<<"$output"
   CHECK_RESULTS=()
   check_mcp
   [[ ${CHECK_RESULTS[*]} == *"mcp|fail|"* ]]
@@ -129,7 +129,7 @@ esac'
   MCP_DOCLING=yes
   run validate_mcp_config
   [ "$status" -eq 2 ]
-  [[ $output == *"MCP_DOCLING должен быть true или false"* ]]
+  [[ $output == *"MCP_DOCLING must be true or false"* ]]
 }
 
 @test "неверный список поисковых систем — код 2" {
@@ -147,10 +147,10 @@ esac'
   MK_MEMORY=12g
   # стенд 6 ГиБ + серверы 3 ГиБ = 9 ГиБ при бюджете 8 ГиБ из 12; системная часть 0,5 ГиБ
   run mcp_budget $((6 << 30)) $((3 << 30)) $((12 << 30)) $((25 << 29))
-  [[ $output == *"не хватает 1,0 ГиБ"* ]]
+  [[ $output == *"lack 1.0 GiB"* ]]
   # 9 × 3/2 + 0,5 = 14 ГиБ
   [[ $output == *"MK_MEMORY=14g"* ]]
-  [[ $output == *"(сейчас 12g)"* ]]
+  [[ $output == *"(now 12g)"* ]]
 }
 
 @test "STD-11, STD-12, STD-03: ключи создаются один раз, у выключенных удаляются после релиза" {
@@ -263,7 +263,7 @@ esac'
   CHECK_RESULTS=()
   check_mcp_server search
   [[ " ${CHECK_RESULTS[*]} " == *"mcp-search-auth|ok"* ]]
-  [[ " ${CHECK_RESULTS[*]} " == *"mcp-search-tools|ok|2 инструментов"* ]]
+  [[ " ${CHECK_RESULTS[*]} " == *"mcp-search-tools|ok|2 tools"* ]]
   [[ " ${CHECK_RESULTS[*]} " == *"mcp-search-query|ok"* ]]
   [ "${MCP_TOOL_COUNT[search]}" = 2 ]
 }

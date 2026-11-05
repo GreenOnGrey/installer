@@ -29,7 +29,7 @@ mk_state() {
   called "kubectl --context hammurapi wait pods --all-namespaces --for=condition=Ready --selector=!job-name --field-selector=status.phase!=Succeeded,status.phase!=Failed"
   called "minikube ssh -p hammurapi -- sudo sh -c"
   called "kubelet-gc 85 80 336h"
-  [[ $output == *"все поды готовы"* ]]
+  [[ $output == *"all pods are ready"* ]]
 }
 
 @test "AUTO-02: кластер уже запущен (включение юнита в up) — ничего не делает и не ждёт подов" {
@@ -38,7 +38,7 @@ mk_state() {
   [ "$status" -eq 0 ]
   not_called "minikube start"
   not_called "kubectl"
-  [[ $output == *"уже запущен"* ]]
+  [[ $output == *"already running"* ]]
 }
 
 @test "AUTO-03: поды не готовы — юнит не проваливается, неготовые в журнале" {
@@ -49,7 +49,7 @@ mk_state() {
   esac'
   run bash "$AUTOSTART" start
   [ "$status" -eq 0 ]
-  [[ $output == *"не все поды готовы"* && $output == *"storages/hammurapi-pg-1 0/1 CrashLoopBackOff"* ]]
+  [[ $output == *"not all pods are ready"* && $output == *"storages/hammurapi-pg-1 0/1 CrashLoopBackOff"* ]]
   [[ $output != *"grafana-0"* ]]
 }
 
@@ -80,7 +80,7 @@ mk_state() {
   mk_state Stopped/Stopped
   run bash "$AUTOSTART" start
   [ "$status" -eq 1 ]
-  [[ $output == *"Docker не отвечает"* ]]
+  [[ $output == *"Docker has not answered"* ]]
   not_called "minikube start"
 }
 
@@ -136,7 +136,7 @@ mk_state() {
   [ "$status" -eq 0 ]
   called "minikube ssh -p hammurapi -- sudo sh -c"
   called "kubelet-gc 85 80 168h"
-  [[ $output == *"kubelet перезапущен"* ]]
+  [[ $output == *"kubelet restarted"* ]]
   stub minikube 'echo unchanged'
   run bash "$AUTOSTART" kubelet-gc
   [ "$status" -eq 0 ]
@@ -147,11 +147,11 @@ mk_state() {
   stub minikube 'case "$*" in ssh*) echo "ssh: connection refused"; exit 1 ;; esac'
   run bash "$AUTOSTART" kubelet-gc
   [ "$status" -eq 1 ]
-  [[ $output == *"не удалось"*"connection refused"* ]]
+  [[ $output == *"failed"*"connection refused"* ]]
   stub minikube 'case "$*" in status*) echo Stopped/Stopped ;; ssh*) exit 1 ;; esac'
   run bash "$AUTOSTART" start
   [ "$status" -eq 0 ]
-  [[ $output == *"все поды готовы"* ]]
+  [[ $output == *"all pods are ready"* ]]
 }
 
 @test "AUTO-12: скрипт kubelet-gc в ноде — выставляет ключи, второй запуск ничего не меняет" {
@@ -185,5 +185,5 @@ mk_state() {
   run kubelet_gc
   [ "$status" -eq 0 ]
   called "minikube ssh -p hammurapi -- sudo sh -c"
-  [[ $output == *"сборка мусора образов: диск 85"* ]]
+  [[ $output == *"image garbage collection: disk 85"* ]]
 }

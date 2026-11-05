@@ -87,13 +87,13 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   PUBLIC=false
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 20 ]
-  [[ $output == *"публичный доступ стенда выключен"* ]]
+  [[ $output == *"public access of the stand is off"* ]]
 }
 
 @test "INS-02: web до core — код 21, «сначала выкатите hammurapi-core», сервер не изменён" {
   run deploy hammurapi-web v2.3.0 0.4.0
   [ "$status" -eq 21 ]
-  [[ $output == *"сначала выкатите hammurapi-core"* ]]
+  [[ $output == *"roll out hammurapi-core first"* ]]
   not_called "create namespace"
   not_called "apply -f -"
 }
@@ -158,7 +158,7 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   CORE_INSTALLED=true
   run deploy hammurapi-core v1.8.0 0.4.0
   [ "$status" -eq 24 ]
-  [[ $output == *"ключ шифрования изменён"* ]]
+  [[ $output == *"encryption key changed"* ]]
   not_called "upgrade --install"
 }
 

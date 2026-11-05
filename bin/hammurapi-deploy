@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # hammurapi-deploy <component> <tag> <chart_version> [--allow-key-rotation]
 #
-# Выкатка Hammurapi на стенд (FTR.HMR.INFRA-0002, техспека п. 3). Запускается
-# переиспользуемым workflow deploy-component.yml по SSH на машине стенда.
+# Rolls out Hammurapi on the stand (FTR.HMR.INFRA-0002, tech §3). Run by the
+# reusable workflow deploy-component.yml over SSH on the machine of the stand.
 #   component       hammurapi-core | hammurapi-web
-#   stdin           JSON с конфигурацией и секретами (п. 3.1); читается в память,
-#                   на диск, в аргументы команд и журнал не попадает
-#   stdout/stderr   журнал; последняя строка stdout — JSON-итог
+#   stdin           JSON with configuration and secrets (§3.1); read into memory,
+#                   it never reaches disk, command arguments or logs
+#   stdout/stderr   log; the last line of stdout is the JSON result
 #                   { status, component, tag, revision, firstInstall, publicBaseDomain, … }
 #
-# Коды: 17 уже идёт выкатка компонента; 20 стенд не готов или нет публичного
-# доступа; 21 web без core; 22 namespace; 23 секреты и конфигурация; 24 изменён
-# ключ шифрования токенов; 25 релиз Helm (--atomic вернул прежнюю ревизию);
-# 26 GitHub App; 27 готовность подов.
+# Codes: 17 a rollout of the component is running; 20 the stand is not ready or has no public
+# access; 21 web without core; 22 namespace; 23 secrets and configuration; 24 the token
+# encryption key changed; 25 Helm release (--atomic restored the previous revision);
+# 26 GitHub App; 27 pod readiness.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
@@ -32,17 +32,17 @@ FIRST_INSTALL=false BASE_DOMAIN="" REVISION="" DIAG="" PAYLOAD="" HELM_REG=""
 FAIL_MSG=""
 
 usage() {
-  echo "использование: hammurapi-deploy <hammurapi-core|hammurapi-web> <vX.Y.Z> <версия чарта> [--allow-key-rotation]" >&2
+  echo "usage: hammurapi-deploy <hammurapi-core|hammurapi-web> <vX.Y.Z> <chart version> [--allow-key-rotation]" >&2
   exit "$E_USAGE"
 }
 
-# fail <код> <сообщение> — запоминает причину для итога и завершает работу.
+# fail <code> <message> — keeps the reason for the result and exits.
 fail() {
   FAIL_MSG=$2
   die "$1" "$2"
 }
 
-# result — итог последней строкой stdout, и при успехе, и при ошибке.
+# result — the result as the last line of stdout, on success and on failure.
 result() {
   local code=$1 status=success
   ((code == 0)) || status=failure
@@ -54,7 +54,7 @@ result() {
     '{status: $s, component: $c, tag: $t, chartVersion: $chart, revision: $r, firstInstall: $first,
       publicBaseDomain: $d, code: $code}
      + (if $d != "" then {webUrl: "https://\($web).\($d)", apiUrl: "https://\($api).\($d)"} else {} end)
-     + (if $s == "failure" then {error: (if $e == "" then "код \($code)" else $e end), diagnostics: $diag} else {} end)'
+     + (if $s == "failure" then {error: (if $e == "" then "code \($code)" else $e end), diagnostics: $diag} else {} end)'
 }
 
 parse_args() {
@@ -69,16 +69,16 @@ parse_args() {
     shift
   done
   case $COMPONENT in hammurapi-core | hammurapi-web) ;; *) usage ;; esac
-  [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$E_USAGE" "тег «$TAG» не в формате vX.Y.Z"
-  [[ $CHART_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$E_USAGE" "версия чарта «$CHART_VERSION» не в формате X.Y.Z"
+  [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$E_USAGE" "tag '$TAG' is not in the format vX.Y.Z"
+  [[ $CHART_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$E_USAGE" "chart version '$CHART_VERSION' is not in the format X.Y.Z"
 }
 
 acquire_deploy_lock() {
   exec 8>>"$DEPLOY_LOCK_DIR/hammurapi-deploy-$COMPONENT.lock"
-  flock -n 8 || fail "$E_LOCKED" "уже выполняется выкатка $COMPONENT на этой машине"
+  flock -n 8 || fail "$E_LOCKED" "a rollout of $COMPONENT is already running on this machine"
 }
 
-# payload <jq-путь> — значение из JSON stdin (jq читает из pipe, не из аргументов).
+# payload <jq path> — a value from the stdin JSON (jq reads a pipe, not arguments).
 payload() { printf '%s' "$PAYLOAD" | jq -r "$1 // empty"; }
 
 read_payload() {
@@ -88,38 +88,38 @@ read_payload() {
     PAYLOAD=$(cat)
     [[ -n $PAYLOAD ]] || PAYLOAD='{}'
   fi
-  printf '%s' "$PAYLOAD" | jq -e 'type == "object"' >/dev/null 2>&1 || fail "$E_SECRETS" "stdin: ожидается JSON-объект"
+  printf '%s' "$PAYLOAD" | jq -e 'type == "object"' >/dev/null 2>&1 || fail "$E_SECRETS" "stdin: a JSON object is expected"
 }
 
-# --- 1. Стенд ---
+# --- 1. The stand ---
 
 check_stand() {
   step stand
   local st cfg=()
-  # Конфигурация стенда на проде — вне выгрузки релиза (/opt/hammurapi-infra/local.env).
+  # On prod the configuration is outside the unpacked release (/opt/hammurapi-infra/local.env).
   [[ -f ${HAMMURAPI_INFRA_CONFIG:-} ]] && cfg=(--config "$HAMMURAPI_INFRA_CONFIG")
   st=$(INSTALLER_STAND_ONLY=1 bash "$STATUS_CMD" status --json --no-color "${cfg[@]}" 2>/dev/null) || true
   if ! jq -e . >/dev/null 2>&1 <<<"$st"; then
-    fail "$E_STAND" "стенд не отвечает: installer status --json"
+    fail "$E_STAND" "the stand does not answer: installer status --json"
   fi
   if [[ $(jq -r '.ok' <<<"$st") != true ]]; then
-    fail "$E_STAND" "стенд не готов: $(jq -r '[.checks[] | select(.ok | not) | "\(.name): \(.message)"] | join("; ")' <<<"$st")"
+    fail "$E_STAND" "the stand is not ready: $(jq -r '[.checks[] | select(.ok | not) | "\(.name): \(.message)"] | join("; ")' <<<"$st")"
   fi
   if [[ $(jq -r '.public.enabled' <<<"$st") != true ]]; then
-    fail "$E_STAND" "публичный доступ стенда выключен: PUBLIC_ACCESS=true в конфигурации installer и up"
+    fail "$E_STAND" "public access of the stand is off: set PUBLIC_ACCESS=true in the installer configuration and run up"
   fi
   BASE_DOMAIN=$(jq -r '.public.baseDomain // empty' <<<"$st")
-  [[ -n $BASE_DOMAIN ]] || fail "$E_STAND" "стенд не сообщил базовый домен"
-  ok "стенд готов, домен $BASE_DOMAIN"
+  [[ -n $BASE_DOMAIN ]] || fail "$E_STAND" "the stand did not report a base domain"
+  ok "the stand is ready, domain $BASE_DOMAIN"
 }
 
-# --- 2. Порядок компонентов ---
+# --- 2. Order of components ---
 
 check_order() {
   if hm status hammurapi-core -n "$NS" >/dev/null 2>&1; then
     [[ $COMPONENT == hammurapi-core ]] && FIRST_INSTALL=false
   else
-    [[ $COMPONENT == hammurapi-web ]] && fail "$E_NO_CORE" "сначала выкатите hammurapi-core"
+    [[ $COMPONENT == hammurapi-web ]] && fail "$E_NO_CORE" "roll out hammurapi-core first"
     FIRST_INSTALL=true
   fi
   if [[ $COMPONENT == hammurapi-web ]] && ! hm status hammurapi-web -n "$NS" >/dev/null 2>&1; then
@@ -131,19 +131,19 @@ check_order() {
 
 ensure_namespaces() {
   step namespaces
-  kc create namespace "$NS" --dry-run=client -o yaml | apply_stdin || fail "$E_NS" "не удалось создать namespace $NS"
+  kc create namespace "$NS" --dry-run=client -o yaml | apply_stdin || fail "$E_NS" "failed to create namespace $NS"
 }
 
-# --- 4. Секреты и конфигурация ---
+# --- 4. Secrets and configuration ---
 
-# apply_json — манифест из stdin (JSON) в kubectl apply: значения не попадают в аргументы.
+# apply_json — a JSON manifest from stdin to kubectl apply: values stay out of arguments.
 apply_json() { kc apply -f - >/dev/null; }
 
 ghcr_pull() {
   local token
   token=$(payload .ghcrPullToken)
   if [[ -z $token ]]; then
-    kc -n "$NS" get secret ghcr-pull >/dev/null 2>&1 || fail "$E_SECRETS" "нет ghcrPullToken и секрета ghcr-pull"
+    kc -n "$NS" get secret ghcr-pull >/dev/null 2>&1 || fail "$E_SECRETS" "neither ghcrPullToken nor the secret ghcr-pull exists"
     return
   fi
   printf '%s' "$token" | jq -Rc --arg ns "$NS" --arg reg "$REGISTRY" '
@@ -151,7 +151,7 @@ ghcr_pull() {
     | {apiVersion: "v1", kind: "Secret", type: "kubernetes.io/dockerconfigjson",
        metadata: {name: "ghcr-pull", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
        data: {".dockerconfigjson": ($cfg | tojson | @base64)}}' | apply_json ||
-    fail "$E_SECRETS" "не удалось записать ghcr-pull в $NS"
+    fail "$E_SECRETS" "failed to write ghcr-pull to $NS"
 }
 
 check_key_fingerprint() {
@@ -159,8 +159,8 @@ check_key_fingerprint() {
   fp=$(payload .secrets.TOKEN_ENCRYPTION_KEY | sha256sum | awk '{print $1}')
   saved=$(kc -n "$NS" get configmap hammurapi-key-fingerprint -o jsonpath='{.data.sha256}' 2>/dev/null || true)
   if [[ -n $saved && $saved != "$fp" ]]; then
-    ((ALLOW_KEY_ROTATION)) || fail "$E_KEY" "ключ шифрования изменён: сохранённые токены пользователей станут нечитаемыми; для намеренной смены — allow_key_rotation"
-    warn "ключ шифрования токенов изменён (allow_key_rotation): пользователи войдут заново"
+    ((ALLOW_KEY_ROTATION)) || fail "$E_KEY" "the encryption key changed: stored user tokens become unreadable; to change it on purpose, use allow_key_rotation"
+    warn "the token encryption key changed (allow_key_rotation): users will sign in again"
   fi
   kc -n "$NS" create configmap hammurapi-key-fingerprint --from-literal="sha256=$fp" --dry-run=client -o yaml | apply_stdin
 }
@@ -173,12 +173,12 @@ copy_conn_secrets() {
         {apiVersion: "v1", kind: "Secret", type: "Opaque",
          metadata: {name: .metadata.name, namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
          data: .data}
-        # Для core: S3_ENDPOINT — host:port без схемы, S3_USE_SSL — по схеме.
+        # For core: S3_ENDPOINT is host:port without a scheme, S3_USE_SSL follows the scheme.
         | if .metadata.name == "s3-conn" then
             (.data.endpoint | @base64d) as $e
             | .data.endpoint_host = ($e | sub("^https?://"; "") | sub("/.*$"; "") | @base64)
             | .data.use_ssl = ((if ($e | startswith("https://")) then "true" else "false" end) | @base64)
-          else . end' | apply_json || fail "$E_SECRETS" "не удалось скопировать $name из $NS_STORAGES"
+          else . end' | apply_json || fail "$E_SECRETS" "failed to copy $name from $NS_STORAGES"
   done
 }
 
@@ -187,7 +187,7 @@ require_payload() {
   for k in "$@"; do
     [[ -n $(payload "$k") ]] || missing+=("${k#.}")
   done
-  ((${#missing[@]} == 0)) || fail "$E_SECRETS" "в конфигурации нет: ${missing[*]}"
+  ((${#missing[@]} == 0)) || fail "$E_SECRETS" "missing from the configuration: ${missing[*]}"
 }
 
 sync_core_config() {
@@ -198,34 +198,34 @@ sync_core_config() {
   check_key_fingerprint
   app_jwt
   APP_SLUG=$(github GET /app | jq -r '.slug // empty')
-  [[ -n $APP_SLUG ]] || fail "$E_APP" "GitHub App недоступен: проверьте HAMMURAPI_GITHUB_APP_ID и ключ"
+  [[ -n $APP_SLUG ]] || fail "$E_APP" "GitHub App is unavailable: check HAMMURAPI_GITHUB_APP_ID and the key"
 
-  # Несекретная конфигурация → ConfigMap hammurapi-config.
+  # Non-secret configuration → ConfigMap hammurapi-config.
   printf '%s' "$PAYLOAD" | jq -c --arg ns "$NS" --arg bot "${APP_SLUG}[bot]" '
     {apiVersion: "v1", kind: "ConfigMap",
      metadata: {name: "hammurapi-config", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
      data: ({GIT_PROVIDER: "github", HAMMURAPI_BOT_LOGIN: $bot} + (.config // {} | with_entries(.value |= tostring)))}' |
-    apply_json || fail "$E_SECRETS" "не удалось записать hammurapi-config"
+    apply_json || fail "$E_SECRETS" "failed to write hammurapi-config"
 
-  # Секреты → Secret hammurapi-secrets. Токена оператора агента больше нет:
-  # агент Hammurapi — Nabu (FTR.HMR.CMN-0007 R3).
+  # Secrets → Secret hammurapi-secrets. The agent operator token is gone:
+  # the agent of Hammurapi is Nabu (FTR.HMR.CMN-0007 R3).
   printf '%s' "$PAYLOAD" | jq -c --arg ns "$NS" '
     (.secrets // {}) as $s
     | {apiVersion: "v1", kind: "Secret", type: "Opaque",
        metadata: {name: "hammurapi-secrets", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
        stringData: ($s | del(.DEPLOY_CALLBACK_SECRET, .ACP_AGENT_ENV)
          | .GITHUB_APP_PRIVATE_KEY = (.GITHUB_APP_PRIVATE_KEY | gsub("\\\\n"; "\n")))}' |
-    apply_json || fail "$E_SECRETS" "не удалось записать hammurapi-secrets"
+    apply_json || fail "$E_SECRETS" "failed to write hammurapi-secrets"
 
   copy_conn_secrets
-  ok "конфигурация и секреты синхронизированы с GitHub"
+  ok "configuration and secrets are in sync with GitHub"
 }
 
 # --- GitHub App ---
 
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
-# app_jwt — JWT приложения (RS256, 9 минут); ключ передаётся openssl через /dev/fd.
+# app_jwt — the app JWT (RS256, 9 minutes); the key reaches openssl through /dev/fd.
 app_jwt() {
   local now header body unsigned sig
   now=$(date +%s)
@@ -233,12 +233,12 @@ app_jwt() {
   body=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' $((now - 60)) $((now + 540)) "$(payload .config.GITHUB_APP_ID)" | b64url)
   unsigned="$header.$body"
   sig=$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign <(payload .secrets.GITHUB_APP_PRIVATE_KEY | sed 's/\\n/\n/g') | b64url) ||
-    fail "$E_APP" "не удалось подписать JWT ключом GitHub App"
+    fail "$E_APP" "failed to sign the JWT with the GitHub App key"
   APP_JWT="$unsigned.$sig"
 }
 
-# github <метод> <путь> [тело JSON из stdin] — API GitHub от имени приложения;
-# заголовок с JWT передаётся curl через /dev/fd, а не аргументом.
+# github <method> <path> [JSON body from stdin] — the GitHub API as the app;
+# the JWT header reaches curl through /dev/fd, not an argument.
 github() {
   local method=$1 path=$2 data=()
   [[ $method != GET ]] && data=(--data-binary @-)
@@ -254,23 +254,23 @@ configure_app() {
   url="https://${HAMMURAPI_API_HOST:-hammurapi-api}.$BASE_DOMAIN/hooks/v1/git"
   state=$(kc -n "$NS" get configmap hammurapi-deploy-state -o jsonpath='{.data.webhookUrl}' 2>/dev/null || true)
   if [[ $FIRST_INSTALL != true && $state == "$url" ]]; then
-    debug "адрес вебхука GitHub App не менялся"
+    debug "the GitHub App webhook address did not change"
     return
   fi
-  # Адрес и секрет вебхука приложения (R13); секрет — в теле из jq, не в аргументах.
+  # Address and secret of the app webhook (R13); the secret is in the jq body, not arguments.
   printf '%s' "$PAYLOAD" | jq -c --arg url "$url" '{url: $url, content_type: "json", secret: .secrets.WEBHOOK_SECRET, insecure_ssl: "0"}' |
-    github PATCH /app/hook/config >/dev/null || fail "$E_APP" "не удалось записать адрес вебхука GitHub App"
+    github PATCH /app/hook/config >/dev/null || fail "$E_APP" "failed to write the GitHub App webhook address"
   inst=$(github GET "/repos/$repo/installation" 2>/dev/null | jq -r '.id // empty') || true
-  [[ -n $inst ]] || fail "$E_APP" "нет доступа к $repo: установите приложение — https://github.com/apps/$APP_SLUG/installations/new"
+  [[ -n $inst ]] || fail "$E_APP" "no access to $repo: install the app at https://github.com/apps/$APP_SLUG/installations/new"
   perms=$(github GET "/app/installations/$inst" | jq -c '{c: .permissions.contents, p: .permissions.pull_requests, e: (.events // [])}')
   if [[ $(jq -r '.c == "write" and .p == "write"' <<<"$perms") != true ]]; then
-    fail "$E_APP" "у GitHub App на $repo нет прав contents: write и pull_requests: write"
+    fail "$E_APP" "the GitHub App lacks contents: write and pull_requests: write on $repo"
   fi
   if [[ $(jq -r '(.e | index("push")) != null and (.e | index("pull_request")) != null' <<<"$perms") != true ]]; then
-    fail "$E_APP" "GitHub App не подписан на события push и pull_request"
+    fail "$E_APP" "the GitHub App is not subscribed to push and pull_request events"
   fi
   kc -n "$NS" create configmap hammurapi-deploy-state --from-literal="webhookUrl=$url" --dry-run=client -o yaml | apply_stdin
-  ok "GitHub App: вебхук $url, доступ к $repo"
+  ok "GitHub App: webhook $url, access to $repo"
 }
 
 # --- 5. Helm ---
@@ -280,12 +280,12 @@ helm_login() {
   token=$(payload .ghcrPullToken)
   [[ -n $token ]] || token=$(kc -n "$NS" get secret ghcr-pull -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null |
     base64 -d | jq -r --arg r "$REGISTRY" '.auths[$r].password // empty')
-  [[ -n $token ]] || fail "$E_HELM" "нет токена чтения реестра для чарта"
-  # Учётные данные реестра — в tmpfs на время выкатки.
+  [[ -n $token ]] || fail "$E_HELM" "no registry read token for the chart"
+  # Registry credentials stay in tmpfs during the rollout.
   HELM_REG=$(mktemp -p /dev/shm hammurapi-helm-XXXXXX.json 2>/dev/null || mktemp)
   export HELM_REGISTRY_CONFIG=$HELM_REG
   printf '%s' "$token" | helm registry login "$REGISTRY" --username hammurapi --password-stdin >/dev/null 2>&1 ||
-    fail "$E_HELM" "не удалось войти в $REGISTRY"
+    fail "$E_HELM" "failed to sign in to $REGISTRY"
 }
 
 diagnostics() {
@@ -318,15 +318,15 @@ helm_deploy() {
     --set-string "hosts.web=${HAMMURAPI_WEB_HOST:-hammurapi}" --set-string "hosts.api=${HAMMURAPI_API_HOST:-hammurapi-api}"
     --atomic --wait --timeout "${HELM_TIMEOUT:-10m}")
   [[ -n $image ]] && args+=(--set-string "image.repository=$image")
-  log "helm upgrade --install $COMPONENT $TAG (чарт $CHART_VERSION)"
+  log "helm upgrade --install $COMPONENT $TAG (chart $CHART_VERSION)"
   if ! hm "${args[@]}" >&2; then
     diagnostics
-    fail "$E_HELM" "релиз $COMPONENT $TAG не развёрнут, Helm вернул прежнюю ревизию; диагностика: $DIAG"
+    fail "$E_HELM" "release $COMPONENT $TAG was not deployed, Helm restored the previous revision; diagnostics: $DIAG"
   fi
   REVISION=$(hm status "$COMPONENT" -n "$NS" -o json 2>/dev/null | jq -r '.version // empty')
 }
 
-# --- 7. Готовность ---
+# --- 7. Readiness ---
 
 wait_ready() {
   step ready
@@ -335,10 +335,10 @@ wait_ready() {
   for d in "${deploys[@]}"; do
     if ! kc -n "$NS" rollout status "deploy/$d" --timeout=5m >/dev/null 2>&1; then
       diagnostics
-      fail "$E_READY" "$d не готов; диагностика: $DIAG"
+      fail "$E_READY" "$d is not ready; diagnostics: $DIAG"
     fi
   done
-  ok "$COMPONENT $TAG готов (ревизия $REVISION)"
+  ok "$COMPONENT $TAG is ready (revision $REVISION)"
 }
 
 on_exit() {
@@ -349,7 +349,7 @@ on_exit() {
 
 main() {
   trap on_exit EXIT
-  # Цвета до первого сообщения: die при ошибке в аргументах их использует.
+  # Colors before the first message: die uses them on an argument error.
   COLOR=0
   setup_color
   parse_args "$@"

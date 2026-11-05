@@ -1,14 +1,14 @@
 # shellcheck shell=bash disable=SC2016
-# SC2016: скрипты проб намеренно в одинарных кавычках — они выполняются в контейнерах.
-# Проверки стенда (R14, R15). Всё выполняется изнутри кластера, наружу ничего
-# не открывается. Пробные поды и Job удаляются после проверки.
+# SC2016: probe scripts are in single quotes on purpose: they run inside containers.
+# Checks of the stand (R14, R15). Everything runs inside the cluster and nothing
+# is exposed. Probe pods and Jobs are removed after the check.
 
 VM_URL="http://victoria-metrics-victoria-metrics-single-server:8428"
 VL_URL="http://victoria-logs-victoria-logs-single-server:9428"
 GRAFANA_URL="http://grafana"
 PROBE_TOPIC=hammurapi-infra-probe
 
-# Результаты проверок: «имя|ok|сообщение» или «имя|fail|сообщение».
+# Check results: name|ok|message or name|fail|message.
 CHECK_RESULTS=()
 MEM_REQUESTED=0 MEM_ALLOCATABLE=0
 
@@ -16,14 +16,14 @@ record() { CHECK_RESULTS+=("$1|$2|$3"); }
 
 probe_id() { openssl rand -hex 6; }
 
-# Суффикс пробных подов и заданий этого запуска: два развёртывания стенда,
-# идущие одновременно, не удаляют пробы друг друга. Брошенные пробы
-# завершаются сами (activeDeadlineSeconds, ttlSecondsAfterFinished).
+# Suffix of this run's probe pods and Jobs: two deploys running at the same time
+# do not delete each other's probes. Abandoned probes end on their own
+# (activeDeadlineSeconds, ttlSecondsAfterFinished).
 PROBE_RUN=${PROBE_RUN:-$(probe_id)}
 CHECKS_PROBE="checks-probe-$PROBE_RUN"
 LOG_PROBE="log-probe-$PROBE_RUN"
 
-# expected_jobs — задания сбора метрик текущей конфигурации (R8).
+# expected_jobs — scrape jobs of the current configuration (R8).
 expected_jobs() {
   local jobs=(kubelet cadvisor apiserver node-exporter kube-state-metrics stack)
   [[ $KAFKA_MODE == internal ]] && jobs+=(kafka kafka-exporter)
@@ -33,7 +33,7 @@ expected_jobs() {
   printf '%s\n' "${jobs[@]}"
 }
 
-# --- Пробные поды ---
+# --- Probe pods ---
 
 probe_resources() {
   printf '      resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { cpu: 200m, memory: %s } }\n' "${1:-128Mi}"
@@ -82,19 +82,19 @@ $(probe_resources 32Mi)
 EOF
 }
 
-# Скрипты контейнеров пробы хранилищ. MODE=check — только доступность
-# (до развёртывания, внешний режим), MODE=full — запись и чтение.
+# Container scripts of the storage probe. MODE=check tests access only
+# (before the deploy, external mode), MODE=full writes and reads.
 readonly PG_PROBE='
 export PGHOST="$PG_host" PGPORT="$PG_port" PGUSER="$PG_username" PGPASSWORD="$PG_password" PGDATABASE="$PG_database" PGSSLMODE="$PG_sslmode" PGCONNECT_TIMEOUT=10
 if [ "$MODE" = check ]; then
-  pg_isready -q -t 10 || { echo "Postgres: $PG_host:$PG_port недоступен"; exit 1; }
+  pg_isready -q -t 10 || { echo "Postgres: $PG_host:$PG_port is unreachable"; exit 1; }
   exit 0
 fi
 out=$(psql -tAc "select 1" 2>&1)
 if [ "$out" = 1 ]; then echo "Postgres: select 1 — ok"; exit 0; fi
 case "$out" in
-  *"password authentication failed"*|*"authentication failed"*) echo "Postgres: ошибка аутентификации" ;;
-  *"could not connect"*|*"timeout"*|*"Connection refused"*) echo "Postgres: $PG_host:$PG_port недоступен" ;;
+  *"password authentication failed"*|*"authentication failed"*) echo "Postgres: authentication failed" ;;
+  *"could not connect"*|*"timeout"*|*"Connection refused"*) echo "Postgres: $PG_host:$PG_port is unreachable" ;;
   *) echo "Postgres: $(echo "$out" | head -1)" ;;
 esac
 exit 1'
@@ -111,24 +111,24 @@ conf=/tmp/kcat.conf
   fi
 } > "$conf"
 if [ "$KAFKA_sasl_mechanism" = OAUTHBEARER ]; then
-  # Токен OAUTHBEARER получает приложение; проба проверяет только TCP.
+  # The application obtains the OAUTHBEARER token; the probe tests TCP only.
   for hp in $(echo "$KAFKA_bootstrap_servers" | tr "," " "); do
-    nc -z -w 10 "${hp%:*}" "${hp##*:}" || { echo "Kafka: $hp недоступен"; exit 1; }
+    nc -z -w 10 "${hp%:*}" "${hp##*:}" || { echo "Kafka: $hp is unreachable"; exit 1; }
   done
-  echo "Kafka: OAUTHBEARER — проверено только TCP-подключение"; exit 0
+  echo "Kafka: OAUTHBEARER, only the TCP connection was checked"; exit 0
 fi
 if [ "$MODE" = check ]; then
-  kcat -F "$conf" -L -m 15 >/dev/null 2>/tmp/err || { echo "Kafka: $KAFKA_bootstrap_servers недоступна: $(head -1 /tmp/err)"; exit 1; }
+  kcat -F "$conf" -L -m 15 >/dev/null 2>/tmp/err || { echo "Kafka: $KAFKA_bootstrap_servers is unreachable: $(head -1 /tmp/err)"; exit 1; }
   exit 0
 fi
 i=0
 until echo "$PROBE_ID" | kcat -F "$conf" -P -t '"$PROBE_TOPIC"' -m 15 2>/tmp/err; do
-  i=$((i+1)); [ $i -ge 6 ] && { echo "Kafka: запись не выполнена: $(head -1 /tmp/err)"; exit 1; }
+  i=$((i+1)); [ $i -ge 6 ] && { echo "Kafka: write failed: $(head -1 /tmp/err)"; exit 1; }
   sleep 5
 done
 kcat -F "$conf" -C -t '"$PROBE_TOPIC"' -o -20 -e -q -m 15 2>/tmp/err | grep -q "$PROBE_ID" ||
-  { echo "Kafka: записанное сообщение не прочитано $(head -1 /tmp/err)"; exit 1; }
-echo "Kafka: запись и чтение — ok"'
+  { echo "Kafka: the written message was not read back $(head -1 /tmp/err)"; exit 1; }
+echo "Kafka: write and read ok"'
 
 readonly S3_PROBE='
 export HOME=/tmp AWS_ACCESS_KEY_ID="$S3_access_key" AWS_SECRET_ACCESS_KEY="$S3_secret_key" AWS_DEFAULT_REGION="$S3_region" \
@@ -136,19 +136,19 @@ export HOME=/tmp AWS_ACCESS_KEY_ID="$S3_access_key" AWS_SECRET_ACCESS_KEY="$S3_s
 [ "$S3_path_style" = true ] && aws configure set default.s3.addressing_style path
 s3() { aws --endpoint-url "$S3_endpoint" "$@"; }
 if [ "$MODE" = check ]; then
-  s3 s3api head-bucket --bucket "$S3_bucket" >/dev/null 2>/tmp/err || { echo "S3: бакет $S3_bucket на $S3_endpoint недоступен: $(tail -1 /tmp/err)"; exit 1; }
+  s3 s3api head-bucket --bucket "$S3_bucket" >/dev/null 2>/tmp/err || { echo "S3: bucket $S3_bucket at $S3_endpoint is unreachable: $(tail -1 /tmp/err)"; exit 1; }
   exit 0
 fi
 key="hammurapi-infra-probe/$PROBE_ID"
-echo "$PROBE_ID" | s3 s3 cp - "s3://$S3_bucket/$key" >/dev/null 2>/tmp/err || { echo "S3: запись не выполнена: $(tail -1 /tmp/err)"; exit 1; }
-s3 s3 cp "s3://$S3_bucket/$key" - 2>/tmp/err | grep -q "$PROBE_ID" || { echo "S3: чтение не выполнено: $(tail -1 /tmp/err)"; exit 1; }
-s3 s3 rm "s3://$S3_bucket/$key" >/dev/null 2>/tmp/err || { echo "S3: удаление не выполнено: $(tail -1 /tmp/err)"; exit 1; }
-echo "S3: запись, чтение и удаление — ok"'
+echo "$PROBE_ID" | s3 s3 cp - "s3://$S3_bucket/$key" >/dev/null 2>/tmp/err || { echo "S3: write failed: $(tail -1 /tmp/err)"; exit 1; }
+s3 s3 cp "s3://$S3_bucket/$key" - 2>/tmp/err | grep -q "$PROBE_ID" || { echo "S3: read failed: $(tail -1 /tmp/err)"; exit 1; }
+s3 s3 rm "s3://$S3_bucket/$key" >/dev/null 2>/tmp/err || { echo "S3: delete failed: $(tail -1 /tmp/err)"; exit 1; }
+echo "S3: write, read and delete ok"'
 
-# yaml_block <текст> — многострочный скаляр YAML с отступом контейнера.
+# yaml_block <text> — a YAML multi-line scalar with the container indent.
 yaml_block() { printf '%s\n' "$1" | sed 's/^/            /'; }
 
-# probe_job_manifest <имя> <check|full> <pg|-> <kafka|-> <s3|->
+# probe_job_manifest <name> <check|full> <pg|-> <kafka|-> <s3|->
 probe_job_manifest() {
   local name=$1 mode=$2 id
   id=$(probe_id)
@@ -165,7 +165,7 @@ spec:
   ttlSecondsAfterFinished: 600
   template:
     metadata:
-      # Метка на самом поде: check_pods другого запуска пропускает пробы по ней.
+      # A label on the pod itself: check_pods of another run skips probes by it.
       labels: { app.kubernetes.io/name: $name, app.kubernetes.io/managed-by: hammurapi-infra }
     spec:
       restartPolicy: Never
@@ -212,8 +212,8 @@ EOF
   fi
 }
 
-# run_probe_job <имя> <таймаут, с> <манифест из stdin> — печатает сообщения
-# контейнеров; код 0, если все контейнеры завершились успешно.
+# run_probe_job <name> <timeout, s> <manifest from stdin> — prints container
+# messages; code 0 if all containers succeeded.
 run_probe_job() {
   local name=$1-$PROBE_RUN timeout=$2 deadline status rc=0 c msg
   kc create -f - >/dev/null || return 1
@@ -226,7 +226,7 @@ run_probe_job() {
   local pod
   pod=$(kc -n "$NS_STORAGES" get pod -l "job-name=$name" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
   if [[ -z $pod ]]; then
-    echo "$name: под не создан"
+    echo "$name: the pod was not created"
     rc=1
   else
     for c in $(kc -n "$NS_STORAGES" get pod "$pod" -o jsonpath='{.spec.containers[*].name}'); do
@@ -236,8 +236,8 @@ run_probe_job() {
       if [[ $code == 0 ]]; then
         [[ -n $msg ]] && echo "ok|$msg"
       else
-        [[ -z $code ]] && msg="$c: не завершился за $timeout с"
-        echo "fail|${msg:-$c: код $code}"
+        [[ -z $code ]] && msg="$c: did not finish in $timeout s"
+        echo "fail|${msg:-$c: code $code}"
         rc=1
       fi
     done
@@ -246,20 +246,20 @@ run_probe_job() {
   return $rc
 }
 
-# --- Проверки ---
+# --- Checks ---
 
 check_pods() {
   local ns failed=0 out
   for ns in "$NS_STORAGES" "$NS_OBSERVABILITY"; do
-    # Поды завершённых Job и пробные поды проверок не учитываются.
+    # Pods of finished Jobs and probe pods do not count.
     if ! out=$(kc -n "$ns" wait --for=condition=Ready pod \
       --field-selector=status.phase!=Succeeded,status.phase!=Failed \
       -l 'app.kubernetes.io/managed-by!=hammurapi-infra' --timeout="$CHECK_TIMEOUT" 2>&1); then
-      record pods fail "$ns: не все поды готовы: $(echo "$out" | grep -v 'condition met' | head -3 | tr '\n' ' ')"
+      record pods fail "$ns: not all pods are ready: $(echo "$out" | grep -v 'condition met' | head -3 | tr '\n' ' ')"
       failed=1
     fi
   done
-  ((failed)) || record pods ok "все поды в $NS_STORAGES и $NS_OBSERVABILITY готовы"
+  ((failed)) || record pods ok "all pods in $NS_STORAGES and $NS_OBSERVABILITY are ready"
 }
 
 start_probe_pods() {
@@ -276,7 +276,7 @@ check_metrics() {
   local deadline=$((SECONDS + 150)) jobs down missing job
   while :; do
     jobs=$(vm_query 'count by (job) (up)' 2>/dev/null | jq -r '.data.result[].metric.job' 2>/dev/null | sort -u || true)
-    # Задание hammurapi не обязательно: упавший Hammurapi не должен блокировать его выкатку.
+    # The hammurapi job is optional: a failing Hammurapi must not block its own rollout.
     down=$(vm_query 'up{job!="hammurapi"} == 0' 2>/dev/null | jq -r '.data.result[].metric | "\(.job)/\(.instance)"' 2>/dev/null || true)
     missing=""
     while read -r job; do
@@ -287,11 +287,11 @@ check_metrics() {
     sleep 10
   done
   if [[ -n $missing ]]; then
-    record metrics fail "нет целей сбора заданий: ${missing% }"
+    record metrics fail "no scrape targets for jobs: ${missing% }"
   elif [[ -n $down ]]; then
-    record metrics fail "недоступны цели сбора: $(echo "$down" | tr '\n' ' ')"
+    record metrics fail "scrape targets are down: $(echo "$down" | tr '\n' ' ')"
   else
-    record metrics ok "активны все задания сбора: $(echo "$jobs" | tr '\n' ' ')"
+    record metrics ok "all scrape jobs are active: $(echo "$jobs" | tr '\n' ' ')"
   fi
 }
 
@@ -301,7 +301,7 @@ check_logs() {
   kc -n "$NS_STORAGES" delete pod "$LOG_PROBE" --ignore-not-found --wait=true >/dev/null 2>&1 || true
   log_probe_manifest "$id" | kc create -f - >/dev/null
   kc -n "$NS_STORAGES" wait --for=condition=Ready "pod/$LOG_PROBE" --timeout=120s >/dev/null 2>&1 || true
-  # Запас на поиск нового файла Vector-ом и на сброс записи в VictoriaLogs.
+  # Time for Vector to find the new file and flush to VictoriaLogs.
   deadline=$((SECONDS + 120))
   while ((SECONDS < deadline)); do
     found=$(probe_curl "$VL_URL/select/logsql/query" --data-urlencode "query=\"hammurapi-infra-probe-$id\"" \
@@ -311,12 +311,12 @@ check_logs() {
   done
   kc -n "$NS_STORAGES" delete pod "$LOG_PROBE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   if [[ -z $found ]]; then
-    record logs fail "логи не поступают в VictoriaLogs"
+    record logs fail "logs do not reach VictoriaLogs"
   elif [[ $(jq -r '[.namespace, .pod, .container, .node] | map(. != null and . != "") | all' <<<"$found" 2>/dev/null) != true ||
     $(jq -r .namespace <<<"$found" 2>/dev/null) != "$NS_STORAGES" ]]; then
-    record logs fail "в записи VictoriaLogs нет полей namespace, pod, container, node"
+    record logs fail "the VictoriaLogs record has no namespace, pod, container, node fields"
   else
-    record logs ok "строка лога из $NS_STORAGES найдена в VictoriaLogs"
+    record logs ok "a log line from $NS_STORAGES was found in VictoriaLogs"
   fi
 }
 
@@ -324,11 +324,11 @@ check_grafana() {
   local health uid failed=""
   health=$(probe_curl "$GRAFANA_URL/api/health" 2>/dev/null | jq -r .database 2>/dev/null || true)
   if [[ $health != ok ]]; then
-    record grafana fail "Grafana не отвечает на /api/health"
+    record grafana fail "Grafana does not answer on /api/health"
     return
   fi
   for uid in victoriametrics victorialogs; do
-    # Учётные данные подставляет оболочка пробного пода из его окружения.
+    # The shell of the probe pod fills in credentials from its environment.
     if ! kc -n "$NS_OBSERVABILITY" exec "$CHECKS_PROBE" -c curl -- sh -c \
       "curl -sS -m 15 -u \"\$GF_USER:\$GF_PASS\" $GRAFANA_URL/api/datasources/uid/$uid/health" 2>/dev/null |
       jq -e '.status == "OK"' >/dev/null 2>&1; then
@@ -336,9 +336,9 @@ check_grafana() {
     fi
   done
   if [[ -n $failed ]]; then
-    record grafana fail "источники данных не отвечают: ${failed% }"
+    record grafana fail "data sources do not answer: ${failed% }"
   else
-    record grafana ok "Grafana и оба источника данных отвечают"
+    record grafana ok "Grafana and both data sources answer"
   fi
 }
 
@@ -354,13 +354,13 @@ check_storages() {
     esac
   done <<<"$out"
   if ((rc != 0 || ${#errs[@]})); then
-    record storages fail "$(printf '%s; ' "${errs[@]:-проба хранилищ не выполнена}")"
+    record storages fail "$(printf '%s; ' "${errs[@]:-the storage probe did not run}")"
   else
     record storages ok "$(printf '%s; ' "${msgs[@]}")"
   fi
 }
 
-# collect_resources — сумма запросов памяти и контейнеры без запросов/лимитов.
+# collect_resources — total memory requests and containers without requests or limits.
 check_resources() {
   local pods missing
   pods=$(kc get pods -n "$NS_STORAGES" -o json; kc get pods -n "$NS_OBSERVABILITY" -o json
@@ -381,17 +381,17 @@ check_resources() {
   local pct=0
   ((MEM_ALLOCATABLE > 0)) && pct=$((MEM_REQUESTED * 100 / MEM_ALLOCATABLE))
   local summary
-  summary="запрошено $(gib "$MEM_REQUESTED") из $(gib "$MEM_ALLOCATABLE") ГиБ ($pct %)"
+  summary="requested $(gib "$MEM_REQUESTED") of $(gib "$MEM_ALLOCATABLE") GiB ($pct%)"
   if [[ -n $missing ]]; then
-    record resources fail "нет запросов или лимитов: $missing"
+    record resources fail "no requests or limits: $missing"
   elif ((MEM_REQUESTED * 3 > MEM_ALLOCATABLE * 2)); then
-    record resources fail "$summary — больше двух третей памяти ноды"
+    record resources fail "$summary, more than two thirds of the node memory"
   else
     record resources ok "$summary"
   fi
 }
 
-gib() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1073741824 }' | tr . ,; }
+gib() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1073741824 }'; }
 
 cleanup_probes() {
   kc -n "$NS_OBSERVABILITY" delete pod "$CHECKS_PROBE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
@@ -399,7 +399,7 @@ cleanup_probes() {
   kc -n "$NS_STORAGES" delete job "storage-probe-$PROBE_RUN" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
 
-# run_checks — все проверки; код 0, если все прошли.
+# run_checks — all checks; code 0 if all pass.
 run_checks() {
   step checks
   CHECK_RESULTS=()
@@ -409,9 +409,9 @@ run_checks() {
     check_metrics
     check_logs
   else
-    record grafana fail "не запустился пробный под checks-probe"
-    record metrics fail "не запустился пробный под checks-probe"
-    record logs fail "не запустился пробный под checks-probe"
+    record grafana fail "the probe pod checks-probe did not start"
+    record metrics fail "the probe pod checks-probe did not start"
+    record logs fail "the probe pod checks-probe did not start"
   fi
   check_storages
   check_mcp
@@ -429,7 +429,7 @@ run_checks() {
   return $failed
 }
 
-# first_failure — сообщение первой непройденной проверки.
+# first_failure — the message of the first failed check.
 first_failure() {
   local r name state msg
   for r in "${CHECK_RESULTS[@]}"; do

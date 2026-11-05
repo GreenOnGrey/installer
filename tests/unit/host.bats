@@ -19,7 +19,7 @@ setup() {
   os_release debian 12
   run check_host
   [ "$status" -eq 10 ]
-  [[ $output == *"неподдерживаемая ОС: debian 12"* ]]
+  [[ $output == *"unsupported OS: debian 12"* ]]
   not_called apt-get
   not_called curl
 }
@@ -27,7 +27,7 @@ setup() {
 @test "HOST-01: Debian 13 проходит проверку" {
   run check_host
   [ "$status" -eq 0 ]
-  [[ $output == *"машина подходит: Debian 13"* ]]
+  [[ $output == *"machine is suitable: Debian 13"* ]]
 }
 
 @test "HOST-02: архитектура aarch64 — код 10" {
@@ -48,21 +48,21 @@ setup() {
   meminfo_gb 8
   run check_host
   [ "$status" -eq 10 ]
-  [[ $output == *"8 ГБ"* && $output == *"15 ГБ"* ]]
+  [[ $output == *"8 GB"* && $output == *"15 GB"* ]]
 }
 
 @test "HOST-04: мало CPU — код 10" {
   host_cpus() { echo 2; }
   run check_host
   [ "$status" -eq 10 ]
-  [[ $output == *"CPU: 2"* ]]
+  [[ $output == *"CPUs: 2"* ]]
 }
 
 @test "R1: мало места на диске до создания кластера — код 10" {
   host_free_disk_gb() { echo 20; }
   run check_host
   [ "$status" -eq 10 ]
-  [[ $output == *"20 ГБ"* ]]
+  [[ $output == *"20 GB"* ]]
 }
 
 @test "R4: на повторном up место на диске не проверяется" {

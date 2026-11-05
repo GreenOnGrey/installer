@@ -15,7 +15,7 @@ its charts and `bin/nabu-deploy` live here too, exactly like those of Hammurapi.
   `FTR.HMR.INFRA-0002` (Hammurapi on the stand); product features in `…/CMN/FTR.HMR.CMN-NNNN`.
   Refer to them as `FTR.HMR.INFRA-0002 R19` (old `PLT.INFRA-…` is obsolete). Deviations are
   written into the spec.
-- Docs, comments and CLI messages of this repository are in Russian.
+- Commands, CLI messages, docs and comments of this repository are in English; specifications are in Russian. Docs, chart comments and test names are being translated.
 - Do not commit, tag or push unless asked. One-off production setup (firewall, `local.env`) is done
   by the maintainer by hand, not automated in workflows.
 

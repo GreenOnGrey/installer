@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Демо-стенд Hammurapi на minikube (FTR.HMR.INFRA-0001): хранилища и наблюдаемость.
+# Installs GreenOnGrey products on minikube (FTR.HMR.INFRA-0001, FTR.INFRA.INST-0001): storages and observability.
 #   ./installer up | status | creds | down | help
 set -euo pipefail
 
@@ -29,26 +29,26 @@ source "$ROOT/lib/mcp.sh"
 
 usage() {
   cat <<'EOF'
-Использование: ./installer <команда> [флаги]
+Usage: ./installer <command> [flags]
 
-Команды:
-  up       проверка машины, зависимости, кластер, развёртывание, проверки, сводка
-  status   состояние кластера и компонентов, проверки стенда, ресурсы
-  creds    адреса, имена секретов и пароли из секретов Kubernetes
-  down     удаление профиля minikube со всеми данными (с подтверждением)
-  help     эта справка
+Commands:
+  up       check the machine, install dependencies, start the cluster, deploy, verify, print a summary
+  status   show the state of the cluster and components, run the checks, show resources
+  creds    print addresses, secret names and passwords from Kubernetes secrets
+  down     delete the minikube profile with all its data (asks for confirmation)
+  help     show this help
 
-Флаги:
-  --config <файл>  файл переопределений (по умолчанию config/local.env)
-  --yes            down: не спрашивать подтверждение
-  --json           status, creds: вывод в JSON
-  --verbose        подробный вывод команд
-  --no-color       без цвета (включается сам, если вывод не в терминал)
+Flags:
+  --config <file>  file with overrides (default: config/local.env)
+  --yes            down: do not ask for confirmation
+  --json           status, creds: print JSON
+  --verbose        print the commands being run
+  --no-color       disable color (automatic when the output is not a terminal)
 EOF
 }
 
 usage_error() {
-  printf 'Ошибка: %s\n\n' "$1" >&2
+  printf 'Error: %s\n\n' "$1" >&2
   usage >&2
   exit "$E_USAGE"
 }
@@ -59,11 +59,11 @@ parse_args() {
   while (($#)); do
     case $1 in
       up | status | creds | down | help)
-        [[ -n $COMMAND ]] && usage_error "лишняя команда: $1"
+        [[ -n $COMMAND ]] && usage_error "unexpected extra command: $1"
         COMMAND=$1
         ;;
       --config)
-        [[ $# -ge 2 ]] || usage_error "--config требует путь к файлу"
+        [[ $# -ge 2 ]] || usage_error "--config needs a file path"
         CONFIG_FILE=$2
         shift
         ;;
@@ -73,14 +73,14 @@ parse_args() {
       --verbose) VERBOSE=1 ;;
       --no-color) COLOR=0 ;;
       -h | --help) COMMAND=help ;;
-      *) usage_error "неизвестная команда или флаг: $1" ;;
+      *) usage_error "unknown command or flag: $1" ;;
     esac
     shift
   done
-  [[ -n $COMMAND ]] || usage_error "не указана команда"
-  [[ $ASSUME_YES == 1 && $COMMAND != down ]] && usage_error "--yes допустим только для down"
-  [[ $JSON == 1 && $COMMAND != status && $COMMAND != creds ]] && usage_error "--json допустим только для status и creds"
-  if [[ -n $CONFIG_FILE && ! -f $CONFIG_FILE ]]; then usage_error "нет файла конфигурации $CONFIG_FILE"; fi
+  [[ -n $COMMAND ]] || usage_error "no command given"
+  [[ $ASSUME_YES == 1 && $COMMAND != down ]] && usage_error "--yes is only valid for down"
+  [[ $JSON == 1 && $COMMAND != status && $COMMAND != creds ]] && usage_error "--json is only valid for status and creds"
+  if [[ -n $CONFIG_FILE && ! -f $CONFIG_FILE ]]; then usage_error "config file not found: $CONFIG_FILE"; fi
   CONFIG_FILE=${CONFIG_FILE:-$ROOT/config/local.env}
   return 0
 }
@@ -93,7 +93,7 @@ acquire_lock() {
     as_root chmod 0666 "$LOCK_FILE"
   fi
   exec 9>>"$LOCK_FILE"
-  flock -n 9 || die "$E_LOCKED" "уже выполняется другой запуск up на этой машине ($LOCK_FILE)"
+  flock -n 9 || die "$E_LOCKED" "another up is already running on this machine ($LOCK_FILE)"
 }
 
 collect_diagnostics() {
@@ -107,7 +107,7 @@ collect_diagnostics() {
     while read -r pod; do
       [[ -n $pod ]] || continue
       kc -n "$ns" describe pod "$pod" >"$dir/describe-$ns-$pod.txt" 2>&1 || true
-      # Логи всех контейнеров: текущий запуск и предыдущий (для CrashLoopBackOff).
+      # Logs of all containers: the current run and the previous one (for CrashLoopBackOff).
       kc -n "$ns" logs "$pod" --all-containers --prefix --tail=300 >"$dir/logs-$ns-$pod.txt" 2>&1 || true
       kc -n "$ns" logs "$pod" --all-containers --prefix --tail=300 --previous >"$dir/logs-$ns-$pod-previous.txt" 2>&1 || true
     done < <(kc -n "$ns" get pods --no-headers 2>/dev/null |
@@ -116,7 +116,7 @@ collect_diagnostics() {
   while read -r rel ns; do
     [[ -n $rel ]] && hm status "$rel" -n "$ns" >"$dir/helm-status-$rel.txt" 2>&1 || true
   done < <(hm list -A -o json 2>/dev/null | jq -r '.[] | "\(.name) \(.namespace)"' 2>/dev/null)
-  warn "диагностика сохранена в $dir"
+  warn "diagnostics saved to $dir"
 }
 
 on_up_exit() {
@@ -124,26 +124,26 @@ on_up_exit() {
   if ((code != 0)); then
     STEP=main
     collect_diagnostics
-    warn "up завершилась с кодом $code; журнал: $RUN_DIR/run.log"
+    warn "up failed with code $code; log: $RUN_DIR/run.log"
   fi
 }
 
 print_summary() {
   local took=$((SECONDS - UP_STARTED)) mode r name ver
-  mode="Postgres: $(mode_ru "$POSTGRES_MODE"), Kafka: $(mode_ru "$KAFKA_MODE"), S3: $(mode_ru "$S3_MODE")"
+  mode="Postgres: $(mode_label "$POSTGRES_MODE"), Kafka: $(mode_label "$KAFKA_MODE"), S3: $(mode_label "$S3_MODE")"
   local ns=$NS_STORAGES res
   res=$(resources_line)
   cat <<EOF
 
-Стенд готов за $(human_duration "$took"). Версия: ${DEPLOYED_TAG:-dev}.
+Ready in $(human_duration "$took"). Version: ${DEPLOYED_TAG:-dev}.
 
-Кластер       minikube $MK_PROFILE (Kubernetes $K8S_VERSION), $MK_CPUS CPU / ${MK_MEMORY^^}
-Хранилища     postgres.$ns.svc:5432  kafka.$ns.svc:9092  s3.$ns.svc:9000
+Cluster       minikube $MK_PROFILE (Kubernetes $K8S_VERSION), $MK_CPUS CPU / ${MK_MEMORY^^}
+Storages      postgres.$ns.svc:5432  kafka.$ns.svc:9092  s3.$ns.svc:9000
               ($mode)
-Наблюдаемость Grafana, VictoriaMetrics, VictoriaLogs в namespace $NS_OBSERVABILITY
-Ресурсы       $res
+Observability Grafana, VictoriaMetrics, VictoriaLogs in namespace $NS_OBSERVABILITY
+Resources     $res
 
-Версии        Kafka $KAFKA_VERSION, Postgres ${POSTGRES_IMAGE##*:}, Grafana-плагин VictoriaLogs $VL_PLUGIN_VERSION
+Versions      Kafka $KAFKA_VERSION, Postgres ${POSTGRES_IMAGE##*:}, VictoriaLogs Grafana plugin $VL_PLUGIN_VERSION
 EOF
   for r in "${RELEASES[@]}"; do
     read -r name ver <<<"$r"
@@ -152,28 +152,28 @@ EOF
   cat <<EOF
 
 Grafana:
-  на своей машине:  ssh -L $GRAFANA_LOCAL_PORT:localhost:$GRAFANA_LOCAL_PORT $(id -un)@<адрес машины>
-  на машине стенда: kubectl --context $(kube_context) -n $NS_OBSERVABILITY port-forward svc/grafana $GRAFANA_LOCAL_PORT:80
-  затем откройте http://localhost:$GRAFANA_LOCAL_PORT
+  on your computer: ssh -L $GRAFANA_LOCAL_PORT:localhost:$GRAFANA_LOCAL_PORT $(id -un)@<machine address>
+  on this machine:  kubectl --context $(kube_context) -n $NS_OBSERVABILITY port-forward svc/grafana $GRAFANA_LOCAL_PORT:80
+  then open http://localhost:$GRAFANA_LOCAL_PORT
 
-Пароли: ./installer creds
+Passwords: ./installer creds
 EOF
   if public_enabled; then
     cat <<EOF
 
-Публичный доступ (сертификат ${ACME_ISSUER:-letsencrypt}):
+Public access (certificate ${ACME_ISSUER:-letsencrypt}):
   https://grafana.$PUBLIC_DOMAIN   https://${HAMMURAPI_WEB_HOST:-hammurapi}.$PUBLIC_DOMAIN   https://${HAMMURAPI_API_HOST:-hammurapi-api}.$PUBLIC_DOMAIN
-  порты 80/443 машины → Traefik $LB_IP; откройте их в межсетевом экране облака
+  ports 80/443 of this machine → Traefik $LB_IP; open them in your cloud firewall
 EOF
   fi
 }
 
-mode_ru() { if [[ $1 == internal ]]; then echo встроенный; else echo внешний; fi; }
+mode_label() { if [[ $1 == internal ]]; then echo built-in; else echo external; fi; }
 
 resources_line() {
   local pct=0
   ((MEM_ALLOCATABLE > 0)) && pct=$((MEM_REQUESTED * 100 / MEM_ALLOCATABLE))
-  echo "запрошено $(gib "$MEM_REQUESTED") ГиБ из $(gib "$MEM_ALLOCATABLE") ГиБ ($pct %)"
+  echo "requested $(gib "$MEM_REQUESTED") GiB of $(gib "$MEM_ALLOCATABLE") GiB ($pct%)"
 }
 
 cmd_up() {
@@ -182,7 +182,7 @@ cmd_up() {
   mkdir -p "$RUN_DIR"
   exec > >(tee -a "$RUN_DIR/run.log") 2>&1
   trap 'on_up_exit $?' EXIT
-  log "журнал запуска: $RUN_DIR/run.log"
+  log "run log: $RUN_DIR/run.log"
   check_host
   acquire_lock
   install_prereqs
@@ -190,10 +190,10 @@ cmd_up() {
   restore_config strict
   validate_config
   deploy_all
-  # Сразу после развёртывания: что применено, то и записано, даже если проверки не пройдут.
+  # Right after the deploy: record what was applied, even if the checks fail later.
   write_config
   if ! run_checks; then
-    die "$E_CHECKS" "проверки стенда не прошли: $(first_failure)"
+    die "$E_CHECKS" "checks failed: $(first_failure)"
   fi
   write_version
   print_summary
@@ -201,7 +201,7 @@ cmd_up() {
 
 # --- status ---
 
-# public_status_json — публичный доступ по данным кластера (ConfigMap стенда).
+# public_status_json — public access as recorded in the cluster.
 public_status_json() {
   local data
   data=$(state_public)
@@ -224,12 +224,12 @@ cmd_status() {
   if have minikube && cluster_running; then running=1; fi
   profile_status=$([[ $running == 1 ]] && echo Running || echo Stopped)
   if [[ $running == 1 ]]; then
-    # Выкатки компонентов проверяют только стенд: сбой MCP-сервера или внешнего поиска
-    # не должен останавливать релиз продукта.
+    # Component rollouts check only the stand: a failing MCP server or external search
+    # must not stop a product release.
     [[ ${INSTALLER_STAND_ONLY:-} == 1 ]] || restore_config
     run_checks || true
   else
-    CHECK_RESULTS=("cluster|fail|кластер $MK_PROFILE не запущен")
+    CHECK_RESULTS=("cluster|fail|cluster $MK_PROFILE is not running")
   fi
   local failed=0 r
   for r in "${CHECK_RESULTS[@]}"; do [[ $r == *"|fail|"* ]] && failed=1; done
@@ -274,18 +274,18 @@ status_json() {
 
 status_text() {
   local profile_status=$1 running=$2 r name state msg
-  printf '\nКластер    minikube %s — %s\n' "$MK_PROFILE" "$profile_status"
+  printf '\nCluster    minikube %s — %s\n' "$MK_PROFILE" "$profile_status"
   if [[ $running == 1 ]]; then
-    printf 'Версия     %s\n' "$(deployed_version | jq -r 'if . == null then "не записана" else "\(.tag) (\(.commit)), \(.deployedAt), \(.deployedBy)" end')"
-    printf '\nРелизы Helm\n'
+    printf 'Version    %s\n' "$(deployed_version | jq -r 'if . == null then "not recorded" else "\(.tag) (\(.commit)), \(.deployedAt), \(.deployedBy)" end')"
+    printf '\nHelm releases\n'
     hm list -A 2>/dev/null | sed 's/^/  /' || true
-    printf '\nПоды\n'
+    printf '\nPods\n'
     kc get pods -n "$NS_STORAGES" 2>/dev/null | sed 's/^/  /' || true
     kc get pods -n "$NS_OBSERVABILITY" --no-headers 2>/dev/null | sed 's/^/  /' || true
     mcp_enabled && { kc get pods -n "$NS_MCP" --no-headers 2>/dev/null | sed 's/^/  /' || true; }
-    printf '\nРесурсы    %s\n' "$(resources_line)"
+    printf '\nResources  %s\n' "$(resources_line)"
   fi
-  printf '\nПроверки\n'
+  printf '\nChecks\n'
   for r in "${CHECK_RESULTS[@]}"; do
     IFS='|' read -r name state msg <<<"$r"
     if [[ $state == ok ]]; then
@@ -299,7 +299,7 @@ status_text() {
 # --- creds ---
 
 cmd_creds() {
-  if ! have kubectl || ! kc get ns "$NS_STORAGES" >/dev/null 2>&1; then die "$E_CHECKS" "кластер $MK_PROFILE не запущен или стенд не развёрнут"; fi
+  if ! have kubectl || ! kc get ns "$NS_STORAGES" >/dev/null 2>&1; then die "$E_CHECKS" "cluster $MK_PROFILE is not running or nothing is deployed"; fi
   restore_config
   local ns=$NS_STORAGES
   local -A pg kafka s3
@@ -331,29 +331,29 @@ cmd_creds() {
     return
   fi
   cat <<EOF
-Postgres ($(mode_ru "$POSTGRES_MODE"))
-  сервис    postgres.$ns.svc:5432     секрет $ns/postgres-conn
-  хост      ${pg[host]}:${pg[port]}   база ${pg[database]}   sslmode ${pg[sslmode]}
-  логин     ${pg[username]}
-  пароль    ${pg[password]}
+Postgres ($(mode_label "$POSTGRES_MODE"))
+  service   postgres.$ns.svc:5432     secret $ns/postgres-conn
+  host      ${pg[host]}:${pg[port]}   database ${pg[database]}   sslmode ${pg[sslmode]}
+  username  ${pg[username]}
+  password  ${pg[password]}
   uri       ${pg[uri]}
 
-Kafka ($(mode_ru "$KAFKA_MODE"))
-  сервис    kafka.$ns.svc:9092        секрет $ns/kafka-conn
+Kafka ($(mode_label "$KAFKA_MODE"))
+  service   kafka.$ns.svc:9092        secret $ns/kafka-conn
   bootstrap ${kafka[bootstrap_servers]}   ${kafka[security_protocol]} ${kafka[sasl_mechanism]}
-  логин     ${kafka[username]:--}
-  пароль    ${kafka[password]:--}
+  username  ${kafka[username]:--}
+  password  ${kafka[password]:--}
 
-S3 ($(mode_ru "$S3_MODE"))
-  сервис    s3.$ns.svc:9000           секрет $ns/s3-conn
-  endpoint  ${s3[endpoint]}   регион ${s3[region]}   бакет ${s3[bucket]}   path_style ${s3[path_style]}
-  ключ      ${s3[access_key]}
-  секрет    ${s3[secret_key]}
+S3 ($(mode_label "$S3_MODE"))
+  service   s3.$ns.svc:9000           secret $ns/s3-conn
+  endpoint  ${s3[endpoint]}   region ${s3[region]}   bucket ${s3[bucket]}   path_style ${s3[path_style]}
+  key       ${s3[access_key]}
+  secret    ${s3[secret_key]}
 
 Grafana
-  сервис    grafana.$NS_OBSERVABILITY.svc:80   секрет $NS_OBSERVABILITY/grafana-admin
-  логин     $gf_user
-  пароль    $gf_pass
+  service   grafana.$NS_OBSERVABILITY.svc:80   secret $NS_OBSERVABILITY/grafana-admin
+  username  $gf_user
+  password  $gf_pass
 EOF
   mcp_creds_text
 }
@@ -362,16 +362,16 @@ EOF
 
 cmd_down() {
   if [[ $ASSUME_YES != 1 ]]; then
-    printf 'Удалить профиль minikube «%s» со всеми данными хранилищ и наблюдаемости? Введите yes: ' "$MK_PROFILE" >&2
+    printf 'Delete the minikube profile "%s" with all data of storages and observability? Type yes: ' "$MK_PROFILE" >&2
     local answer=""
     read -r answer || true
-    [[ $answer == yes ]] || die "$E_CANCELLED" "отменено: ничего не удалено"
+    [[ $answer == yes ]] || die "$E_CANCELLED" "cancelled: nothing was deleted"
   fi
   step cluster
-  have minikube || die "$E_CLUSTER" "minikube не установлен"
-  cluster_delete >/dev/null || die "$E_CLUSTER" "minikube delete не выполнен"
+  have minikube || die "$E_CLUSTER" "minikube is not installed"
+  cluster_delete >/dev/null || die "$E_CLUSTER" "minikube delete failed"
   remove_autostart
-  ok "профиль $MK_PROFILE удалён"
+  ok "profile $MK_PROFILE deleted"
 }
 
 main() {
@@ -398,7 +398,7 @@ main() {
   esac
 }
 
-# Подключение без запуска — для юнит-тестов (tests/unit).
+# Sourcing without running is for unit tests (tests/unit).
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   main "$@"
 fi

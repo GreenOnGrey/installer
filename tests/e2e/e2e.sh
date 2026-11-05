@@ -101,11 +101,11 @@ stage PERS-02 "перезагрузка и up — данные и пароли �
 # CHK: проверки ловят реальные отказы.
 stage CHK-01 "VictoriaLogs в 0 — status код 15 «логи не поступают»" \
   "kubectl --context hammurapi -n observability scale statefulset victoria-logs-victoria-logs-single-server --replicas=0 &&
-   { $H status --no-color >/tmp/chk01.txt 2>&1; rc=\$?; }; grep -q 'логи не поступают в VictoriaLogs' /tmp/chk01.txt && exit \$rc; exit 99" 15
+   { $H status --no-color >/tmp/chk01.txt 2>&1; rc=\$?; }; grep -q 'logs do not reach VictoriaLogs' /tmp/chk01.txt && exit \$rc; exit 99" 15
 stage CHK-03 "неверный пароль в postgres-conn — «Postgres: ошибка аутентификации»" \
   "kubectl --context hammurapi -n observability scale statefulset victoria-logs-victoria-logs-single-server --replicas=1 &&
    kubectl --context hammurapi -n storages patch secret postgres-conn -p '{\"data\":{\"password\":\"d3Jvbmc=\"}}' &&
-   { $H status --no-color >/tmp/chk03.txt 2>&1; rc=\$?; }; grep -q 'Postgres: ошибка аутентификации' /tmp/chk03.txt && exit \$rc; exit 99" 15
+   { $H status --no-color >/tmp/chk03.txt 2>&1; rc=\$?; }; grep -q 'Postgres: authentication failed' /tmp/chk03.txt && exit \$rc; exit 99" 15
 stage CHK-04 "после проверок пробные поды и Job удалены" \
   "sleep 15; ! kubectl --context hammurapi get pods -A -l app.kubernetes.io/managed-by=hammurapi-infra --no-headers 2>/dev/null | grep -q ."
 stage UP-04 "up восстанавливает стенд после сбоев" "$H up --no-color"

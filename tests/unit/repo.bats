@@ -83,7 +83,7 @@ load helpers
   sleep 0.5
   run acquire_lock
   [ "$status" -eq 17 ]
-  [[ $output == *"уже выполняется"* ]]
+  [[ $output == *"already running"* ]]
   kill %1 2>/dev/null || true
 }
 
