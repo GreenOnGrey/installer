@@ -34,7 +34,12 @@ write_config() {
     [[ $value != "$default" ]] || continue
     data=$(jq -c --arg k "$key" --arg v "$value" '. + {($k): $v}' <<<"$data")
   done < <({ env_keys "$ROOT/config/defaults.env"; printf '%s\n' "${MCP_OPTIONS[@]}"; } | sort -u)
-  jq -n --arg ns "$NS_STATE" --arg name "$STATE_CONFIG_CM" --argjson data "$data" \
+  state_configmap "$STATE_CONFIG_CM" "$data"
+}
+
+# state_configmap <name> <data JSON> — a ConfigMap of the state with this data.
+state_configmap() {
+  jq -n --arg ns "$NS_STATE" --arg name "$1" --argjson data "$2" \
     '{apiVersion: "v1", kind: "ConfigMap", metadata: {name: $name, namespace: $ns,
       labels: {"app.kubernetes.io/managed-by": "installer"}}, data: $data}' | apply_stdin
 }

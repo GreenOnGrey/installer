@@ -144,6 +144,19 @@ For an external Kafka, the write and read check uses the topic `installer-probe`
 
 An example for Google Cloud (Cloud SQL, Managed Service for Apache Kafka, Cloud Storage) is in [docs/gcp.md](docs/gcp.md).
 
+## Products
+
+`PRODUCTS=nabu` (the default) rolls out Nabu after the stand passes its checks, through the same `bin/nabu-deploy` that the CI of Nabu runs, at the versions of `config/versions.env` (`NABU_CORE_VERSION`, `NABU_WEB_VERSION`, `NABU_CHART_VERSION`). An empty `PRODUCTS` installs the stand only. Hammurapi follows in a later release.
+
+Nabu needs `PUBLIC_ACCESS=true`, `AUTH_PROVIDER` and `BOOTSTRAP_ADMINS`:
+
+- `github`: an OAuth App with the callback `https://nabu-api.<domain>/auth/callback`, `NABU_GITHUB_CLIENT_ID` and the secret `NABU_GITHUB_CLIENT_SECRET`; `GITHUB_ALLOWED_ORG` limits sign-in to an organization;
+- `oidc`: `OIDC_ISSUER`, `OIDC_CLIENT_ID` and the secret `OIDC_CLIENT_SECRET`.
+
+`BOOTSTRAP_LLM_API_KEY` is optional. Without it, add a model connection in the admin area of Nabu. Secrets come from the environment or `<key>_FILE`, never from the config file. The first `install` keeps them in the secret `installer/product-inputs`, so a later run needs them only to change them. `SECRETS_KEY` of Nabu is generated once and never changes on a rollout.
+
+A component deployed by its own CI, with no record in the ConfigMap `installer/installer-products`, is left alone and listed in `skipped` of the JSON result. This is how production works: its products roll out from their repositories, and its `local.env` sets `PRODUCTS=` (empty).
+
 ## MCP servers
 
 Optional MCP servers for Nabu agents (`FTR.NAB.CMN-0006`). Each one is enabled by its own option in `config/local.env`, and all are off by default. The chart, images and server descriptions are released by the repository [mcps](https://github.com/GreenOnGrey/mcps), and `MCP_CHART_VERSION` in `config/versions.env` pins the version.

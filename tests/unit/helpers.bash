@@ -9,7 +9,8 @@ setup_stubs() {
   CALLS=$BATS_TEST_TMPDIR/calls
   mkdir -p "$STUBS"
   : >"$CALLS"
-  export PATH="$STUBS:$PATH" CALLS STUBS
+  # The products need sign-in and public access: tests of the stand run without them (products.bats sets them).
+  export PATH="$STUBS:$PATH" CALLS STUBS PRODUCTS=
   local c
   for c in sudo apt-get apt-mark docker kubectl helm minikube curl systemctl usermod gpg sg; do
     stub "$c" 'exit 0'
@@ -45,6 +46,8 @@ load_script() {
   source "$ROOT/installer"
   COLOR=0
   setup_color
+  PRODUCTS=${PRODUCTS-}
+  export PRODUCTS
   load_config "$ROOT" /dev/null
   # Server descriptions as in the chart mcp-servers; tests do not download the chart.
   MCP_CHART_DIR=$ROOT/tests/fixtures/mcp/chart

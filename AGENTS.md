@@ -39,6 +39,7 @@ charts/nabu-web          the SPA of Nabu
 charts/landing           the site of GreenOnGrey: nginx with static pages
 lib/preflight.sh         checks of an external cluster before anything changes in it (INSTALL_TARGET=external)
 lib/uninstall.sh         uninstall: on minikube the profile; on a cluster the labelled namespaces and their releases
+lib/product.sh           products of PRODUCTS: the payload of bin/nabu-deploy from the configuration and kept secrets
 lib/mcp.sh               optional MCP servers (FTR.NAB.CMN-0006): enabled by MCP_* options; the chart mcp-servers and
                          the descriptions of servers come from a release of `mcps` (MCP_CHART_VERSION)
 config/                  defaults.env, versions.env (chart and tool versions)

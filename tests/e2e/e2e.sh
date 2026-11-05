@@ -64,7 +64,8 @@ git -C "$ROOT" archive --format=tar.gz --prefix="$REMOTE_DIR/" HEAD >"$ROOT/.wor
 g compute scp "$ROOT/.work/e2e.tar.gz" "$INSTANCE:e2e.tar.gz" --zone "$GCP_ZONE" "${IAP_ARGS[@]}"
 g compute ssh "$INSTANCE" --zone "$GCP_ZONE" "${IAP_ARGS[@]}" --command "tar -xzf e2e.tar.gz && rm e2e.tar.gz"
 
-H="bash ./installer"
+# The stand only: the products need sign-in, which e2e has not.
+H="env PRODUCTS= bash ./installer"
 
 # PROD-01 (FTR.INFRA.INST-0001 R26): the tag of prod with the names of prod, then this commit on top.
 if [[ -n ${E2E_UPGRADE_FROM:-} ]]; then
