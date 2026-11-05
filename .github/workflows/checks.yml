@@ -24,7 +24,7 @@ jobs:
           curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VERSION/shellcheck-$SHELLCHECK_VERSION.linux.x86_64.tar.xz" | tar -xJ
           sc=./shellcheck-$SHELLCHECK_VERSION/shellcheck
           $sc -x installer
-          $sc -x tests/manifests.sh tests/e2e/*.sh tests/kind/*.sh dashboards/normalize.sh .github/scripts/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/landing-deploy bin/ingress-forward bin/stand-autostart
+          $sc -x tests/manifests.sh tests/e2e/*.sh tests/kind/*.sh tests/el/*.sh dashboards/normalize.sh .github/scripts/*.sh bin/hammurapi-deploy bin/nabu-deploy bin/landing-deploy bin/ingress-forward bin/stand-autostart
           $sc -s bash tests/unit/*.bats tests/unit/helpers.bash
 
   actionlint:

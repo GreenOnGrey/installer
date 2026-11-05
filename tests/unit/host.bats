@@ -27,7 +27,7 @@ setup() {
 @test "HOST-01: Debian 13 passes" {
   run check_host
   [ "$status" -eq 0 ]
-  [[ $output == *"machine is suitable: Debian 13"* ]]
+  [[ $output == *"machine is suitable: debian 13"* ]]
 }
 
 @test "HOST-02: architecture aarch64: code 10" {
@@ -71,4 +71,37 @@ setup() {
   echo '{}' >"$MINIKUBE_HOME/profiles/greenongrey/config.json"
   run check_host
   [ "$status" -eq 0 ]
+}
+
+@test "R9: RHEL, Rocky and AlmaLinux 9 and 10 fit" {
+  host_rpm_installed() { return 1; }
+  local d
+  for d in "rhel 9.4" "rocky 9.5" "almalinux 10.0" "rocky 10.1"; do
+    # shellcheck disable=SC2086
+    os_release $d
+    run check_host
+    [ "$status" -eq 0 ] || { echo "$d: $output"; return 1; }
+  done
+}
+
+@test "TGT-04: other systems and versions: code 10, the supported ones are named" {
+  host_rpm_installed() { return 1; }
+  local d
+  for d in "ubuntu 24.04" "rocky 8.10" "centos 9" "fedora 41"; do
+    # shellcheck disable=SC2086
+    os_release $d
+    run check_host
+    [ "$status" -eq 10 ] || { echo "$d: $status"; return 1; }
+    [[ $output == *"RHEL, Rocky or AlmaLinux 9 and 10"* ]]
+  done
+}
+
+@test "TGT-05: EL with podman: code 10 with the reason, nothing removed" {
+  os_release rocky 9.4
+  stub rpm '[[ $* == *podman* ]]'
+  stub dnf 'exit 0'
+  run check_host
+  [ "$status" -eq 10 ]
+  [[ $output == *"podman conflicts with Docker CE"* && $output == *"nothing was removed"* ]]
+  not_called dnf
 }

@@ -5,6 +5,8 @@
 # after docker.service and by `up`.
 #   - DNAT in nat/PREROUTING: <external interface>:80,443 → LB_IP;
 #   - an allow rule in DOCKER-USER: Docker leaves this chain alone.
+# With firewalld running, its permanent forward-port replaces the DNAT, and the rules survive a reload
+# (FTR.INFRA.INST-0001 tech §5). The way is chosen by what runs, not by the name of the OS.
 # No SNAT: answers from the Docker network go through the machine, conntrack returns
 # them to the client, and the client address is preserved. All rules carry a comment and
 # are removed before adding, so a Docker restart leaves no duplicates.
@@ -15,6 +17,7 @@ FORWARD_STATE=${FORWARD_STATE:-/var/lib/installer}
 # The prefix is in the state of `up`: the comment is the same in the unit and in a manual run.
 COMMENT=$(cat "$FORWARD_STATE/unit-prefix" 2>/dev/null || echo greenongrey)-ingress
 IPTABLES=${IPTABLES:-iptables}
+FIREWALL_CMD=${FIREWALL_CMD:-firewall-cmd}
 
 log() { echo "ingress-forward: $*" >&2; }
 
@@ -32,6 +35,42 @@ ext_if() {
   [[ -n $dev ]] || dev=$(ip -o -4 route show to default | awk '{print $5; exit}')
   [[ -n $dev ]] || return 1
   echo "$dev"
+}
+
+firewalld_running() { command -v "$FIREWALL_CMD" >/dev/null 2>&1 && "$FIREWALL_CMD" --state >/dev/null 2>&1; }
+
+# firewalld_zone <interface> — its zone, or the default one.
+firewalld_zone() { "$FIREWALL_CMD" --get-zone-of-interface="$1" 2>/dev/null || "$FIREWALL_CMD" --get-default-zone; }
+
+# firewalld_remove — our forward ports in the running and the permanent configuration of every zone, as the
+# zone of the interface may have changed. Ours are those to the addresses this script has applied: a forward
+# of the user stays. The addresses are in the state, as firewalld has no comments.
+firewalld_remove() {
+  local zone scope rule addr
+  for addr in $(cat "$FORWARD_STATE/applied-ip" 2>/dev/null || true) "$@"; do
+    for zone in $("$FIREWALL_CMD" --get-zones); do
+      for scope in "" --permanent; do
+        # shellcheck disable=SC2086 # the empty scope is no argument
+        { "$FIREWALL_CMD" $scope --zone="$zone" --list-forward-ports 2>/dev/null || true; } |
+          { grep -E "^port=(80|443):proto=tcp:toport=(80|443):toaddr=${addr//./\\.}\$" || true; } | while IFS= read -r rule; do
+          "$FIREWALL_CMD" $scope --zone="$zone" --remove-forward-port="$rule" >/dev/null
+        done
+      done
+    done
+  done
+  rm -f "$FORWARD_STATE/applied-ip"
+}
+
+# firewalld_add <zone> <ip> — no masquerade, so Traefik sees the address of the client.
+firewalld_add() {
+  local zone=$1 ip=$2 port scope
+  echo "$ip" >"$FORWARD_STATE/applied-ip"
+  for port in 80 443; do
+    for scope in "" --permanent; do
+      # shellcheck disable=SC2086 # the empty scope is no argument
+      "$FIREWALL_CMD" $scope --zone="$zone" --add-forward-port="port=$port:proto=tcp:toport=$port:toaddr=$ip" >/dev/null
+    done
+  done
 }
 
 # remove_rules — removes all commented rules from nat/PREROUTING and DOCKER-USER.
@@ -53,8 +92,15 @@ apply_rules() {
   ip=$(lb_ip) || { log "no Traefik address (LB_IP or $FORWARD_STATE/lb-ip)"; exit 1; }
   dev=$(ext_if) || { log "no external interface found (default route)"; exit 1; }
   remove_rules
-  "$IPTABLES" -t nat -A PREROUTING -i "$dev" -p tcp -m multiport --dports "$PORTS" \
-    -m comment --comment "$COMMENT" -j DNAT --to-destination "$ip"
+  if firewalld_running; then
+    local zone
+    zone=$(firewalld_zone "$dev")
+    firewalld_remove "$ip"
+    firewalld_add "$zone" "$ip"
+  else
+    "$IPTABLES" -t nat -A PREROUTING -i "$dev" -p tcp -m multiport --dports "$PORTS" \
+      -m comment --comment "$COMMENT" -j DNAT --to-destination "$ip"
+  fi
   # Docker creates DOCKER-USER; if it is missing we create it, and Docker keeps it.
   "$IPTABLES" -t filter -N DOCKER-USER 2>/dev/null || true
   "$IPTABLES" -t filter -I DOCKER-USER -d "$ip" -p tcp -m multiport --dports "$PORTS" \
@@ -64,9 +110,13 @@ apply_rules() {
 
 case ${1:-} in
   apply) apply_rules ;;
-  remove) remove_rules ;;
+  remove)
+    remove_rules
+    if firewalld_running; then firewalld_remove; fi
+    ;;
   status)
     "$IPTABLES" -t nat -S PREROUTING | grep -F -- "--comment $COMMENT" || true
+    if firewalld_running && dev=$(ext_if); then "$FIREWALL_CMD" --zone="$(firewalld_zone "$dev")" --list-forward-ports; fi
     "$IPTABLES" -t filter -S DOCKER-USER 2>/dev/null | grep -F -- "--comment $COMMENT" || true
     ;;
   *)

@@ -44,7 +44,7 @@ config/                  defaults.env, versions.env (chart and tool versions)
 values/                  Helm values of the stand's components
 dashboards/              Grafana dashboards; alert rules are in values/grafana.yaml (alerting)
 tests/unit/*.bats        unit tests (Linux); tests/manifests.sh — rendered manifests; tests/kind — the external
-                         target on kind (CI job kind); tests/e2e
+                         target on kind (CI job kind); tests/el — Rocky under KVM (workflow el); tests/e2e
 ```
 
 ## Commands

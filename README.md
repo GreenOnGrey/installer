@@ -28,7 +28,7 @@ Versions of all components and charts are in [`config/versions.env`](config/vers
 
 | | Minimum |
 |---|---|
-| OS | Debian 13 (trixie), x86_64 |
+| OS | x86_64: Debian 13 (trixie), or RHEL, Rocky or AlmaLinux 9 and 10 (SELinux may stay enforcing; `podman` and `runc` conflict with Docker CE and must be removed first) |
 | CPU / memory | 4 vCPU, 16 GB (default profile: minikube 3 CPU / 12 GB) |
 | Disk | 80 GB free (a 100 GB disk is recommended) |
 | Permissions | a regular user with passwordless `sudo`; do **not** run as root: minikube with the docker driver does not work as root |

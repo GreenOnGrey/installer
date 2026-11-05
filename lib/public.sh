@@ -222,7 +222,7 @@ install_forward() {
 # (FTR.HMR.INFRA-0002). Installed by installer up.
 [Unit]
 Description=GreenOnGrey: forwarding of 80/443 to the minikube ingress
-After=docker.service
+After=docker.service firewalld.service
 Requires=docker.service
 PartOf=docker.service
 
