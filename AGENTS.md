@@ -100,4 +100,6 @@ A tag `vX.Y.Z` (`deploy-prod.yml`) publishes the charts with version `X.Y.Z` to
 `oci://ghcr.io/greenongrey/charts` (existing versions are skipped), then deploys the stand: the code
 is copied over SSH to `/opt/installer/releases/<tag>`, `up` runs, and `current` switches to the
 tag only after `up` succeeds. Core and web install a chart by `CHART_VERSION` in their
-`deploy/versions.env`. A broken tag is fixed by a new tag, not by moving the old one.
+`deploy/versions.env`. After production takes a pushed tag, the job `release` publishes `installer.tar.gz` of the
+tag (`.github/scripts/release-archive.sh`), its SHA-256 and a keyless cosign signature to the GitHub
+Release. A broken tag is fixed by a new tag, not by moving the old one.

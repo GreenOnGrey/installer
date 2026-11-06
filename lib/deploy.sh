@@ -205,16 +205,31 @@ deploy_all() {
   ok "all releases are deployed"
 }
 
+# release_field <TAG|COMMIT> — the value of the file RELEASE of an unpacked archive, or nothing. A working copy
+# tells its version through git: a RELEASE left there from an archive is ignored.
+release_field() {
+  [[ ! -e $ROOT/.git && -f $ROOT/RELEASE ]] || return 0
+  sed -n "s/^$1=//p" "$ROOT/RELEASE" | head -1
+}
+
+# installer_version — the tag of this code, or dev. In an archive RELEASE comes before git: unpacked inside
+# another working copy, git would report that one.
+installer_version() {
+  local tag=${INFRA_TAG:-}
+  [[ -n $tag ]] || tag=$(release_field TAG)
+  [[ -n $tag ]] || tag=$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null) || true
+  echo "${tag:-dev}"
+}
+
 # write_version — the deployed tag and commit in a ConfigMap (R18). Prod has no
 # git checkout (the workflow unpacks the tag), so they come in INFRA_TAG and
-# INFRA_COMMIT; a git working copy provides them itself.
-# installer_version — the tag of this code, or dev.
-installer_version() { echo "${INFRA_TAG:-$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null || echo dev)}"; }
-
+# INFRA_COMMIT; a git working copy provides them itself, and the release archive in its
+# file RELEASE (FTR.INFRA.INST-0001 R7).
 write_version() {
   local tag commit
   tag=$(installer_version)
-  commit=${INFRA_COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)}
+  commit=${INFRA_COMMIT:-$(release_field COMMIT)}
+  [[ -n $commit ]] || commit=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null) || commit=unknown
   commit=${commit:0:7}
   # The pins of update --to stay (FTR.INFRA.INST-0001 R23).
   local pinned
