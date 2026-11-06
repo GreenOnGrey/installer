@@ -50,7 +50,7 @@ In production, public access parameters are GitHub variables of the repository `
 | `PUBLIC_BASE_DOMAIN` | empty means `<external IP with dashes>.sslip.io` |
 | `PUBLIC_IP` | empty means it is detected automatically |
 | `HAMMURAPI_WEB_HOST`, `HAMMURAPI_API_HOST` | `hammurapi`, `hammurapi-api`: subdomains of the Hammurapi site and API (`hammurapi.<domain>`, `hammurapi-api.<domain>`); the rollout passes them to the charts |
-| `PUBLIC_EXTRA_HOSTS` | `nabu nabu-api web`: subdomains of Nabu (FTR.NAB.CMN-0001) and the GreenOnGrey site (FTR.LND.WEB-0001) on the same stand in the shared certificate |
+| `PUBLIC_EXTRA_HOSTS` | `nabu nabu-api web` on production: the subdomains of Nabu (FTR.NAB.CMN-0001) and of the GreenOnGrey site (FTR.LND.WEB-0001) in the shared certificate; the default has no `web` |
 
 A manual `up` on the machine does not get these values and takes them from `local.env`. If they are not there, such an `up` skips the step `public`, and Traefik and the certificate already deployed stay.
 
