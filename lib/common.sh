@@ -3,7 +3,7 @@
 
 # Exit codes (technical specification, §1).
 readonly E_OK=0 E_UNKNOWN=1 E_USAGE=2 E_HOST=10 E_PREREQ=11 E_CLUSTER=12 E_DEPLOY=13 \
-  E_EXTERNAL=14 E_CHECKS=15 E_CANCELLED=16 E_LOCKED=17 E_PREFLIGHT=18
+  E_EXTERNAL=14 E_CHECKS=15 E_CANCELLED=16 E_LOCKED=17 E_PREFLIGHT=18 E_DNS=19
 
 STEP=${STEP:-main}
 VERBOSE=${VERBOSE:-0}
@@ -141,8 +141,9 @@ load_config() {
   done
 }
 
-# secret_value <key> [lines] — the value from the environment variable or the file <key>_FILE. With
-# lines, the lines of a multi-line value (a PEM key) are joined by a literal \n; without, line ends go.
+# secret_value <key> [lines] — the value from the environment variable or the file <key>_FILE, else the one
+# the cluster keeps for the same resource (stand_secret, tech §3.1). With lines, the lines of a multi-line
+# value (a PEM key) are joined by a literal \n; without, line ends go.
 secret_value() {
   local key=$1 file_key="${1}_FILE"
   if [[ -n ${!key:-} ]]; then
@@ -154,7 +155,40 @@ secret_value() {
   elif [[ -n ${!file_key:-} ]]; then
     [[ -r ${!file_key} ]] || die "$E_USAGE" "$file_key: cannot read file ${!file_key}"
     if [[ ${2:-} == lines ]]; then join_lines <"${!file_key}"; else tr -d '\r\n' <"${!file_key}"; fi
+  else
+    stand_secret "$key"
   fi
+}
+
+# stand_secret <key> — the secret of an external storage or of Grafana as the cluster keeps it, while the
+# configuration names the same resource: a changed host or user (S3: endpoint or bucket) is a new resource,
+# and its secret is asked for again. Nothing if the cluster does not answer.
+stand_secret() {
+  local key=$1 ns name match field
+  have jq || return 0
+  case $key in
+    POSTGRES_PASSWORD)
+      ns=$NS_STORAGES name=postgres-conn field=password
+      match=$(jq -cn --arg h "${POSTGRES_HOST:-}" --arg u "${POSTGRES_USER:-}" '{host: $h, username: $u}')
+      ;;
+    KAFKA_PASSWORD)
+      ns=$NS_STORAGES name=kafka-conn field=password
+      match=$(jq -cn --arg b "${KAFKA_BOOTSTRAP:-}" --arg u "${KAFKA_USERNAME:-}" '{bootstrap_servers: $b, username: $u}')
+      ;;
+    S3_ACCESS_KEY | S3_SECRET_KEY)
+      ns=$NS_STORAGES name=s3-conn field=$(tr '[:upper:]' '[:lower:]' <<<"${key#S3_}")
+      match=$(jq -cn --arg e "${S3_ENDPOINT:-}" --arg b "${S3_BUCKET:-}" '{endpoint: $e, bucket: $b}')
+      ;;
+    GRAFANA_GITHUB_CLIENT_SECRET)
+      ns=$NS_OBSERVABILITY name=grafana-github-oauth field=GF_AUTH_GITHUB_CLIENT_SECRET
+      match=$(jq -cn --arg c "${GRAFANA_GITHUB_CLIENT_ID:-}" '{GF_AUTH_GITHUB_CLIENT_ID: $c}')
+      ;;
+    *) return 0 ;;
+  esac
+  # Called as $(secret_value …): a cache would not outlive the subshell, and the calls are few.
+  kc -n "$ns" get secret "$name" --request-timeout=10s -o json 2>/dev/null |
+    jq -r --argjson m "$match" --arg f "$field" '(.data // {}) | map_values(@base64d)
+      | select(. as $d | $m | to_entries | all(.value != "" and $d[.key] == .value)) | .[$f] // empty' 2>/dev/null || true
 }
 
 # join_lines — lines joined by a literal \n, carriage returns dropped.
@@ -176,7 +210,7 @@ require_secret() {
   local mode_name=$1 key=$2
   [[ $mode_name == *=* ]] || mode_name+="=external"
   if [[ -z $(secret_value "$key") ]]; then
-    CONFIG_MISSING+=("$mode_name: neither $key (environment variable) nor ${key}_FILE is set")
+    CONFIG_MISSING+=("$mode_name: neither $key (environment variable) nor ${key}_FILE is set, and the cluster keeps none for this resource")
   fi
 }
 
@@ -362,6 +396,10 @@ validate_public_config() {
     true) ;;
     false) return 0 ;;
     *) die "$E_USAGE" "PUBLIC_ACCESS must be true or false" ;;
+  esac
+  case ${PUBLIC_DNS_CHECK:-true} in
+    true | false) ;;
+    *) die "$E_USAGE" "PUBLIC_DNS_CHECK must be true or false" ;;
   esac
   if target_external; then require_param INSTALL_TARGET=external PUBLIC_BASE_DOMAIN; fi
   case ${INGRESS_MODE:-internal} in

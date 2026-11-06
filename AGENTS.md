@@ -22,8 +22,8 @@ its charts and `bin/nabu-deploy` live here too, exactly like those of Hammurapi.
 ## Contents
 
 ```text
-installer       CLI: install | update | status | creds | uninstall — a stand on minikube or an existing cluster with storages,
-                         observability, public access (MetalLB, Traefik, cert-manager)
+installer       CLI: install | update | status | creds | uninstall, the wizard without a command — a stand on minikube
+                         or an existing cluster with storages, observability, public access (MetalLB, Traefik, cert-manager)
 lib/*.sh                 functions sourced by the CLI (common, host, prereqs, cluster, deploy, public, …)
 bin/hammurapi-deploy     deploys hammurapi-core/web on the stand; reads one JSON from stdin
 bin/nabu-deploy          deploys nabu-core/web (namespaces nabu, nabu-sandboxes; its DB, bucket, hosts)
@@ -40,9 +40,13 @@ charts/landing           the site of GreenOnGrey: nginx with static pages
 lib/preflight.sh         checks of an external cluster before anything changes in it (INSTALL_TARGET=external)
 lib/uninstall.sh         uninstall: on minikube the profile; on a cluster the labelled namespaces and their releases
 lib/update.sh            update: the plan, pins of update --to (installer-version), going back only by the annotation of a chart
+lib/wizard.sh            the wizard of ./installer without a command: questions on plain read, the config file, then
+                         install --config with the typed secrets in its environment
+config/mcp-servers.tsv   the MCP servers the wizard offers, with their memory; tests/manifests.sh checks it against the chart
 lib/product.sh           products of PRODUCTS: the payloads of bin/nabu-deploy and bin/hammurapi-deploy from the configuration and kept secrets
 lib/mcp.sh               optional MCP servers (FTR.NAB.CMN-0006): enabled by MCP_* options; the chart mcp-servers and
-                         the descriptions of servers come from a release of `mcps` (MCP_CHART_VERSION)
+                         the descriptions of servers come from a release of `mcps` (MCP_CHART_VERSION); a new version of
+                         the chart also refreshes config/mcp-servers.tsv
 config/                  defaults.env, versions.env (chart and tool versions)
 values/                  Helm values of the stand's components
 dashboards/              Grafana dashboards; alert rules are in values/grafana.yaml (alerting)

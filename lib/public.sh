@@ -60,9 +60,40 @@ public_prepare() {
     log "base domain: $PUBLIC_DOMAIN (ingress class ${INGRESS_CLASS:-traefik}, issuer ${ACME_ISSUER:-letsencrypt})"
     return 0
   fi
+  # install_steps prepares before the cluster changes, deploy_all again: the address is detected once.
+  [[ -z $PUBLIC_DOMAIN ]] || return 0
   PUBLIC_IP_RESOLVED=$(detect_public_ip) || die "$E_DEPLOY" "failed to detect the external IP of the machine; set PUBLIC_IP"
   PUBLIC_DOMAIN=$(public_domain "$PUBLIC_IP_RESOLVED")
   log "base domain: $PUBLIC_DOMAIN (external IP $PUBLIC_IP_RESOLVED)"
+  if [[ -z ${PUBLIC_BASE_DOMAIN:-} ]]; then
+    warn "no PUBLIC_BASE_DOMAIN: $PUBLIC_DOMAIN is a fallback. Let's Encrypt limits certificates per registered domain, and all of sslip.io shares one limit, so issuance may fail for days: set a domain of your own (R18)"
+  fi
+  check_dns
+}
+
+# check_dns — every public host of the domain points to the machine, or Let's Encrypt issues no certificate
+# (R18). The wizard asks whether to go on; without it code 19, before any certificate is requested.
+# PUBLIC_DNS_CHECK=false skips it, for a proxy in front of the machine.
+check_dns() {
+  [[ -n ${PUBLIC_BASE_DOMAIN:-} && ${PUBLIC_DNS_CHECK:-true} == true ]] || return 0
+  local host ips wrong=()
+  for host in $(public_hosts); do
+    ips=$(getent ahostsv4 "$host.$PUBLIC_DOMAIN" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ') || true
+    ips=${ips% }
+    [[ $ips == "$PUBLIC_IP_RESOLVED" ]] || wrong+=("$host.$PUBLIC_DOMAIN → ${ips:-no record}")
+  done
+  if ((${#wrong[@]} == 0)); then
+    ok "DNS: the hosts of $PUBLIC_DOMAIN point to $PUBLIC_IP_RESOLVED"
+    return 0
+  fi
+  local msg
+  msg="DNS of $PUBLIC_DOMAIN does not point to the machine $PUBLIC_IP_RESOLVED: $(printf '%s; ' "${wrong[@]}")Let's Encrypt would issue no certificate"
+  if wizard_running; then
+    warn "$msg"
+    wizard_confirm "Go on anyway (the certificate waits for DNS)?" || die "$E_CANCELLED" "cancelled: point the hosts to $PUBLIC_IP_RESOLVED and run ./installer again"
+    return 0
+  fi
+  die "$E_DNS" "$msg; point the hosts (or *.$PUBLIC_DOMAIN) to $PUBLIC_IP_RESOLVED, or set PUBLIC_DNS_CHECK=false behind a proxy; no certificate was requested"
 }
 
 # grafana_public_values <file> — Ingress, root_url and GitHub sign-in (R20).
@@ -177,10 +208,18 @@ EOF
 }
 
 # public_hosts — host names of the certificate without the domain: Hammurapi, Grafana if it is on, and PUBLIC_EXTRA_HOSTS (Nabu).
+# The hosts of Hammurapi stay unless PRODUCTS leaves it out and no CI has deployed it here: a host without DNS
+# would fail the whole certificate.
 public_hosts() {
-  local grafana=""
-  if observability_enabled; then grafana=" grafana"; fi
-  echo "${HAMMURAPI_WEB_HOST:-hammurapi} ${HAMMURAPI_API_HOST:-hammurapi-api}$grafana${PUBLIC_EXTRA_HOSTS:+ $PUBLIC_EXTRA_HOSTS}"
+  local hosts=() products=",${PRODUCTS// /},"
+  if [[ $products == ,, || $products == *,hammurapi,* ]] ||
+    hm status hammurapi-core -n "${HAMMURAPI_NAMESPACE:-hammurapi}" >/dev/null 2>&1; then
+    hosts+=("${HAMMURAPI_WEB_HOST:-hammurapi}" "${HAMMURAPI_API_HOST:-hammurapi-api}")
+  fi
+  if observability_enabled; then hosts+=(grafana); fi
+  # shellcheck disable=SC2206 # a list of names
+  hosts+=(${PUBLIC_EXTRA_HOSTS:-})
+  echo "${hosts[*]}"
 }
 
 public_certificate() {

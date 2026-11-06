@@ -41,8 +41,10 @@ The script checks all of this before installing and exits without changing anyth
 ```sh
 git clone https://github.com/GreenOnGrey/installer.git
 cd installer
-./installer install
+./installer
 ```
+
+Without a command, in a terminal, `./installer` opens the wizard. It asks for the target, the products, the domain, the sign-in, the storages and the MCP servers. It shows a summary without secrets and, after a `yes`, writes `/etc/greenongrey/installer.env` and runs `./installer install --config` with that file, the same command CI runs. The secrets you type stay in memory and reach `install` through its environment; `install` keeps them in the cluster. Run the wizard again to change a resource or turn on an MCP server: it fills in the current values, and a kept secret shows as `set`, so Enter keeps it. The wizard asks nothing that `install` does not check, and it changes nothing until the summary is confirmed (code 16 otherwise). Without a terminal, `./installer` ends with code 2 and the help.
 
 `install` installs Docker Engine, kubectl, Helm and minikube at the required versions (leaving installed ones alone), starts the cluster, generates passwords, deploys the components, checks the stand and prints a summary. On a clean machine this takes about 15–20 minutes, a repeated run takes a couple of minutes.
 
@@ -60,23 +62,24 @@ kubectl --context greenongrey -n observability port-forward svc/grafana 3000:80
 
 | Command | What it does |
 |---|---|
+| `./installer` | The wizard (a terminal is required): writes the configuration file, then runs `install` with it |
 | `./installer install` | Installs and deploys, asking nothing. A repeated run is safe: it brings the stand to the described state, keeps data and passwords, and applies changed versions. `up` is its old name |
 | `./installer status [--json]` | State of the cluster, releases and pods, the deployed version, checks, requested memory |
 | `./installer creds [--json]` | Service addresses, secret names, usernames and passwords of storages and Grafana |
 | `./installer update [<service>] [--to <version>] [--dry-run] [--yes]` | Brings the install to the versions of this release: the stand, then the products and MCP servers, after the checks pass (code 15 otherwise) and a confirmation (`--yes` without a terminal). With a service (`nabu-core`, `nabu-web`, `hammurapi-core`, `hammurapi-web`, `mcp-servers`), only it. `--to` pins it to another version, which `install` keeps and `status` shows; `update` without a service removes all pins. Going below the running version needs the annotation `greenongrey.tech/downgrade-safe-to` of the chart (code 2 otherwise). A failed service stops the update with no rollback: the JSON result lists `updated`, `failed` and `skipped` |
 | `./installer uninstall [--yes]` | Removes what the installer installed, after a confirmation (without a terminal `--yes` is required): on minikube the profile with all its data and the units; on an existing cluster the releases and namespaces of the installer and of the products, with the data of built-in storages. External Postgres, Kafka, S3 and their data stay. `down` is its old name |
 
-Flags: `--config <file>` (default: `config/local.env`), `--verbose`, `--no-color`.
+Flags: `--config <file>`, `--verbose`, `--no-color`.
 
-Exit codes: `0` success, `2` wrong call or configuration, `10` unsuitable machine, `11` a dependency is not installed or its checksum does not match, `12` the cluster did not start, `13` a release was not deployed, `14` an external storage is unreachable, `15` checks failed, `16` cancelled, `17` another run is changing the installation, `18` the external cluster does not fit. A missing parameter does not stop at the first one: code `2` names them all.
+Exit codes: `0` success, `2` wrong call or configuration, `10` unsuitable machine, `11` a dependency is not installed or its checksum does not match, `12` the cluster did not start, `13` a release was not deployed, `14` an external storage is unreachable, `15` checks failed, `16` cancelled, `17` another run is changing the installation, `18` the external cluster does not fit, `19` DNS of the domain does not point to the machine. A missing parameter does not stop at the first one: code `2` names them all.
 
-`install` and `uninstall` end stdout with one line of JSON, on success and on failure:
+`install`, `update` and `uninstall` end stdout with one line of JSON, on success and on failure:
 
 ```json
 {"status":"ok","command":"install","code":0,"durationSeconds":412,"installerVersion":"v0.4.0","updated":[],"failed":[],"skipped":[],"diagnostics":null}
 ```
 
-The configuration file is `--config`, else `$INSTALLER_CONFIG`, else `/etc/greenongrey/installer.env` if it exists, else `config/local.env`.
+The configuration file is `--config`, else `$INSTALLER_CONFIG`, else `/etc/greenongrey/installer.env` if it exists, else `config/local.env`. The wizard writes the same file, or `/etc/greenongrey/installer.env` when none exists. It replaces the lines of the keys it asked about and keeps the other lines and comments.
 
 **Machine reboots.** `install` installs the systemd unit `greenongrey-stand`. At boot it starts the minikube profile (its container has no restart policy) and waits for the pods. Components come back on their own, since their objects and volumes live in the profile. At shutdown the unit stops the cluster cleanly. See the outcome with `journalctl -u greenongrey-stand`. The unit `hammurapi-ingress-forward` restores port forwarding for public access. To turn autostart off, set `STAND_AUTOSTART=false` and run `install`. `uninstall` removes it and the forwarding unit.
 
@@ -123,6 +126,12 @@ Before anything changes, `install` checks the cluster and reports all reasons to
 
 `PUBLIC_BASE_DOMAIN` is required with public access. With the built-in ingress the cluster needs a provider of `LoadBalancer` services. On a new cluster the address appears only during `install`, so the first run stops at the certificate: point `*.<domain>` to the printed address and run `install` again. `uninstall` removes the releases and the namespaces the installer and `bin/*-deploy` labelled with `app.kubernetes.io/part-of` (`installer`, `nabu`, `hammurapi`, `landing`), and the `ClusterIssuer`s of the built-in ingress; CRDs stay. A namespace that existed before the installer, or that an older tag created, has no label: `uninstall` names it and leaves it. A default `StorageClass` is required, as there is no option to choose another one yet.
 
+### Domain
+
+`PUBLIC_BASE_DOMAIN` is the domain of the public hosts: `nabu.` and `nabu-api.` for Nabu, `hammurapi.` and `hammurapi-api.` for Hammurapi, and `grafana.`. Without a product, as on production where the products roll out from their own CI, the stand keeps the hosts of Hammurapi; `PUBLIC_EXTRA_HOSTS` adds the others. On minikube an empty domain falls back to `<IP>.sslip.io`, with a warning: Let's Encrypt limits certificates per registered domain, and all users of sslip.io share one limit. An existing cluster requires a domain.
+
+On minikube, before the cluster changes, `install` checks that each host resolves to the address of the machine. If one does not, `install` stops with code 19 and requests no certificate; the wizard asks whether to go on. Behind a proxy whose address the hosts resolve to, set `PUBLIC_DNS_CHECK=false`.
+
 ### Ingress
 
 `INGRESS_MODE=internal` (the default) installs Traefik and cert-manager, and MetalLB and port forwarding on minikube.
@@ -139,7 +148,7 @@ Set `POSTGRES_MODE`, `KAFKA_MODE` or `S3_MODE` to `external`, separately for eac
 
 Before the deploy, the Job `external-check` checks them from the cluster, and a failure stops `install` with code 14 and deploys no storages. Postgres needs the `vector` extension, and its owner needs `CREATEROLE` and `CREATEDB` (without `CREATEDB`, create the database of Nabu in advance). Kafka needs an answer to a metadata request. S3 needs the buckets `S3_BUCKET` and `S3_BUCKET_NABU` created in advance: the check writes, reads and deletes an object `.installer-check/<id>` in each.
 
-Passwords and keys go only through files (`POSTGRES_PASSWORD_FILE=/secure/pg-password`) or environment variables. A password written directly in `local.env` stops the script with code 2.
+Passwords and keys go only through files (`POSTGRES_PASSWORD_FILE=/secure/pg-password`) or environment variables. A password written directly in `local.env` stops the script with code 2. A later run without them takes them from the `*-conn` secret of the cluster, as long as the storage is the same: the same host and user for Postgres and Kafka, the same endpoint for S3. A given value replaces the kept one.
 
 For an external Kafka, the write and read check uses the topic `installer-probe`. Create it in advance if automatic topic creation is off. With `OAUTHBEARER` the probe checks only the TCP connection, because the application obtains the token itself.
 

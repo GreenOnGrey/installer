@@ -400,5 +400,7 @@ products_summary() {
     if ! nabu_external; then
       printf '              allow the service agents of Hammurapi to its client in Nabu (Admin → Clients)\n'
     fi
+    printf '              webhook of the repositories: https://%s.%s/hooks/v1/git (application/json), events pushes, pull requests,\n              reviews, review comments and issue comments;\n' "${HAMMURAPI_API_HOST:-hammurapi-api}" "$PUBLIC_DOMAIN"
+    printf '              its secret is the key WEBHOOK_SECRET of the secret %s/hammurapi-secrets\n' "$(hammurapi_ns)"
   fi
 }

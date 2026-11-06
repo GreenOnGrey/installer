@@ -186,7 +186,34 @@ mcp_chart() {
   else
     fail "MCP-01: Deployments of the chart '$deps', in descriptions '$want'"
   fi
+  mcp_wizard_list
   MCP_DOCLING=false MCP_SEARCH=false MCP_YANDEX_MAIL=false MCP_DOCGEN=false
+}
+
+# mcp_wizard_list — config/mcp-servers.tsv, which the wizard reads without Helm, names the servers of the
+# chart and the memory each one requests.
+mcp_wizard_list() {
+  local srv o want="" have f mib
+  have=$(sed '/^#/d' "$ROOT/config/mcp-servers.tsv" | cut -f1,2 | tr '\t' ' ' | sort)
+  for srv in "${MCP_SERVERS[@]}"; do
+    local args=()
+    for o in "${MCP_SERVERS[@]}"; do printf -v "$(mcp_opt "$o")" false; done
+    # A server new to the chart has no option in defaults.env yet.
+    [[ " ${MCP_OPTIONS[*]} " == *" $(mcp_opt "$srv") "* ]] || MCP_OPTIONS+=("$(mcp_opt "$srv")")
+    printf -v "$(mcp_opt "$srv")" true
+    mapfile -t args < <(mcp_helm_args)
+    f=$OUT/mcp-$srv.yaml
+    helm template "$MCP_RELEASE" "$MCP_CHART_DIR" -n mcp --kube-version "$KUBE_VERSION" "${args[@]}" >"$f"
+    mib=$(docs_json "$f" | jq -r 'select(.kind == "Deployment") | .spec.template.spec.containers[] | .resources.requests.memory // empty' |
+      while read -r q; do to_bytes "$q"; done | awk '{ s += $1 } END { print int(s / 1048576) }')
+    want+="$srv $mib"$'\n'
+  done
+  want=$(sort <<<"${want%$'\n'}")
+  if [[ $have == "$want" ]]; then
+    pass "R21: config/mcp-servers.tsv matches the chart: $(tr '\n' ',' <<<"$want")"
+  else
+    fail "R21: config/mcp-servers.tsv has '$(tr '\n' ',' <<<"$have")', the chart '$(tr '\n' ',' <<<"$want")'"
+  fi
 }
 
 # --- FTR.HMR.INFRA-0002: Hammurapi charts and public access ---
