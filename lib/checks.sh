@@ -12,6 +12,8 @@ PROBE_TOPIC=installer-probe
 CHECK_RESULTS=()
 MEM_REQUESTED=0 MEM_ALLOCATABLE=0
 
+# record <name> <ok|warn|fail> <message> — warn is shown but does not fail the checks: the stand works, and
+# something outside it does not answer.
 record() { CHECK_RESULTS+=("$1|$2|$3"); }
 
 probe_id() { openssl rand -hex 6; }
@@ -470,10 +472,14 @@ run_checks() {
   local r name state msg failed=0
   for r in "${CHECK_RESULTS[@]}"; do
     IFS='|' read -r name state msg <<<"$r"
-    if [[ $state == ok ]]; then ok "$name: $msg"; else
-      warn "$name: $msg"
-      failed=1
-    fi
+    case $state in
+      ok) ok "$name: $msg" ;;
+      warn) warn "$name: $msg" ;;
+      *)
+        warn "$name: $msg"
+        failed=1
+        ;;
+    esac
   done
   return $failed
 }

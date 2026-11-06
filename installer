@@ -389,7 +389,7 @@ checks_json() {
   local r name state msg
   for r in "${CHECK_RESULTS[@]}"; do
     IFS='|' read -r name state msg <<<"$r"
-    jq -cn --arg n "$name" --arg s "$state" --arg m "$msg" '{name: $n, ok: ($s == "ok"), message: $m}'
+    jq -cn --arg n "$name" --arg s "$state" --arg m "$msg" '{name: $n, ok: ($s == "ok" or $s == "warn"), warning: ($s == "warn"), message: $m}'
   done | jq -cs .
 }
 
@@ -443,6 +443,8 @@ status_text() {
     IFS='|' read -r name state msg <<<"$r"
     if [[ $state == ok ]]; then
       printf '  %s✓%s %-10s %s\n' "$C_GREEN" "$C_RESET" "$name" "$msg"
+    elif [[ $state == warn ]]; then
+      printf '  %s!%s %-10s %s\n' "$C_YELLOW" "$C_RESET" "$name" "$msg"
     else
       printf '  %s✗%s %-10s %s\n' "$C_RED" "$C_RESET" "$name" "$msg"
     fi

@@ -169,7 +169,7 @@ jobs:
                 "Cluster: \(.profile.status // "?"), Kubernetes \(.profile.kubernetes // "?")",
                 "Memory: \(.resources.requestedPercent // "?")% of minikube requested by components", "",
                 "| Check | Result | Message |", "|---|---|---|",
-                ((.checks // [])[] | "| \(.name) | \(if .ok then "✓" else "✗" end) | \(.message) |")' status.json
+                ((.checks // [])[] | "| \(.name) | \(if .ok then (if .warning then "!" else "✓" end) else "✗" end) | \(.message) |")' status.json
             elif jq -e '.error' status.json >/dev/null 2>&1; then
               echo "status: $(jq -r .error status.json)"
             else

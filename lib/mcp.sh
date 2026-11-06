@@ -449,11 +449,24 @@ check_mcp_server() {
   esac
 }
 
+# search_refusals <answer> — "limits" when SearXNG names the engines that failed and each of them refused by its
+# limits (too many requests, CAPTCHA, access denied, suspended); nothing otherwise.
+search_refusals() {
+  local reasons
+  reasons=$(jq -r '.result.content[0].text // ""' 2>/dev/null <<<"$1" | grep -o 'engines failed:.*' | grep -oE '\([^)]*\)' || true)
+  [[ -n $reasons ]] || return 0
+  grep -viqE 'too many requests|captcha|access denied|suspended' <<<"$reasons" || echo limits
+}
+
 check_mcp_search_query() {
   local out
   out=$(mcp_rpc "$1" "$2" tools/call '{"name":"searxng_web_search","arguments":{"query":"kubernetes"}}')
   if jq -e '.result.isError != true and ((.result.content[0].text // "") | test("http"))' >/dev/null 2>&1 <<<"$out"; then
     record mcp-search-query ok "the query kubernetes found pages"
+  elif [[ $(search_refusals "$out") == limits ]]; then
+    # The server works, and every engine that failed refused it by its limits (data center addresses). An engine
+    # that does not answer at all stays a failure: then the network of the stand may be broken.
+    record mcp-search-query warn "the server answers, but the search engines refused it: ${out:0:160}"
   else
     record mcp-search-query fail "the query kubernetes found nothing: ${out:0:160}"
   fi
@@ -552,7 +565,7 @@ mcp_status_json() {
     for r in "${CHECK_RESULTS[@]}"; do
       IFS='|' read -r name state msg <<<"$r"
       [[ $name == "mcp-$srv-"* ]] || continue
-      checks=$(jq -c --arg n "$name" --arg s "$state" --arg m "$msg" '. + [{name: $n, ok: ($s == "ok"), message: $m}]' <<<"$checks")
+      checks=$(jq -c --arg n "$name" --arg s "$state" --arg m "$msg" '. + [{name: $n, ok: ($s == "ok" or $s == "warn"), warning: ($s == "warn"), message: $m}]' <<<"$checks")
     done
     out=$(jq -c --arg s "$srv" --arg u "$(mcp_url "$srv")" --arg d "${MCP_DEPLOYMENTS[$srv]}" \
       --argjson t "${MCP_TOOL_COUNT[$srv]:-null}" --argjson c "$checks" --argjson dep "$deploys" \

@@ -108,6 +108,7 @@ All Hammurapi configuration lives in secrets and variables of the **organization
 | `HAMMURAPI_SPEC_REPO` | `GreenOnGrey/hammurapi-spec` |
 | `HAMMURAPI_BOOTSTRAP_ADMINS` | login of the stand's owner, the first global administrator |
 | `AUTO_DEPLOY` | `false`: Hammurapi drives the rollout by tag (R23); build and scan continue |
+| `VERSIONS_APP_ID` | the GitHub App that opens the PR of the version in `installer` after a rollout to production (FTR.INFRA.INST-0001 R25); the same for Nabu |
 
 **Secrets:**
 
@@ -120,6 +121,7 @@ All Hammurapi configuration lives in secrets and variables of the **organization
 | `HAMMURAPI_BOOTSTRAP_DEEPSEEK_API_KEY` | optional: a DeepSeek key for the first LLM connection; further connections and models are in Administration → Agent (FTR.HMR.CMN-0004) |
 | `HAMMURAPI_GHCR_PULL_TOKEN` | a classic PAT with `read:packages`: images and charts on the machine |
 | `HAMMURAPI_DEPLOY_CALLBACK_SECRET` | secret of the rollout webhook of the environment `production` in Hammurapi (Administration → Deploy) |
+| `VERSIONS_APP_PRIVATE_KEY` | private key of that App. The App has Contents and Pull requests (read and write) and is installed only on `installer`. Without the App a rollout only notes that no PR was opened |
 
 Each of the two repositories has the environment `production` (Settings → Environments) with rollout rules: allowed tags `v*.*.*`, and reviewers if you like. It holds no values of its own.
 

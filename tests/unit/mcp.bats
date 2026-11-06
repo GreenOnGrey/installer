@@ -268,6 +268,31 @@ esac'
   [ "${MCP_TOOL_COUNT[search]}" = 2 ]
 }
 
+@test "R6: search engines that refuse the server by their limits are a warning; anything else is a failure" {
+  MCP_SEARCH=true
+  CHECK_RESULTS=()
+  mcp_rpc() { echo '{"result":{"content":[{"type":"text","text":"Search Degraded: No results for \"kubernetes\", and these engines failed: brave (too many requests)"}]}}'; }
+  check_mcp_search_query http://search.mcp.svc:3000/mcp SEARCH_KEY
+  [[ ${CHECK_RESULTS[0]} == "mcp-search-query|warn|the server answers"* ]]
+  mcp_rpc() { echo "curl: (7) Failed to connect"; }
+  check_mcp_search_query http://search.mcp.svc:3000/mcp SEARCH_KEY
+  [[ ${CHECK_RESULTS[1]} == "mcp-search-query|fail|"* ]]
+  # An engine that does not answer at all may be the network of the stand: a failure.
+  mcp_rpc() { echo '{"result":{"content":[{"type":"text","text":"No results, and these engines failed: brave (too many requests), bing (timeout)"}]}}'; }
+  check_mcp_search_query http://search.mcp.svc:3000/mcp SEARCH_KEY
+  [[ ${CHECK_RESULTS[2]} == "mcp-search-query|fail|"* ]]
+}
+
+@test "R6: a warning does not fail the checks; status shows it and its JSON keeps ok" {
+  check_pods() { record pods ok "ready"; }
+  check_storages() { record mcp-search-query warn "engines failed"; }
+  for f in check_grafana check_metrics check_logs check_mcp check_resources check_public cleanup_probes; do eval "$f() { :; }"; done
+  start_probe_pods() { return 0; }
+  run_checks
+  run checks_json
+  echo "$output" | jq -e '.[] | select(.name == "mcp-search-query") | .ok and .warning'
+}
+
 @test "STD-15: status: readiness by Deployments, tool count and checks" {
   MCP_SEARCH=true MCP_DOCLING=true
   MCP_TOOL_COUNT[search]=4
