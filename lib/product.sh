@@ -368,6 +368,25 @@ deploy_products() {
   ok "products: $(product_list | paste -sd, -)"
 }
 
+# deploy_products_of <component> — one component at its version (update <service>).
+deploy_products_of() {
+  local component=$1 script ns chart before="" var=${SERVICE_VERSION_VAR[$1]}
+  PRODUCT_INPUTS_READ=0
+  CONFIG_MISSING=()
+  validate_products
+  die_if_missing
+  ensure_nabu_client
+  save_product_inputs
+  case $component in
+    nabu-*) script=nabu-deploy ns=$(nabu_ns) chart=$NABU_CHART_VERSION ;;
+    hammurapi-*) script=hammurapi-deploy ns=$(hammurapi_ns) chart=$HAMMURAPI_CHART_VERSION ;;
+  esac
+  [[ $component == nabu-core ]] && before=$(secret_key "$ns" nabu-secrets BOOTSTRAP_CLIENTS 2>/dev/null || true)
+  deploy_component "$script" "$ns" "$component" "${!var}" "$chart" ||
+    die "$E_USAGE" "$component belongs to the CI of its product: update it there"
+  if [[ $component == nabu-core ]]; then restart_nabu_api "$before"; fi
+}
+
 # products_summary — addresses of the products, and what is still to be done by hand.
 products_summary() {
   if has_product nabu; then

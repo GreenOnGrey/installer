@@ -32,6 +32,8 @@ source "$ROOT/lib/mcp.sh"
 source "$ROOT/lib/uninstall.sh"
 # shellcheck source=lib/product.sh
 source "$ROOT/lib/product.sh"
+# shellcheck source=lib/update.sh
+source "$ROOT/lib/update.sh"
 
 usage() {
   cat <<'EOF'
@@ -40,6 +42,10 @@ Usage: ./installer <command> [flags]
 Commands:
   install    check the machine or the cluster, install dependencies, deploy, verify, print a summary;
              no questions, safe to repeat
+  update [<service>] [--to <version>]
+             bring the install to the versions of this release; with a service, only it; --to pins
+             it to a version (status shows the pin, update without a service removes all pins).
+             Services: nabu-core nabu-web hammurapi-core hammurapi-web mcp-servers
   status     show the state of the cluster and components, run the checks, show resources
   creds      print addresses, secret names and passwords from Kubernetes secrets
   uninstall  remove what the installer installed: on minikube the profile with all its data, on an
@@ -49,12 +55,13 @@ Commands:
 Flags:
   --config <file>  configuration file (default: $INSTALLER_CONFIG, then /etc/greenongrey/installer.env
                    if it exists, then config/local.env)
-  --yes            uninstall: do not ask for confirmation; required without a terminal
+  --yes            uninstall, update: do not ask for confirmation; required without a terminal
+  --dry-run        update: show the versions it would change, change nothing
   --json           status, creds: print JSON
   --verbose        print the commands being run
   --no-color       disable color (automatic when the output is not a terminal)
 
-install and uninstall end stdout with one line of JSON: status, command, code, durationSeconds,
+install, update and uninstall end stdout with one line of JSON: status, command, code, durationSeconds,
 installerVersion, updated, failed, skipped, diagnostics.
 EOF
 }
@@ -90,10 +97,17 @@ parse_args() {
       down) arg=uninstall ;;
     esac
     case $arg in
-      install | status | creds | uninstall | help)
+      install | status | creds | uninstall | update | help)
         [[ -n $COMMAND ]] && usage_error "unexpected extra command: $1"
         COMMAND=$arg
         ;;
+      --to)
+        [[ $# -ge 2 ]] || usage_error "--to needs a version"
+        UPDATE_TO=$2
+        shift
+        ;;
+      --to=*) UPDATE_TO=${1#--to=} ;;
+      --dry-run) DRY_RUN=1 ;;
       --config)
         [[ $# -ge 2 ]] || usage_error "--config needs a file path"
         CONFIG_FILE=$2
@@ -105,13 +119,18 @@ parse_args() {
       --verbose) VERBOSE=1 ;;
       --no-color) COLOR=0 ;;
       -h | --help) COMMAND=help ;;
-      *) usage_error "unknown command or flag: $1" ;;
+      -*) usage_error "unknown command or flag: $1" ;;
+      *)
+        [[ $COMMAND == update && -z $UPDATE_SERVICE ]] || usage_error "unknown command or flag: $1"
+        UPDATE_SERVICE=$1
+        ;;
     esac
     shift
   done
   # The wizard comes with a later release (FTR.INFRA.INST-0001 R3); until then no command is a usage error.
   [[ -n $COMMAND ]] || usage_error "no command given"
-  [[ $ASSUME_YES == 1 && $COMMAND != uninstall ]] && usage_error "--yes is only valid for uninstall"
+  [[ $ASSUME_YES == 1 && $COMMAND != uninstall && $COMMAND != update ]] && usage_error "--yes is only valid for uninstall and update"
+  [[ ($DRY_RUN == 1 || -n $UPDATE_TO) && $COMMAND != update ]] && usage_error "--dry-run and --to are only valid for update"
   [[ $JSON == 1 && $COMMAND != status && $COMMAND != creds ]] && usage_error "--json is only valid for status and creds"
   if [[ -n $CONFIG_FILE && ! -f $CONFIG_FILE ]]; then usage_error "config file not found: $CONFIG_FILE"; fi
   CONFIG_FILE=${CONFIG_FILE:-$(default_config)}
@@ -151,7 +170,12 @@ print_result() {
 
 OLD_LOCK_FILE=${OLD_LOCK_FILE:-/var/lock/hammurapi-infra.lock}
 
+LOCK_HELD=0
+
 acquire_lock() {
+  # update takes the lock before install_steps takes it again: reopening fd 9 would release it.
+  ((LOCK_HELD)) && return 0
+  LOCK_HELD=1
   # An external target changes nothing on the machine, /var/lock included.
   if target_external; then
     LOCK_FILE=$WORK_DIR/installer.lock
@@ -263,6 +287,11 @@ resources_line() {
 cmd_install() {
   start_run_log
   trap 'on_install_exit $?' EXIT
+  install_steps
+}
+
+# install_steps — the whole install; update without a service runs it too.
+install_steps() {
   products_preflight
   if target_external; then
     acquire_lock
@@ -278,6 +307,8 @@ cmd_install() {
   migrate_names
   restore_config strict
   validate_config
+  # R23: a service pinned by update --to keeps its version.
+  apply_pins
   deploy_all
   # Right after the deploy: record what was applied, even if the checks fail later.
   write_config
@@ -358,11 +389,12 @@ status_json() {
   jq -n --arg profile "$name" --arg st "$profile_status" --arg k8s "$k8s" --arg target "${INSTALL_TARGET:-minikube}" \
     --argjson version "$version" --argjson releases "$releases" --argjson pods "$pods" --argjson public "$public" \
     --argjson checks "$(checks_json)" --argjson req "$MEM_REQUESTED" --argjson alloc "$MEM_ALLOCATABLE" \
-    --argjson mcp "$(mcp_status_json)" \
+    --argjson mcp "$(mcp_status_json)" --argjson pinned "$(if [[ $running == 1 ]]; then pinned_versions; else echo '{}'; fi)" \
     --arg pg "$POSTGRES_MODE" --arg kafka "$KAFKA_MODE" --arg s3 "$S3_MODE" \
     --argjson observability "$(if observability_enabled; then echo true; else echo false; fi)" \
     '{target: $target, profile: {name: $profile, status: $st, kubernetes: $k8s}, version: $version,
       storages: {postgres: $pg, kafka: $kafka, s3: $s3}, observability: $observability, public: $public, mcp: $mcp,
+      pinned: $pinned,
       releases: $releases, pods: $pods, checks: $checks,
       resources: {requestedMemoryBytes: $req, allocatableMemoryBytes: $alloc,
         requestedPercent: (if $alloc > 0 then ($req * 100 / $alloc | floor) else 0 end)},
@@ -374,6 +406,8 @@ status_text() {
   printf '\nCluster    %s — %s\n' "$(cluster_label)" "$profile_status"
   if [[ $running == 1 ]]; then
     printf 'Version    %s\n' "$(deployed_version | jq -r 'if . == null then "not recorded" else "\(.tag) (\(.commit)), \(.deployedAt), \(.deployedBy)" end')"
+    # R23: a pinned service differs from the set until update without a service.
+    pinned_versions | jq -r 'to_entries[] | "Pinned     \(.key) \(.value) (update removes the pin)"'
     printf '\nHelm releases\n'
     hm list -A 2>/dev/null | sed 's/^/  /' || true
     printf '\nPods\n'
@@ -502,7 +536,7 @@ main() {
   fi
   # Commands that change the system end with the JSON result whatever stops them (R6).
   case $COMMAND in
-    install | uninstall) trap 'print_result $?' EXIT ;;
+    install | uninstall | update) trap 'print_result $?' EXIT ;;
   esac
   load_config "$ROOT" "$CONFIG_FILE"
   WORK_DIR="$ROOT/.work"
@@ -518,6 +552,11 @@ main() {
       cmd_status
       ;;
     creds) cmd_creds ;;
+    update)
+      validate_update_args
+      validate_config products
+      cmd_update
+      ;;
     uninstall)
       validate_names
       CONFIG_MISSING=()
