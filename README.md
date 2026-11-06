@@ -39,10 +39,22 @@ The script checks all of this before installing and exits without changing anyth
 ## Quick start
 
 ```sh
-git clone https://github.com/GreenOnGrey/installer.git
-cd installer
-./installer
+curl -fsSL https://github.com/GreenOnGrey/installer/releases/latest/download/installer.tar.gz | tar xz && ./installer/installer
 ```
+
+Each release `vX.Y.Z` has `installer.tar.gz` with its SHA-256 and a keyless [cosign](https://docs.sigstore.dev/) signature made by the release workflow of this repository. To check them before running:
+
+```sh
+base=https://github.com/GreenOnGrey/installer/releases/latest/download
+curl -fsSLO "$base/installer.tar.gz" -O "$base/installer.tar.gz.sha256" -O "$base/installer.tar.gz.sigstore.json"
+sha256sum -c installer.tar.gz.sha256
+cosign verify-blob installer.tar.gz --bundle installer.tar.gz.sigstore.json \
+  --certificate-identity-regexp '^https://github\.com/GreenOnGrey/installer/\.github/workflows/deploy-prod\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+tar xzf installer.tar.gz && ./installer/installer
+```
+
+A release gets its archive only after production has taken the tag. `git clone --branch vX.Y.Z https://github.com/GreenOnGrey/installer.git` gives the same files, plus the tests.
 
 Without a command, in a terminal, `./installer` opens the wizard. It asks for the target, the products, the domain, the sign-in, the storages and the MCP servers. It shows a summary without secrets and, after a `yes`, writes `/etc/greenongrey/installer.env` and runs `./installer install --config` with that file, the same command CI runs. The secrets you type stay in memory and reach `install` through its environment; `install` keeps them in the cluster. Run the wizard again to change a resource or turn on an MCP server: it fills in the current values, and a kept secret shows as `set`, so Enter keeps it. The wizard asks nothing that `install` does not check, and it changes nothing until the summary is confirmed (code 16 otherwise). Without a terminal, `./installer` ends with code 2 and the help.
 
@@ -223,6 +235,7 @@ Production is a stand in Google Cloud. The workflow [`deploy-prod`](.github/work
 - it hands the production machine an export of the tag (`git archive`) over the same SSH, unpacks it into `/opt/installer/releases/<tag>` and runs `up` (the old name of `install`, which older tags know too, for a rollback). After a success `current` points to that tag, and the last 5 exports are kept. The production machine needs no access to GitHub, because deploy keys are forbidden by the organization's policy;
 - `/opt/installer/local.env` and secret files stay on the machine and are not passed through the workflow. The exceptions are public access, Grafana sign-in through GitHub and MCP servers (below): their parameters reach `install` through the stdin of the SSH session and are not written to disk. Logs of all runs are in `/opt/installer/logs`;
 - rollouts run one at a time (`concurrency`), and `/var/lock/installer.lock` blocks a parallel `install` on the machine (code 17);
+- after a pushed tag succeeds on production, the job `release` publishes the GitHub Release of the tag: `installer.tar.gz` (`.github/scripts/release-archive.sh`: the tag without `.github` and tests, with a file `RELEASE` that names the tag and commit), its `.sha256` and the cosign bundle `.sigstore.json`. A manual run publishes nothing, so an old tag never becomes the latest release;
 - the outcome is the `status` summary in the run's report. The deployed tag shows in `status` (ConfigMap `installer/installer-version`). The log of each run stays on the machine: the repository is public, so logs are not uploaded as artifacts.
 
 Settings of the GitHub environment `production`:

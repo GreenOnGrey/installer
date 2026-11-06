@@ -3,4 +3,5 @@ logs/
 .work/
 .cache/
 charts/hammurapi-dashboards/files/
-
+# The version file of the release archive (.github/scripts/release-archive.sh).
+/RELEASE

@@ -460,14 +460,14 @@ check_mcp_search_query() {
 }
 
 # check_mcp_docling_serve — docling-serve answers 401 without a key, and the reference
-# document converts to Markdown (R6).
+# document converts to Markdown (R6). The document is part of the installer: the release archive has no tests/.
 check_mcp_docling_serve() {
   local code html out
   code=$(mcp_probe 'curl -sS -m 10 -o /dev/null -w "%{http_code}" http://docling-serve:5001/v1/convert/source -H "Content-Type: application/json" -d "{}"')
   if [[ $code == 401 ]]; then record mcp-docling-serve-auth ok "without a key: 401"; else
     record mcp-docling-serve-auth fail "expected 401 without a key, got: $code"
   fi
-  html=$(base64 -w0 "$ROOT/tests/fixtures/mcp/sample.html")
+  html=$(base64 -w0 "$ROOT/lib/mcp-sample.html")
   out=$(mcp_probe 'echo '"$html"' | base64 -d > /tmp/sample.html &&
     printf "header = \"X-Api-Key: %s\"\n" "$DOCLING_SERVE_KEY" | curl -K - -sS -m 300 http://docling-serve:5001/v1/convert/file \
       -F "files=@/tmp/sample.html;type=text/html" -F "to_formats=md"')
