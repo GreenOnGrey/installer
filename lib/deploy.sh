@@ -216,9 +216,12 @@ write_version() {
   tag=$(installer_version)
   commit=${INFRA_COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)}
   commit=${commit:0:7}
+  # The pins of update --to stay (FTR.INFRA.INST-0001 R23).
+  local pinned
+  pinned=$(pinned_versions) || exit
   kc -n "$NS_STATE" create configmap "$STATE_VERSION_CM" \
     --from-literal="tag=$tag" --from-literal="commit=$commit" \
     --from-literal="deployedAt=$(now_utc)" --from-literal="deployedBy=${DEPLOYED_BY:-$(id -un)}" \
-    --dry-run=client -o yaml | apply_stdin
+    --from-literal="pinned=$pinned" --dry-run=client -o yaml | apply_stdin
   DEPLOYED_TAG=$tag
 }
