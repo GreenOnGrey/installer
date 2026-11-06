@@ -42,4 +42,4 @@ This applies to `update` without a service too: after a pin above the set, retur
 
 ## Production of a product
 
-The CI of each product rolls its tags out to our production directly; an installer release is not needed for that. A component deployed by its own CI is left alone by `install` and `update`, which list it in `skipped`.
+The CI of each product rolls its tags out to our production directly; an installer release is not needed for that. After a successful rollout, `deploy-component.yml` of `nabu` and `hammurapi` calls [`version-pr.yml`](../.github/workflows/version-pr.yml) of this repository. It opens a PR that moves the version in `config/versions.env`, with the agent Pi and the chart the component ran with, so the set follows what runs on production. A component deployed by its own CI is left alone by `install` and `update`, which list it in `skipped`.

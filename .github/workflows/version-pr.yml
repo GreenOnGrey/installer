@@ -1,0 +1,124 @@
+# The PR of a version (FTR.INFRA.INST-0001 R25, tech §7): after a component rolled out to production and passed its
+# checks, deploy-component.yml of nabu and hammurapi calls this workflow, and a PR here moves the component in
+# config/versions.env, so the set of a release holds only versions that run on production.
+#   uses: GreenOnGrey/installer/.github/workflows/version-pr.yml@<SHA of a tag>
+#
+# The token is that of the GitHub App of the organization: VERSIONS_APP_ID, VERSIONS_APP_PRIVATE_KEY, with Contents and
+# Pull requests (read and write), installed only on installer. Without it the job only says so. The last rollout
+# decides what runs on production: every other open PR of the component is closed, also after a rollback. A failure is
+# a warning: the rollout itself has succeeded.
+name: version-pr
+on:
+  workflow_call:
+    inputs:
+      component: { type: string, required: true }   # nabu-core | nabu-web | hammurapi-core | hammurapi-web
+      tag: { type: string, required: true }         # vX.Y.Z, running on production
+      app_id: { type: string, default: "" }         # vars.VERSIONS_APP_ID of the caller
+    secrets:
+      VERSIONS_APP_PRIVATE_KEY: { required: false }
+
+jobs:
+  pr:
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest is moving to Ubuntu 26
+    continue-on-error: true
+    concurrency: { group: "versions-${{ inputs.component }}", cancel-in-progress: false }
+    permissions: {}
+    timeout-minutes: 10
+    env:
+      COMPONENT: ${{ inputs.component }}
+      TAG: ${{ inputs.tag }}
+      HAS_APP: ${{ inputs.app_id != '' && secrets.VERSIONS_APP_PRIVATE_KEY != '' }}
+    steps:
+      - name: Without the App
+        if: env.HAS_APP != 'true'
+        run: |
+          echo "::notice::VERSIONS_APP_ID or VERSIONS_APP_PRIVATE_KEY is not set: no PR of the version to installer"
+      - name: Token of the App
+        id: app
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.VERSIONS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: installer
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.HAS_APP == 'true'
+        with:
+          repository: ${{ github.repository_owner }}/installer
+          token: ${{ steps.app.outputs.token }}
+          path: installer
+      - name: PR of the version
+        id: pr
+        if: env.HAS_APP == 'true'
+        working-directory: installer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          CALLER: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          semver='[0-9]+\.[0-9]+\.[0-9]+'
+          # The line of the set this run moves, and those that come with the component from its deploy/versions.env
+          # at the tag: the agent Pi is in the image of nabu-core; a chart moves only forward, as releases of the
+          # installer publish charts too.
+          case $COMPONENT in
+            nabu-core) companions=("PI_VERSION NABU_PI_VERSION exact" "CHART_VERSION NABU_CHART_VERSION forward") ;;
+            nabu-web) companions=("CHART_VERSION NABU_CHART_VERSION forward") ;;
+            hammurapi-core | hammurapi-web) companions=("CHART_VERSION HAMMURAPI_CHART_VERSION forward") ;;
+            *) echo "::error::not a component of the set: $COMPONENT"; exit 1 ;;
+          esac
+          [[ $TAG =~ ^v$semver$ ]] || { echo "::error::not a tag vX.Y.Z: $TAG"; exit 1; }
+          # value <key> <file> — the value of the only line key=…; an error otherwise.
+          value() {
+            local lines
+            mapfile -t lines < <(grep -E "^$1=" "$2" || true)
+            if ((${#lines[@]} != 1)) || ! [[ ${lines[0]} =~ ^$1=v?$semver$ ]]; then
+              echo "::error::$2 needs exactly one line $1=<version>" >&2
+              return 1
+            fi
+            echo "${lines[0]#*=}"
+          }
+          newer() { [[ $1 != "$2" && $(printf '%s\n%s\n' "${1#v}" "${2#v}" | sort -V | tail -1) == "${1#v}" ]]; }
+          key=$(tr '[:lower:]-' '[:upper:]_' <<<"$COMPONENT")_VERSION
+          current=$(value "$key" config/versions.env)
+          branch="versions/$COMPONENT-$TAG"
+          # close_others <keep> <comment> — open PRs of the component other than <keep>: they no longer run on production.
+          close_others() {
+            gh pr list --state open --limit 500 --json number,headRefName \
+              --jq ".[] | select(.headRefName | startswith(\"versions/$COMPONENT-v\")) | select(.headRefName != \"$1\") | .number" |
+              while read -r n; do gh pr close "$n" --delete-branch --comment "$2"; done
+          }
+          if newer "$current" "$TAG"; then
+            echo "::notice::$COMPONENT $TAG is older than $current of the set: no PR; going back in the set is a decision of its own"
+            close_others "" "Production went back to $COMPONENT $TAG: $RUN_URL"
+            exit 0
+          fi
+          pinned=$RUNNER_TEMP/versions.env
+          curl -fsSL --retry 3 "https://raw.githubusercontent.com/$CALLER/$TAG/deploy/versions.env" -o "$pinned"
+          sed -i -E "s/^$key=.*/$key=$TAG/" config/versions.env
+          for c in "${companions[@]}"; do
+            read -r from to mode <<<"$c"
+            want=$(value "$from" "$pinned")
+            have=$(value "$to" config/versions.env)
+            if [[ $mode == exact ]] || newer "$want" "$have"; then sed -i -E "s/^$to=.*/$to=$want/" config/versions.env; fi
+          done
+          if git diff --quiet; then
+            echo "the set already has $COMPONENT $TAG"
+            close_others "" "Production runs $COMPONENT $TAG, which the set already has: $RUN_URL"
+            exit 0
+          fi
+          # The branch is made anew from main every time: a PR merged next to it leaves no conflict.
+          id=$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)
+          git -c user.name="${APP_SLUG}[bot]" -c user.email="$id+${APP_SLUG}[bot]@users.noreply.github.com" \
+            commit -q -am "$COMPONENT $TAG in the set of versions" -m "It runs on production: $RUN_URL (FTR.INFRA.INST-0001 R25)."
+          git push -q -f origin "HEAD:refs/heads/$branch"
+          pr=$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')
+          if [[ -z $pr ]]; then
+            pr=$(gh pr create --head "$branch" --title "$COMPONENT $TAG in the set of versions" \
+              --body "$COMPONENT $TAG rolled out to production and passed its checks: $RUN_URL. The next release of the installer installs it, with the versions it ran with (FTR.INFRA.INST-0001 R25).")
+          fi
+          echo "- PR of the version: $pr" >>"$GITHUB_STEP_SUMMARY"
+          close_others "$branch" "Superseded by $pr"
