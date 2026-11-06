@@ -311,9 +311,14 @@ helm_login() {
   token=$(payload .ghcrPullToken)
   [[ -n $token ]] || token=$(kc -n "$NS" get secret ghcr-pull -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null |
     base64 -d | jq -r --arg r "$REGISTRY" '.auths[$r].password // empty')
-  [[ -n $token ]] || fail "$E_HELM" "no registry read token for the chart"
   HELM_REG=$(mktemp -p /dev/shm nabu-helm-XXXXXX.json 2>/dev/null || mktemp)
   export HELM_REGISTRY_CONFIG=$HELM_REG
+  # The charts are public (FTR.INFRA.INST-0001 arch §1): without a token they download anonymously, and
+  # the empty registry config keeps stale credentials of the machine out of the way.
+  if [[ -z $token ]]; then
+    echo '{}' >"$HELM_REG"
+    return 0
+  fi
   printf '%s' "$token" | helm registry login "$REGISTRY" --username nabu --password-stdin >/dev/null 2>&1 ||
     fail "$E_HELM" "failed to sign in to $REGISTRY"
 }
