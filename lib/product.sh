@@ -1,7 +1,7 @@
 # shellcheck shell=bash
-# Products of an install (FTR.INFRA.INST-0001 R11, R13): bin/nabu-deploy with a payload built here from
-# the configuration and the secrets of the cluster. The deploy contract (stdin JSON, codes, the last line
-# of JSON) does not change, so the CI of a product runs the same script.
+# Products of an install (FTR.INFRA.INST-0001 R11, R13): bin/nabu-deploy and bin/hammurapi-deploy with
+# payloads built here from the configuration and the secrets of the cluster. The deploy contract (stdin
+# JSON, codes, the last line of JSON) does not change, so the CI of a product runs the same scripts.
 
 readonly STATE_PRODUCTS_CM=installer-products PRODUCT_INPUTS_SECRET=product-inputs
 PRODUCT_BIN=${PRODUCT_BIN:-$ROOT/bin}
@@ -9,13 +9,21 @@ PRODUCT_BIN=${PRODUCT_BIN:-$ROOT/bin}
 # does not answer (a stopped minikube).
 PRODUCT_INPUTS=""
 PRODUCT_INPUTS_READ=0
+# Values the installer generates and keeps with the inputs: the secret of the client of Hammurapi in the
+# Nabu of this install. Never taken from the environment, so a NABU_CLIENT_SECRET of an external Nabu
+# cannot replace it.
+declare -gA GENERATED_INPUTS=()
+readonly GENERATED_KEYS=(NABU_BOOTSTRAP_CLIENT_SECRET)
 
 nabu_ns() { echo "${NABU_NAMESPACE:-nabu}"; }
+hammurapi_ns() { echo "${HAMMURAPI_NAMESPACE:-hammurapi}"; }
 
 # product_list — the products of PRODUCTS, one per line.
 product_list() { tr ', ' '\n\n' <<<"${PRODUCTS:-}" | sed '/^$/d'; }
 
 has_product() { product_list | grep -qx "$1"; }
+
+nabu_external() { [[ ${NABU_MODE:-internal} == external ]]; }
 
 read_product_inputs() {
   ((PRODUCT_INPUTS_READ)) && return 0
@@ -35,35 +43,53 @@ stored_input() {
   jq -r --arg k "$1" '.[$k] // empty | @base64d' <<<"$PRODUCT_INPUTS"
 }
 
+# input_value <key> — the value given to this run. The private key of the GitHub App keeps its lines
+# as \n, the form bin/hammurapi-deploy reads.
+input_value() {
+  if [[ $1 == HAMMURAPI_GITHUB_APP_PRIVATE_KEY ]]; then secret_value "$1" lines; else secret_value "$1"; fi
+}
+
 # product_secret <key> — the value given to this run, else the kept one.
 product_secret() {
   local v
-  v=$(secret_value "$1")
+  v=$(input_value "$1")
   if [[ -n $v ]]; then printf '%s' "$v"; else stored_input "$1"; fi
 }
 
 # require_product_secret <what> <key> — while the cluster does not answer, a kept value cannot be seen:
 # deploy_products checks again once the cluster runs.
 require_product_secret() {
-  [[ -n $(secret_value "$2") ]] && return 0
+  [[ -n $(input_value "$2") ]] && return 0
   read_product_inputs
   [[ -z $PRODUCT_INPUTS || -n $(stored_input "$2") ]] && return 0
   CONFIG_MISSING+=("$1: neither $2 (environment variable) nor ${2}_FILE is set, and no earlier install kept it")
 }
 
 # validate_products — the products and their sign-in; missing values go to CONFIG_MISSING. Only install
-# calls it: status serves the rollouts of every product and does not depend on the sign-in of Nabu.
+# calls it: status serves the rollouts of every product and does not depend on the sign-in of a product.
 validate_products() {
   local p
   while read -r p; do
     case $p in
-      nabu) ;;
-      hammurapi) die "$E_USAGE" "PRODUCTS: Hammurapi comes with a later release of the installer; use nabu or leave it empty" ;;
-      *) die "$E_USAGE" "PRODUCTS: nabu or nothing, not '$p'" ;;
+      nabu | hammurapi) ;;
+      *) die "$E_USAGE" "PRODUCTS: nabu, hammurapi or both, not '$p'" ;;
     esac
   done < <(product_list)
-  has_product nabu || return 0
-  local what="PRODUCTS=nabu"
+  case ${NABU_MODE:-internal} in
+    internal | external) ;;
+    *) die "$E_USAGE" "NABU_MODE must be internal or external, not '$NABU_MODE'" ;;
+  esac
+  if nabu_external && has_product nabu; then
+    die "$E_USAGE" "NABU_MODE=external: Nabu is not installed here, so leave nabu out of PRODUCTS"
+  fi
+  # R11: Hammurapi does not work without Nabu.
+  if has_product hammurapi && ! nabu_external && ! has_product nabu; then
+    PRODUCTS="nabu,$PRODUCTS"
+    export PRODUCTS
+    log "PRODUCTS: Hammurapi needs Nabu, so Nabu is installed too"
+  fi
+  [[ -n $(product_list) ]] || return 0
+  local what="PRODUCTS=$(product_list | paste -sd, -)"
   [[ ${PUBLIC_ACCESS:-false} == true ]] ||
     CONFIG_MISSING+=("$what: set PUBLIC_ACCESS=true, as the products need HTTPS and OAuth callbacks")
   require_param "$what" AUTH_PROVIDER
@@ -71,8 +97,11 @@ validate_products() {
   case ${AUTH_PROVIDER:-} in
     "") ;;
     github)
-      require_param "$what" NABU_GITHUB_CLIENT_ID
-      require_product_secret "$what" NABU_GITHUB_CLIENT_SECRET
+      # Hammurapi signs in with the client of its GitHub App, checked below.
+      if has_product nabu; then
+        require_param "$what" NABU_GITHUB_CLIENT_ID
+        require_product_secret "$what" NABU_GITHUB_CLIENT_SECRET
+      fi
       ;;
     oidc)
       require_param "$what" OIDC_ISSUER
@@ -81,13 +110,56 @@ validate_products() {
       ;;
     *) die "$E_USAGE" "AUTH_PROVIDER must be github or oidc, not '$AUTH_PROVIDER'" ;;
   esac
+  has_product hammurapi || return 0
+  require_param "$what" HAMMURAPI_GITHUB_APP_ID
+  require_param "$what" HAMMURAPI_GITHUB_CLIENT_ID
+  require_param "$what" HAMMURAPI_SPEC_REPO
+  require_product_secret "$what" HAMMURAPI_GITHUB_APP_PRIVATE_KEY
+  require_product_secret "$what" HAMMURAPI_GITHUB_CLIENT_SECRET
+  if [[ -n ${HAMMURAPI_SPEC_REPO:-} && ! $HAMMURAPI_SPEC_REPO =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    die "$E_USAGE" "HAMMURAPI_SPEC_REPO: owner/name of a GitHub repository, not '$HAMMURAPI_SPEC_REPO'"
+  fi
+  if nabu_external; then
+    require_param "NABU_MODE=external" NABU_URL
+    require_param "NABU_MODE=external" NABU_CLIENT_ID
+    require_product_secret "NABU_MODE=external" NABU_CLIENT_SECRET
+    if [[ -n ${NABU_URL:-} && ! $NABU_URL =~ ^https:// ]]; then
+      die "$E_USAGE" "NABU_URL: the https:// address of the API of Nabu, not '$NABU_URL'"
+    fi
+  fi
+}
+
+# products_preflight — before anything changes (R11): an external Nabu takes the client of Hammurapi, and an
+# internal one is not of its own CI, as only a Nabu of the installer creates that client.
+products_preflight() {
+  has_product hammurapi || return 0
+  step preflight
+  if ! nabu_external; then
+    if nabu_of_ci; then
+      die "$E_USAGE" "Nabu here belongs to its own CI, so it cannot create the client of Hammurapi: register one in Nabu (Admin → Clients) and set NABU_MODE=external, NABU_URL, NABU_CLIENT_ID and NABU_CLIENT_SECRET"
+    fi
+    return 0
+  fi
+  # The secret reaches curl through stdin, not an argument.
+  P_ID=$NABU_CLIENT_ID P_SECRET=$(product_secret NABU_CLIENT_SECRET) \
+    jq -rn '"grant_type=client_credentials&client_id=\($ENV.P_ID | @uri)&client_secret=\($ENV.P_SECRET | @uri)"' |
+    curl -fsS --max-time 15 -H 'Content-Type: application/x-www-form-urlencoded' --data-binary @- \
+      "${NABU_URL%/}/oauth/token" 2>/dev/null | jq -e '.access_token | length > 0' >/dev/null 2>&1 ||
+    die "$E_EXTERNAL" "the external Nabu at $NABU_URL does not issue a token to the client $NABU_CLIENT_ID (POST /oauth/token): check NABU_URL, NABU_CLIENT_ID and NABU_CLIENT_SECRET; nothing was installed"
+  ok "external Nabu: $NABU_URL, client $NABU_CLIENT_ID"
+}
+
+# nabu_of_ci — a release nabu-core exists, and the installer has no record of it.
+nabu_of_ci() {
+  hm status nabu-core -n "$(nabu_ns)" >/dev/null 2>&1 &&
+    [[ -z $(recorded_products | jq -r '.["nabu-core"] // empty') ]]
 }
 
 # save_product_inputs — the given secrets are kept for later runs; kept ones without a new value stay.
 save_product_inputs() {
   local key value args=() changed=0
-  for key in "${PRODUCT_SECRET_KEYS[@]}"; do
-    value=$(secret_value "$key")
+  for key in "${PRODUCT_SECRET_KEYS[@]}" "${GENERATED_KEYS[@]}"; do
+    if [[ " ${GENERATED_KEYS[*]} " == *" $key "* ]]; then value=${GENERATED_INPUTS[$key]:-}; else value=$(input_value "$key"); fi
     if [[ -n $value ]]; then
       [[ $value == "$(stored_input "$key")" ]] || changed=1
     else
@@ -101,13 +173,42 @@ save_product_inputs() {
   PRODUCT_INPUTS_READ=0
 }
 
-# nabu_secrets_key — SECRETS_KEY of an installed Nabu, or a new one: it encrypts stored secrets, so a
-# rollout never changes it (bin/nabu-deploy stops with code 24 otherwise).
-nabu_secrets_key() {
+# ensure_nabu_client — the secret of the client of Hammurapi in the Nabu of this install: generated once
+# and kept with the inputs before Nabu creates the client from its hash (FTR.NAB.CMN-0001 R17a).
+ensure_nabu_client() {
+  has_product hammurapi && ! nabu_external || return 0
+  [[ -z $(stored_input NABU_BOOTSTRAP_CLIENT_SECRET) ]] || return 0
+  GENERATED_INPUTS[NABU_BOOTSTRAP_CLIENT_SECRET]="nabu_$(openssl rand -hex 32)"
+}
+
+# hammurapi_nabu_secret — the secret of the client of Hammurapi: given for an external Nabu, generated for
+# the Nabu of this install.
+hammurapi_nabu_secret() {
+  if nabu_external; then
+    product_secret NABU_CLIENT_SECRET
+  elif [[ -n ${GENERATED_INPUTS[NABU_BOOTSTRAP_CLIENT_SECRET]:-} ]]; then
+    printf '%s' "${GENERATED_INPUTS[NABU_BOOTSTRAP_CLIENT_SECRET]}"
+  else
+    stored_input NABU_BOOTSTRAP_CLIENT_SECRET
+  fi
+}
+
+# kept_key <ns> <secret> <key> — a key an installed product already uses, or a new one: changing it would
+# make stored data unreadable (codes 24 of bin/*-deploy).
+kept_key() {
   local key
-  key=$(secret_key "$(nabu_ns)" nabu-secrets SECRETS_KEY 2>/dev/null || true)
+  key=$(secret_key "$1" "$2" "$3" 2>/dev/null || true)
   [[ -n $key ]] || key=$(openssl rand -hex 32)
   printf '%s' "$key"
+}
+
+# nabu_bootstrap_clients — BOOTSTRAP_CLIENTS of Nabu: the client of Hammurapi, if it is installed here.
+nabu_bootstrap_clients() {
+  has_product hammurapi || return 0
+  local hash
+  hash=$(hammurapi_nabu_secret | sha256sum | awk '{print $1}')
+  jq -cn --arg h "$hash" --arg url "https://${HAMMURAPI_WEB_HOST:-hammurapi}.$PUBLIC_DOMAIN" \
+    '[{name: "hammurapi", secretSha256: $h, url: $url, agents: []}]'
 }
 
 # nabu_payload <component> — the stdin of bin/nabu-deploy. Secrets reach jq through the environment.
@@ -120,8 +221,8 @@ nabu_payload() {
   local github_secret="" oidc_secret=""
   if [[ $AUTH_PROVIDER == github ]]; then github_secret=$(product_secret NABU_GITHUB_CLIENT_SECRET); fi
   if [[ $AUTH_PROVIDER == oidc ]]; then oidc_secret=$(product_secret OIDC_CLIENT_SECRET); fi
-  P_SECRETS_KEY=$(nabu_secrets_key) P_GITHUB_SECRET=$github_secret P_OIDC_SECRET=$oidc_secret \
-    P_LLM_KEY=$(product_secret BOOTSTRAP_LLM_API_KEY) \
+  P_SECRETS_KEY=$(kept_key "$(nabu_ns)" nabu-secrets SECRETS_KEY) P_GITHUB_SECRET=$github_secret P_OIDC_SECRET=$oidc_secret \
+    P_LLM_KEY=$(product_secret BOOTSTRAP_LLM_API_KEY) P_CLIENTS=$(nabu_bootstrap_clients) \
     jq -cn --arg image "$repo/nabu-core" --arg provider "$AUTH_PROVIDER" \
     --arg github_id "${NABU_GITHUB_CLIENT_ID:-}" --arg org "${GITHUB_ALLOWED_ORG:-}" \
     --arg issuer "${OIDC_ISSUER:-}" --arg oidc_id "${OIDC_CLIENT_ID:-}" --arg oidc_name "${OIDC_PROVIDER_NAME:-}" \
@@ -134,7 +235,51 @@ nabu_payload() {
        + (if $provider == "github" then {GITHUB_CLIENT_ID: $github_id, GITHUB_ALLOWED_ORG: $org}
           else {OIDC_ISSUER: $issuer, OIDC_CLIENT_ID: $oidc_id, OIDC_PROVIDER_NAME: $oidc_name} end) | nonempty),
      secrets: ({SECRETS_KEY: $ENV.P_SECRETS_KEY, GITHUB_CLIENT_SECRET: $ENV.P_GITHUB_SECRET,
-       OIDC_CLIENT_SECRET: $ENV.P_OIDC_SECRET, BOOTSTRAP_LLM_API_KEY: $ENV.P_LLM_KEY} | nonempty)}'
+       OIDC_CLIENT_SECRET: $ENV.P_OIDC_SECRET, BOOTSTRAP_LLM_API_KEY: $ENV.P_LLM_KEY,
+       BOOTSTRAP_CLIENTS: $ENV.P_CLIENTS} | nonempty)}'
+}
+
+# hammurapi_payload <component> — the stdin of bin/hammurapi-deploy.
+hammurapi_payload() {
+  local repo=${HAMMURAPI_IMAGE_REPO:-ghcr.io/greenongrey}
+  if [[ $1 == hammurapi-web ]]; then
+    jq -cn --arg image "$repo/hammurapi-web" '{image: $image}'
+    return
+  fi
+  local ns nabu_url nabu_id nabu_web="" oidc_secret=""
+  ns=$(hammurapi_ns)
+  if nabu_external; then
+    nabu_url=${NABU_URL%/} nabu_id=$NABU_CLIENT_ID
+  else
+    nabu_url="https://${NABU_API_HOST:-nabu-api}.$PUBLIC_DOMAIN" nabu_id=hammurapi
+    nabu_web="https://${NABU_WEB_HOST:-nabu}.$PUBLIC_DOMAIN"
+  fi
+  if [[ $AUTH_PROVIDER == oidc ]]; then oidc_secret=$(product_secret OIDC_CLIENT_SECRET); fi
+  P_APP_KEY=$(product_secret HAMMURAPI_GITHUB_APP_PRIVATE_KEY) P_CLIENT_SECRET=$(product_secret HAMMURAPI_GITHUB_CLIENT_SECRET) \
+    P_WEBHOOK=$(kept_key "$ns" hammurapi-secrets WEBHOOK_SECRET) P_TOKEN_KEY=$(kept_key "$ns" hammurapi-secrets TOKEN_ENCRYPTION_KEY) \
+    P_OIDC_SECRET=$oidc_secret P_NABU_SECRET=$(hammurapi_nabu_secret) \
+    jq -cn --arg image "$repo/hammurapi-core" --arg provider "$AUTH_PROVIDER" --arg repo_name "$HAMMURAPI_SPEC_REPO" \
+    --arg app "$HAMMURAPI_GITHUB_APP_ID" --arg client "$HAMMURAPI_GITHUB_CLIENT_ID" --arg admins "$BOOTSTRAP_ADMINS" \
+    --arg org "${GITHUB_ALLOWED_ORG:-}" --arg issuer "${OIDC_ISSUER:-}" --arg oidc_id "${OIDC_CLIENT_ID:-}" \
+    --arg oidc_name "${OIDC_PROVIDER_NAME:-}" --arg nabu_url "$nabu_url" --arg nabu_id "$nabu_id" --arg nabu_web "$nabu_web" '
+    def nonempty: with_entries(select(.value != null and .value != ""));
+    {image: $image,
+     config: ({GIT_PROVIDER: "github", GIT_REPO: $repo_name, GITHUB_APP_ID: $app, GITHUB_CLIENT_ID: $client,
+       BOOTSTRAP_ADMINS: $admins, AUTH_PROVIDER: $provider, NABU_URL: $nabu_url, NABU_CLIENT_ID: $nabu_id,
+       NABU_WEB_URL: $nabu_web}
+       + (if $provider == "github" then {GITHUB_ALLOWED_ORG: $org}
+          else {OIDC_ISSUER: $issuer, OIDC_CLIENT_ID: $oidc_id, OIDC_PROVIDER_NAME: $oidc_name} end) | nonempty),
+     secrets: ({GITHUB_APP_PRIVATE_KEY: $ENV.P_APP_KEY, GITHUB_CLIENT_SECRET: $ENV.P_CLIENT_SECRET,
+       WEBHOOK_SECRET: $ENV.P_WEBHOOK, TOKEN_ENCRYPTION_KEY: $ENV.P_TOKEN_KEY, OIDC_CLIENT_SECRET: $ENV.P_OIDC_SECRET,
+       NABU_CLIENT_SECRET: $ENV.P_NABU_SECRET} | nonempty)}'
+}
+
+# product_payload <component>
+product_payload() {
+  case $1 in
+    nabu-*) nabu_payload "$1" ;;
+    hammurapi-*) hammurapi_payload "$1" ;;
+  esac
 }
 
 # recorded_products — {component: tag} of the components the installer owns.
@@ -163,7 +308,7 @@ deploy_component() {
     record_product "$component" "$tag"
   fi
   log "$component $tag (chart $chart)"
-  nabu_payload "$component" |
+  product_payload "$component" |
     INSTALLER_CONFIG=$CONFIG_FILE bash "$PRODUCT_BIN/$script" "$component" "$tag" "$chart" >"$RUN_DIR/$component.log" 2>&1 || rc=$?
   if ((rc != 0)); then
     RESULT_FAILED+=("$component")
@@ -174,6 +319,29 @@ deploy_component() {
   RESULT_UPDATED+=("$component")
 }
 
+# restart_nabu_api <BOOTSTRAP_CLIENTS before the rollout> — api reads BOOTSTRAP_CLIENTS at its start, and a
+# rollout at the same tag does not restart it when only the secret changed.
+restart_nabu_api() {
+  [[ " ${RESULT_UPDATED[*]} " == *" nabu-core "* ]] || return 0
+  local after
+  after=$(secret_key "$(nabu_ns)" nabu-secrets BOOTSTRAP_CLIENTS 2>/dev/null || true)
+  [[ $after != "$1" ]] || return 0
+  log "the service clients of Nabu changed: restarting its api"
+  kc -n "$(nabu_ns)" rollout restart deployment/api >/dev/null &&
+    kc -n "$(nabu_ns)" rollout status deployment/api --timeout="$HELM_TIMEOUT" >/dev/null ||
+    die "$E_DEPLOY" "the api of Nabu did not restart with the client of Hammurapi"
+}
+
+# deploy_pair <script> <ns> <product> <core tag> <web tag> <chart> — web follows its core: a core of the
+# CI of its product keeps its web too.
+deploy_pair() {
+  if deploy_component "$1" "$2" "$3-core" "$4" "$6"; then
+    deploy_component "$1" "$2" "$3-web" "$5" "$6" || true
+  else
+    RESULT_SKIPPED+=("$3-web")
+  fi
+}
+
 deploy_products() {
   [[ -n $(product_list) ]] || return 0
   step products
@@ -182,23 +350,36 @@ deploy_products() {
   CONFIG_MISSING=()
   validate_products
   die_if_missing
+  ensure_nabu_client
   save_product_inputs
   if has_product nabu; then
-    # Web follows its core: a core of the CI of Nabu keeps its web too.
-    if deploy_component nabu-deploy "$(nabu_ns)" nabu-core "$NABU_CORE_VERSION" "$NABU_CHART_VERSION"; then
-      deploy_component nabu-deploy "$(nabu_ns)" nabu-web "$NABU_WEB_VERSION" "$NABU_CHART_VERSION" || true
-    else
-      RESULT_SKIPPED+=(nabu-web)
+    local clients_before
+    clients_before=$(secret_key "$(nabu_ns)" nabu-secrets BOOTSTRAP_CLIENTS 2>/dev/null || true)
+    deploy_pair nabu-deploy "$(nabu_ns)" nabu "$NABU_CORE_VERSION" "$NABU_WEB_VERSION" "$NABU_CHART_VERSION"
+    restart_nabu_api "$clients_before"
+  fi
+  if has_product hammurapi; then
+    # A stopped minikube hid the release from products_preflight.
+    if ! nabu_external && [[ " ${RESULT_SKIPPED[*]} " == *" nabu-core "* ]]; then
+      die "$E_USAGE" "Nabu here belongs to its own CI, so it cannot create the client of Hammurapi: set NABU_MODE=external with a client registered in it"
     fi
+    deploy_pair hammurapi-deploy "$(hammurapi_ns)" hammurapi "$HAMMURAPI_CORE_VERSION" "$HAMMURAPI_WEB_VERSION" "$HAMMURAPI_CHART_VERSION"
   fi
   ok "products: $(product_list | paste -sd, -)"
 }
 
 # products_summary — addresses of the products, and what is still to be done by hand.
 products_summary() {
-  has_product nabu || return 0
-  printf '\nNabu          https://%s.%s   API https://%s.%s\n' "${NABU_WEB_HOST:-nabu}" "$PUBLIC_DOMAIN" "${NABU_API_HOST:-nabu-api}" "$PUBLIC_DOMAIN"
-  if [[ -z $(product_secret BOOTSTRAP_LLM_API_KEY) ]]; then
-    printf '              no model key yet (BOOTSTRAP_LLM_API_KEY): add a model connection in the admin area of Nabu\n'
+  if has_product nabu; then
+    printf '\nNabu          https://%s.%s   API https://%s.%s\n' "${NABU_WEB_HOST:-nabu}" "$PUBLIC_DOMAIN" "${NABU_API_HOST:-nabu-api}" "$PUBLIC_DOMAIN"
+    if [[ -z $(product_secret BOOTSTRAP_LLM_API_KEY) ]]; then
+      printf '              no model key yet (BOOTSTRAP_LLM_API_KEY): add a model connection in the admin area of Nabu\n'
+    fi
+  fi
+  if has_product hammurapi; then
+    printf '\nHammurapi     https://%s.%s   API https://%s.%s\n' "${HAMMURAPI_WEB_HOST:-hammurapi}" "$PUBLIC_DOMAIN" "${HAMMURAPI_API_HOST:-hammurapi-api}" "$PUBLIC_DOMAIN"
+    if ! nabu_external; then
+      printf '              allow the service agents of Hammurapi to its client in Nabu (Admin → Clients)\n'
+    fi
   fi
 }

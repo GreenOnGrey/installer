@@ -12,7 +12,8 @@ RUN_DIR=${RUN_DIR:-}
 
 # Keys whose values must not be written directly into local.env (tech, §2).
 # Secrets of the products given by the user (lib/product.sh keeps them in installer/product-inputs).
-readonly PRODUCT_SECRET_KEYS=(NABU_GITHUB_CLIENT_SECRET OIDC_CLIENT_SECRET BOOTSTRAP_LLM_API_KEY)
+readonly PRODUCT_SECRET_KEYS=(NABU_GITHUB_CLIENT_SECRET OIDC_CLIENT_SECRET BOOTSTRAP_LLM_API_KEY
+  HAMMURAPI_GITHUB_APP_PRIVATE_KEY HAMMURAPI_GITHUB_CLIENT_SECRET NABU_CLIENT_SECRET)
 readonly SECRET_KEYS=(POSTGRES_PASSWORD KAFKA_PASSWORD S3_ACCESS_KEY S3_SECRET_KEY GRAFANA_GITHUB_CLIENT_SECRET
   "${PRODUCT_SECRET_KEYS[@]}")
 
@@ -140,16 +141,24 @@ load_config() {
   done
 }
 
-# secret_value <key> — the value from the environment variable or the file <key>_FILE.
+# secret_value <key> [lines] — the value from the environment variable or the file <key>_FILE. With
+# lines, the lines of a multi-line value (a PEM key) are joined by a literal \n; without, line ends go.
 secret_value() {
   local key=$1 file_key="${1}_FILE"
   if [[ -n ${!key:-} ]]; then
-    printf '%s' "${!key}"
+    [[ ${2:-} == lines ]] || {
+      printf '%s' "${!key}"
+      return 0
+    }
+    printf '%s' "${!key}" | join_lines
   elif [[ -n ${!file_key:-} ]]; then
     [[ -r ${!file_key} ]] || die "$E_USAGE" "$file_key: cannot read file ${!file_key}"
-    tr -d '\r\n' <"${!file_key}"
+    if [[ ${2:-} == lines ]]; then join_lines <"${!file_key}"; else tr -d '\r\n' <"${!file_key}"; fi
   fi
 }
+
+# join_lines — lines joined by a literal \n, carriage returns dropped.
+join_lines() { awk 'NR > 1 { printf "\\n" } { sub(/\r$/, ""); printf "%s", $0 }'; }
 
 # require_param, require_secret: a missing value is recorded in CONFIG_MISSING, and validate_config
 # names them all at once (FTR.INFRA.INST-0001 R6), so a CI run does not fix them one by one.
