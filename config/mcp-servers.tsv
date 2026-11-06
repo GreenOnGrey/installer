@@ -1,0 +1,7 @@
+# The MCP servers the wizard offers, from the chart mcp-servers of MCP_CHART_VERSION: name, memory
+# requests of its Deployments in MiB, what it does. tests/manifests.sh checks the list and the memory
+# against the chart; a server missing here still installs by its MCP_<NAME>=true in the config file.
+docgen	896	documents: generates office files, converts them, previews them on the site of Nabu
+docling	1552	document conversion: PDF, office files and scans to text
+search	384	web search through SearXNG
+yandex-mail	64	read-only Yandex Mail: each user connects a mailbox through Yandex OAuth

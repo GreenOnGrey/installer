@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs GreenOnGrey products on minikube or an existing cluster (FTR.HMR.INFRA-0001, FTR.INFRA.INST-0001).
-#   ./installer install | status | creds | uninstall | help
+#   ./installer [install | update | status | creds | uninstall | help]
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -34,10 +34,15 @@ source "$ROOT/lib/uninstall.sh"
 source "$ROOT/lib/product.sh"
 # shellcheck source=lib/update.sh
 source "$ROOT/lib/update.sh"
+# shellcheck source=lib/wizard.sh
+source "$ROOT/lib/wizard.sh"
 
 usage() {
   cat <<'EOF'
-Usage: ./installer <command> [flags]
+Usage: ./installer [<command>] [flags]
+
+Without a command in a terminal, the wizard asks for the configuration, writes it to the config file
+and runs install with it.
 
 Commands:
   install    check the machine or the cluster, install dependencies, deploy, verify, print a summary;
@@ -54,7 +59,8 @@ Commands:
 
 Flags:
   --config <file>  configuration file (default: $INSTALLER_CONFIG, then /etc/greenongrey/installer.env
-                   if it exists, then config/local.env)
+                   if it exists, then config/local.env; the wizard writes /etc/greenongrey/installer.env
+                   when none of them exists)
   --yes            uninstall, update: do not ask for confirmation; required without a terminal
   --dry-run        update: show the versions it would change, change nothing
   --json           status, creds: print JSON
@@ -73,6 +79,8 @@ usage_error() {
 }
 
 COMMAND="" CONFIG_FILE="" ASSUME_YES=0 JSON=0
+# The environment of the user, before the configuration is loaded: the wizard hands it on to install.
+ORIG_ENV_NAMES=$(compgen -e | tr '\n' ' ')
 SYSTEM_CONFIG=${SYSTEM_CONFIG:-/etc/greenongrey/installer.env}
 
 # default_config — INSTALLER_CONFIG, the system file, then the file of the checkout.
@@ -127,11 +135,23 @@ parse_args() {
     esac
     shift
   done
-  # The wizard comes with a later release (FTR.INFRA.INST-0001 R3); until then no command is a usage error.
-  [[ -n $COMMAND ]] || usage_error "no command given"
+  # R3: no command opens the wizard in a terminal; without one it is a usage error, with no question.
+  if [[ -z $COMMAND ]]; then
+    interactive || usage_error "no command given; the wizard needs a terminal"
+    COMMAND=wizard
+  fi
   [[ $ASSUME_YES == 1 && $COMMAND != uninstall && $COMMAND != update ]] && usage_error "--yes is only valid for uninstall and update"
   [[ ($DRY_RUN == 1 || -n $UPDATE_TO) && $COMMAND != update ]] && usage_error "--dry-run and --to are only valid for update"
   [[ $JSON == 1 && $COMMAND != status && $COMMAND != creds ]] && usage_error "--json is only valid for status and creds"
+  if [[ $COMMAND == wizard ]]; then
+    # The wizard writes the file, so it may not exist yet; a new install gets the system file.
+    CONFIG_FILE=${CONFIG_FILE:-${INSTALLER_CONFIG:-}}
+    if [[ -z $CONFIG_FILE ]]; then
+      CONFIG_FILE=$SYSTEM_CONFIG
+      [[ -f $SYSTEM_CONFIG || ! -f $ROOT/config/local.env ]] || CONFIG_FILE=$ROOT/config/local.env
+    fi
+    return 0
+  fi
   if [[ -n $CONFIG_FILE && ! -f $CONFIG_FILE ]]; then usage_error "config file not found: $CONFIG_FILE"; fi
   CONFIG_FILE=${CONFIG_FILE:-$(default_config)}
   return 0
@@ -300,6 +320,8 @@ install_steps() {
   else
     check_single_profile
     check_host
+    # The domain before the cluster changes: DNS that points elsewhere stops the run with nothing done (R18).
+    public_prepare
     acquire_lock
     install_prereqs
     cluster_up
@@ -542,6 +564,7 @@ main() {
   WORK_DIR="$ROOT/.work"
   mkdir -p "$WORK_DIR"
   case $COMMAND in
+    wizard) cmd_wizard "$CONFIG_FILE" ;;
     install)
       # Products only here: status serves the rollouts of every product (lib/product.sh).
       validate_config products
