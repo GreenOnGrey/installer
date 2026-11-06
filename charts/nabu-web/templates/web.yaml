@@ -69,7 +69,9 @@ metadata:
   {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls }}
   tls: [{ hosts: ["{{ $web }}"]{{ if .Values.ingress.clusterIssuer }}, secretName: web-tls{{ end }} }]
+  {{- end }}
   rules:
     - host: "{{ $web }}"
       http:

@@ -352,7 +352,7 @@ public_status_json() {
   if [[ -z $data || $data == "{}" ]]; then
     echo '{"enabled":false}'
   else
-    jq -c '{enabled: true, baseDomain, publicIp, lbIp, issuer, ingressMode: (.ingressMode // "internal"), ingressClass: (.ingressClass // "traefik")}' <<<"$data"
+    jq -c '{enabled: true, baseDomain, publicIp, lbIp, issuer, ingressMode: (.ingressMode // "internal"), ingressClass: (.ingressClass // "traefik"), tlsTermination: (.tlsTermination // "ingress")}' <<<"$data"
   fi
 }
 

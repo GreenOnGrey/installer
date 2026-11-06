@@ -100,12 +100,14 @@ Built-in or external, each on its own ([resources.md](resources.md)).
 | `PUBLIC_ACCESS` | `false` | `true` publishes the products and Grafana over HTTPS; the products require it |
 | `PUBLIC_BASE_DOMAIN` | empty | The domain. Empty on minikube: `<IP>.sslip.io`. Required on `external` |
 | `PUBLIC_DNS_CHECK` | `true` | On minikube, each host must resolve to the machine (code `19`); `false` behind a proxy |
-| `PUBLIC_IP` | empty | The external address of the machine; empty: detected |
+| `PUBLIC_IP` | empty | The external address of the machine; empty: detected. With `TLS_TERMINATION=external`, the address of the load balancer, which the DNS check compares the hosts with |
 | `HAMMURAPI_WEB_HOST` | `hammurapi` | Host of the site of Hammurapi |
 | `HAMMURAPI_API_HOST` | `hammurapi-api` | Host of its API |
 | `PUBLIC_EXTRA_HOSTS` | `nabu nabu-api` | Other hosts of the certificate; the wizard sets those of the products |
 | `CERT_NAME` | `greenongrey-public` | The shared certificate of the built-in ingress |
-| `ACME_EMAIL` | empty | Address for Let's Encrypt; required with the built-in ingress |
+| `TLS_TERMINATION` | `ingress` | `ingress`: TLS on the ingress, with certificates of Let's Encrypt or of `ACME_ISSUER`. `external`: a load balancer in front terminates TLS and sends HTTP to port 80; no cert-manager, no certificates ([external-kubernetes.md](external-kubernetes.md#tls-on-a-load-balancer)) |
+| `TLS_PROXY_CIDRS` | empty | With `TLS_TERMINATION=external` and the built-in Traefik: addresses or CIDRs of the load balancer, comma-separated; Traefik trusts their `X-Forwarded-*` only |
+| `ACME_EMAIL` | empty | Address for Let's Encrypt; required with the built-in ingress and TLS on it |
 | `ACME_ISSUER` | `letsencrypt` | `letsencrypt` or `letsencrypt-staging`; with `INGRESS_MODE=external`, a `ClusterIssuer` of the cluster |
 | `INGRESS_MODE` | `internal` | `internal`: Traefik and cert-manager (and MetalLB on minikube). `external`: those of the cluster |
 | `INGRESS_CLASS` | `traefik` | The ingress class; with `external`, an existing one |

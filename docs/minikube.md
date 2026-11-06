@@ -41,6 +41,8 @@ With `PUBLIC_ACCESS=true` (the products need it), MetalLB gives Traefik an addre
 
 Before the cluster changes, `install` checks that each host of `PUBLIC_BASE_DOMAIN` resolves to the external address of the machine (`PUBLIC_IP`, or the address an IP service reports). If one does not, `install` stops with code `19` and requests no certificate. The wizard asks instead whether to go on. Behind a proxy, whose address the hosts resolve to, set `PUBLIC_DNS_CHECK=false`.
 
+Behind a load balancer that terminates TLS, set `TLS_TERMINATION=external`. Then no cert-manager is installed and the hosts resolve to the load balancer, which forwards HTTP to port 80 of the machine ([external-kubernetes.md](external-kubernetes.md#tls-on-a-load-balancer)).
+
 Without a domain the hosts are `<host>.<IP with dashes>.sslip.io`. Let's Encrypt limits certificates per registered domain, and all users of sslip.io share one limit, so issuance may fail for days.
 
 Grafana is at `https://grafana.<domain>` with public access, or through an SSH tunnel without it:

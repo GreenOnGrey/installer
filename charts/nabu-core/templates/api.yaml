@@ -42,7 +42,9 @@ spec:
   ingressClassName: {{ .Values.ingress.className }}
   # The default Traefik certificate (the stand's shared one, with nabu. and nabu-api.), or with
   # clusterIssuer a secret of its own.
+  {{- if .Values.ingress.tls }}
   tls: [{ hosts: [{{ include "nabu.api" . | quote }}]{{ if .Values.ingress.clusterIssuer }}, secretName: api-tls{{ end }} }]
+  {{- end }}
   rules:
     - host: {{ include "nabu.api" . | quote }}
       http:

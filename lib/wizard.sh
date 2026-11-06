@@ -201,13 +201,18 @@ wizard_products() {
 
 wizard_domain() {
   wizard_section "Domain and certificates"
+  local was=${TLS_TERMINATION:-ingress}
+  ask_choice TLS_TERMINATION "Where is TLS terminated?" \
+    "ingress=here: the install gets certificates (Let's Encrypt, or the ClusterIssuer of the cluster)" \
+    "external=on a load balancer in front of the install, kept by your team: it sends HTTP to port 80"
   if [[ $INSTALL_TARGET == external ]]; then
-    ask_choice INGRESS_MODE "Ingress and certificates:" \
-      "internal=install Traefik and cert-manager into the cluster" \
-      "external=use an ingress class and a ClusterIssuer the cluster already has"
+    ask_choice INGRESS_MODE "Ingress:" \
+      "internal=install Traefik$([[ $TLS_TERMINATION == ingress ]] && echo " and cert-manager") into the cluster" \
+      "external=use an ingress class$([[ $TLS_TERMINATION == ingress ]] && echo " and a ClusterIssuer") the cluster already has"
     if [[ $INGRESS_MODE == external ]]; then
       ask INGRESS_CLASS "The ingress class" '^[a-z0-9][a-z0-9.-]*$' "the name of an IngressClass"
-      ask ACME_ISSUER "The ClusterIssuer" '^[a-z0-9][a-z0-9.-]*$' "the name of a ClusterIssuer"
+      [[ $TLS_TERMINATION == external ]] ||
+        ask ACME_ISSUER "The ClusterIssuer" '^[a-z0-9][a-z0-9.-]*$' "the name of a ClusterIssuer"
     else
       wizard_set INGRESS_CLASS traefik
     fi
@@ -215,8 +220,28 @@ wizard_domain() {
     wizard_set INGRESS_MODE internal
     wizard_set INGRESS_CLASS traefik
   fi
-  local re='^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$'
+  local re='^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$' ip='^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
   say "The products get hosts of the domain (the summary lists them): point them, or *.<domain>, to this installation."
+  if [[ $TLS_TERMINATION == external ]]; then
+    ask PUBLIC_BASE_DOMAIN "The domain" "$re" "a domain such as example.com: the certificate of the load balancer names it"
+    ask PUBLIC_IP "The address the hosts resolve to (the load balancer), for the DNS check; \"-\" to skip it" "^$|$ip" "an IPv4 address"
+    if [[ $INGRESS_MODE == internal ]]; then
+      say "Traefik trusts the headers X-Forwarded-* (the original scheme and client) only from the load balancer."
+      ask TLS_PROXY_CIDRS "Addresses or CIDRs of the load balancer, comma-separated" "$CIDR_LIST_RE" "such as 10.0.0.0/24,10.0.1.5"
+    fi
+    say "The load balancer redirects HTTP to HTTPS itself; the install answers on port 80 only."
+    # The charts of the products answer HTTP from this release on.
+    local chart
+    for chart in NABU_CHART_VERSION HAMMURAPI_CHART_VERSION; do
+      if [[ $(printf '%s\n%s\n' "$TLS_EXTERNAL_CHART_MIN" "${!chart}" | sort -V | head -1) != "$TLS_EXTERNAL_CHART_MIN" ]]; then
+        say "$chart=$TLS_EXTERNAL_CHART_MIN: the charts of the products answer HTTP behind a load balancer from this version on."
+        wizard_set "$chart" "$TLS_EXTERNAL_CHART_MIN"
+      fi
+    done
+    return
+  fi
+  # PUBLIC_IP named the load balancer; on the ingress it is the address of the machine, detected when empty.
+  [[ $was != external ]] || wizard_set PUBLIC_IP ""
   if [[ $INSTALL_TARGET == minikube ]]; then
     say "$SSLIP_WARNING"
     ask PUBLIC_BASE_DOMAIN "The domain, Enter for <IP>.sslip.io" "^$|$re" "a domain such as example.com"

@@ -114,8 +114,8 @@ check_stand() {
   ingress_from_status "$st"
   # The chart redirects www. through a Middleware of Traefik.
   # Its own domain is checked against the public address of a minikube machine.
-  if ingress_external || [[ $(jq -r '.target // "minikube"' <<<"$st") == external ]]; then
-    fail "$E_STAND" "the site needs Traefik of the stand on minikube: INSTALL_TARGET=minikube, INGRESS_MODE=internal"
+  if ingress_external || tls_external || [[ $(jq -r '.target // "minikube"' <<<"$st") == external ]]; then
+    fail "$E_STAND" "the site needs Traefik of the stand on minikube with its certificates: INSTALL_TARGET=minikube, INGRESS_MODE=internal, TLS_TERMINATION=ingress"
   fi
   BASE_DOMAIN=$(jq -r '.public.baseDomain // empty' <<<"$st")
   [[ -n $BASE_DOMAIN ]] || fail "$E_STAND" "the stand did not report a base domain"

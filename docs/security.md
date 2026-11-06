@@ -32,7 +32,7 @@ Anyone with access to the cluster can read these secrets. Limit access to the ku
 ## Network
 
 - **Published from outside**, with public access: only ports 80 and 443 of the ingress. Traefik routes only the hosts and paths of the products and Grafana. Service ports stay inside the cluster.
-- **Certificates**: Let's Encrypt through cert-manager, or the `ClusterIssuer` of your cluster.
+- **Certificates**: Let's Encrypt through cert-manager, or the `ClusterIssuer` of your cluster. With `TLS_TERMINATION=external` the load balancer in front holds them, and the traffic from it to the ingress is plain HTTP: keep that network private, and give Traefik only the addresses of the load balancer (`TLS_PROXY_CIDRS`).
 - **Sandboxes of Nabu**: agents run code in sandboxes isolated by `NetworkPolicy`. On an existing cluster, `install` tests that the network plugin enforces it before anything changes (code `18` otherwise). Their outgoing traffic goes through the egress proxy of Nabu.
 - **MCP servers**: reachable only from the components of Nabu and the checks of the stand, again through network policies. Platform servers also require a key.
 - **Grafana**: through an SSH tunnel, or with public access through GitHub sign-in limited to `GRAFANA_GITHUB_ORG`.

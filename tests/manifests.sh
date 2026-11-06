@@ -440,6 +440,13 @@ product_ingress() {
     else
       fail "R17 $c: the external Ingress"
     fi
+    helm template "$c" "$ROOT/charts/$c" -n products --kube-version "$KUBE_VERSION" "${base[@]}" \
+      --set ingress.tls=false >"$f" 2>&1 || { fail "R17 $c: helm template without tls"; continue; }
+    if docs_json "$f" | jq -se '[.[] | select(.kind == "Ingress")] | length > 0 and all(has("spec") and (.spec | has("tls") | not))' >/dev/null; then
+      pass "R17 $c: TLS on a load balancer: no tls in the Ingress"
+    else
+      fail "R17 $c: the Ingress behind a load balancer still has tls"
+    fi
   done
 }
 
@@ -459,6 +466,22 @@ public_access_charts() {
       pass "R19: HTTP → HTTPS, HTTP-01 bypasses the redirect, default certificate greenongrey-public"
     else
       fail "R19: Traefik settings"
+    fi
+  fi
+  # FTR.INFRA.INST-0001 R17: behind a load balancer that terminates TLS, the arguments of deploy_public.
+  local tls_args=()
+  mapfile -t tls_args < <(TLS_PROXY_CIDRS=10.0.0.0/24,10.0.1.5 traefik_tls_args)
+  if ! helm template traefik traefik/traefik --version "$TRAEFIK_CHART_VERSION" -n ingress --kube-version "$KUBE_VERSION" \
+    -f "$ROOT/values/traefik.yaml" "${tls_args[@]}" >"$dir/traefik-tls.yaml" 2>&1; then
+    fail "traefik behind a load balancer: helm template: $(head -3 "$dir/traefik-tls.yaml")"
+  else
+    local tls
+    tls=$(docs_json "$dir/traefik-tls.yaml" | jq -r 'select(.kind == "Deployment") | .spec.template.spec.containers[0].args[]')
+    if ! grep -q 'redirections' <<<"$tls" && grep -qx -- '--entryPoints.web.forwardedHeaders.trustedIPs=10.0.0.0/24,10.0.1.5' <<<"$tls" &&
+      ! docs_json "$dir/traefik-tls.yaml" | jq -e 'select(.kind == "TLSStore")' >/dev/null; then
+      pass "R17: TLS on a load balancer: no redirect, no TLSStore, X-Forwarded-* trusted from its addresses only"
+    else
+      fail "R17: Traefik behind a load balancer: $(grep -E 'redirections|trustedIPs' <<<"$tls" | tr '\n' ' ')"
     fi
   fi
   if ! helm template cert-manager jetstack/cert-manager --version "$CERT_MANAGER_CHART_VERSION" -n cert-manager \
