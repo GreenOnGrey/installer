@@ -55,6 +55,18 @@ metallb_range() {
 public_prepare() {
   public_enabled || return 0
   step public
+  if tls_external; then
+    # The hosts resolve to the load balancer: its address, if given, is what DNS must name (R17).
+    [[ -z $PUBLIC_DOMAIN ]] || return 0
+    PUBLIC_DOMAIN=$PUBLIC_BASE_DOMAIN PUBLIC_IP_RESOLVED=${PUBLIC_IP:-}
+    log "base domain: $PUBLIC_DOMAIN, TLS on the load balancer in front of the install"
+    if [[ -n $PUBLIC_IP_RESOLVED ]]; then
+      check_dns "the load balancer"
+    else
+      warn "no PUBLIC_IP: the DNS of $PUBLIC_DOMAIN is not checked; set it to the address of the load balancer"
+    fi
+    return 0
+  fi
   if ingress_external || target_external; then
     PUBLIC_DOMAIN=$PUBLIC_BASE_DOMAIN
     log "base domain: $PUBLIC_DOMAIN (ingress class ${INGRESS_CLASS:-traefik}, issuer ${ACME_ISSUER:-letsencrypt})"
@@ -68,13 +80,14 @@ public_prepare() {
   if [[ -z ${PUBLIC_BASE_DOMAIN:-} ]]; then
     warn "no PUBLIC_BASE_DOMAIN: $PUBLIC_DOMAIN is a fallback. Let's Encrypt limits certificates per registered domain, and all of sslip.io shares one limit, so issuance may fail for days: set a domain of your own (R18)"
   fi
-  check_dns
+  check_dns "the machine"
 }
 
-# check_dns — every public host of the domain points to the machine, or Let's Encrypt issues no certificate
-# (R18). The wizard asks whether to go on; without it code 19, before any certificate is requested.
-# PUBLIC_DNS_CHECK=false skips it, for a proxy in front of the machine.
+# check_dns <what> — every public host of the domain points to PUBLIC_IP_RESOLVED, the machine or the load
+# balancer, or the hosts do not reach the install (R18). The wizard asks whether to go on; without it code 19,
+# before any certificate is requested. PUBLIC_DNS_CHECK=false skips it, for a proxy in front of the machine.
 check_dns() {
+  local what=$1
   [[ -n ${PUBLIC_BASE_DOMAIN:-} && ${PUBLIC_DNS_CHECK:-true} == true ]] || return 0
   local host ips wrong=()
   for host in $(public_hosts); do
@@ -87,13 +100,13 @@ check_dns() {
     return 0
   fi
   local msg
-  msg="DNS of $PUBLIC_DOMAIN does not point to the machine $PUBLIC_IP_RESOLVED: $(printf '%s; ' "${wrong[@]}")Let's Encrypt would issue no certificate"
+  msg="DNS of $PUBLIC_DOMAIN does not point to $what $PUBLIC_IP_RESOLVED: $(printf '%s; ' "${wrong[@]}")the hosts would not reach the install"
   if wizard_running; then
     warn "$msg"
     wizard_confirm "Go on anyway (the certificate waits for DNS)?" || die "$E_CANCELLED" "cancelled: point the hosts to $PUBLIC_IP_RESOLVED and run ./installer again"
     return 0
   fi
-  die "$E_DNS" "$msg; point the hosts (or *.$PUBLIC_DOMAIN) to $PUBLIC_IP_RESOLVED, or set PUBLIC_DNS_CHECK=false behind a proxy; no certificate was requested"
+  die "$E_DNS" "$msg; point the hosts (or *.$PUBLIC_DOMAIN) to $PUBLIC_IP_RESOLVED, or set PUBLIC_DNS_CHECK=false; no certificate was requested"
 }
 
 # grafana_public_values <file> — Ingress, root_url and GitHub sign-in (R20).
@@ -104,7 +117,9 @@ grafana_public_values() {
     echo "  enabled: true"
     echo "  ingressClassName: ${INGRESS_CLASS:-traefik}"
     echo "  hosts: [\"grafana.$PUBLIC_DOMAIN\"]"
-    if ingress_external; then
+    if tls_external; then
+      : # the load balancer holds the certificate
+    elif ingress_external; then
       echo "  annotations: { cert-manager.io/cluster-issuer: \"$ACME_ISSUER\" }"
       echo "  tls: [{ hosts: [\"grafana.$PUBLIC_DOMAIN\"], secretName: $GRAFANA_TLS_SECRET }]"
     else
@@ -246,6 +261,7 @@ public_state_manifest() {
     --from-literal="baseDomain=$PUBLIC_DOMAIN" --from-literal="publicIp=$PUBLIC_IP_RESOLVED" \
     --from-literal="lbIp=$LB_IP" --from-literal="issuer=${ACME_ISSUER:-letsencrypt}" \
     --from-literal="ingressMode=${INGRESS_MODE:-internal}" --from-literal="ingressClass=${INGRESS_CLASS:-traefik}" \
+    --from-literal="tlsTermination=${TLS_TERMINATION:-ingress}" \
     --dry-run=client -o yaml
 }
 
@@ -299,6 +315,10 @@ remove_forward() {
 # deploy_public_external — nothing to install: the cluster has the controller and the issuer (R17).
 deploy_public_external() {
   public_state_manifest | apply_stdin
+  if tls_external; then
+    ok "public access: *.$PUBLIC_DOMAIN through ingress class $INGRESS_CLASS, TLS on the load balancer"
+    return 0
+  fi
   if observability_enabled && ! wait_certificate "$NS_OBSERVABILITY" "$GRAFANA_TLS_SECRET"; then
     kc -n "$NS_OBSERVABILITY" describe certificate "$GRAFANA_TLS_SECRET" >"$RUN_DIR/certificate.txt" 2>&1 || true
     die "$E_DEPLOY" "issuer $ACME_ISSUER did not issue the certificate of Grafana in 5 minutes, see $RUN_DIR/certificate.txt"
@@ -330,26 +350,35 @@ deploy_public() {
     lb_args=(--set-string "service.spec.loadBalancerIP=$first")
   fi
   ensure_namespace "$NS_INGRESS"
-  ensure_namespace "$NS_CERT_MANAGER"
-
-  release cert-manager "$NS_CERT_MANAGER" jetstack/cert-manager "$CERT_MANAGER_CHART_VERSION" cert-manager.yaml
-  wait_crd clusterissuers.cert-manager.io
-  wait_crd certificates.cert-manager.io
-  cluster_issuers | apply_stdin
+  local traefik_args=()
+  if tls_external; then
+    # A cert-manager of an earlier install stays, as an external ingress leaves it (R17).
+    mapfile -t traefik_args < <(traefik_tls_args)
+  else
+    ensure_namespace "$NS_CERT_MANAGER"
+    release cert-manager "$NS_CERT_MANAGER" jetstack/cert-manager "$CERT_MANAGER_CHART_VERSION" cert-manager.yaml
+    wait_crd clusterissuers.cert-manager.io
+    wait_crd certificates.cert-manager.io
+    cluster_issuers | apply_stdin
+    traefik_args=(--set-string "tlsStore.default.defaultCertificate.secretName=$CERT_NAME")
+  fi
 
   release traefik "$NS_INGRESS" traefik/traefik "$TRAEFIK_CHART_VERSION" traefik.yaml \
-    "${lb_args[@]}" \
-    --set-string "tlsStore.default.defaultCertificate.secretName=$CERT_NAME"
+    "${lb_args[@]}" "${traefik_args[@]}"
   LB_IP=$(kc -n "$NS_INGRESS" get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
   [[ -n $LB_IP ]] || die "$E_DEPLOY" "the traefik service has no load balancer address"
   log "Traefik: $LB_IP"
   # On an external target the load balancer of the cluster takes the traffic.
   if ! target_external; then install_forward; fi
 
-  public_certificate | apply_stdin
   public_state_manifest | apply_stdin
   local hosts
   hosts=$(public_hosts)
+  if tls_external; then
+    ok "public access: http://{${hosts// /,}}.$PUBLIC_DOMAIN through Traefik $LB_IP, TLS on the load balancer in front"
+    return 0
+  fi
+  public_certificate | apply_stdin
   log "certificate for ${hosts// /., }.$PUBLIC_DOMAIN (${ACME_ISSUER:-letsencrypt})"
   if ! kc -n "$NS_INGRESS" wait "certificate/$CERT_NAME" --for=condition=Ready --timeout=5m >/dev/null 2>&1; then
     kc -n "$NS_INGRESS" describe certificate "$CERT_NAME" >"$RUN_DIR/certificate.txt" 2>&1 || true
@@ -361,6 +390,13 @@ deploy_public() {
     die "$E_DEPLOY" "the certificate was not issued in 5 minutes: check that ports 80/443 of the machine are open from outside and *.$PUBLIC_DOMAIN points to $PUBLIC_IP_RESOLVED (see $RUN_DIR/certificate.txt)"
   fi
   ok "public access: https://{${hosts// /,}}.$PUBLIC_DOMAIN"
+}
+
+# traefik_tls_args — Traefik behind a load balancer that terminates TLS: HTTP without a redirect, no TLSStore, and
+# X-Forwarded-* only from the addresses of the load balancer. One argument per line.
+traefik_tls_args() {
+  printf '%s\n' --set-json 'ports.web.http.redirections.entryPoint={}' --set tlsStore=null \
+    --set-json "ports.web.forwardedHeaders.trustedIPs=$(tr ',' '\n' <<<"$TLS_PROXY_CIDRS" | jq -Rnc '[inputs | select(length > 0)]')"
 }
 
 # public_curl <host> <scheme> [curl arguments…] — a request to Traefik from the machine
@@ -378,6 +414,10 @@ check_public_external() {
   local ready
   if ! kc get ingressclass "$INGRESS_CLASS" >/dev/null 2>&1; then
     record public fail "ingress class $INGRESS_CLASS does not exist"
+    return
+  fi
+  if tls_external; then
+    record public ok "ingress class $INGRESS_CLASS; TLS on the load balancer"
     return
   fi
   ready=$(resource_ready clusterissuer "$ACME_ISSUER")
@@ -407,10 +447,42 @@ check_public_certificate() {
   fi
 }
 
+# check_public_http — TLS on the load balancer: Traefik routes the hosts over HTTP. The load balancer and its
+# certificate are not the stand's, so no request goes through them. On an existing cluster no request goes to
+# Traefik either, as for its certificate: its address may not be reachable from this machine.
+check_public_http() {
+  local host code hosts
+  LB_IP=${LB_IP:-$(kc -n "$NS_INGRESS" get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)}
+  PUBLIC_DOMAIN=${PUBLIC_DOMAIN:-$(state_public | jq -r '.baseDomain // empty' 2>/dev/null || true)}
+  if [[ -z $LB_IP || -z $PUBLIC_DOMAIN ]]; then
+    record public fail "public access is not configured: no Traefik address or domain"
+    return
+  fi
+  if target_external; then
+    record public ok "Traefik has the address $LB_IP for the load balancer that terminates TLS"
+    return
+  fi
+  # Without Grafana the first host of a product: an answer of Traefik for it means the route works.
+  hosts=$(public_hosts)
+  host="grafana.$PUBLIC_DOMAIN"
+  observability_enabled || host="${hosts%% *}.$PUBLIC_DOMAIN"
+  code=$(public_curl "$host" http -o /dev/null -w '%{http_code}' 2>/dev/null || true)
+  # 200, or a 302 to sign-in; 301 or 308 would be a redirect to HTTPS, which the load balancer sends instead.
+  if [[ $code == 200 || $code == 302 ]]; then
+    record public ok "http://$host through $LB_IP answers $code; TLS on the load balancer"
+  else
+    record public fail "http://$host through $LB_IP answers '${code:-no answer}' (expected 200 or a 302 to sign-in, no redirect to HTTPS)"
+  fi
+}
+
 check_public() {
   public_enabled || return 0
   if ingress_external; then
     check_public_external
+    return 0
+  fi
+  if tls_external; then
+    check_public_http
     return 0
   fi
   if target_external; then

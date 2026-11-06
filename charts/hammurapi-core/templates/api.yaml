@@ -64,7 +64,9 @@ metadata:
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   # The default Traefik certificate, or with clusterIssuer a secret of its own.
+  {{- if .Values.ingress.tls }}
   tls: [{ hosts: [{{ include "core.apiHost" . | quote }}]{{ if .Values.ingress.clusterIssuer }}, secretName: api-tls{{ end }} }]
+  {{- end }}
   rules:
     - host: {{ include "core.apiHost" . | quote }}
       http:

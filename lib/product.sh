@@ -89,7 +89,14 @@ validate_products() {
     log "PRODUCTS: Hammurapi needs Nabu, so Nabu is installed too"
   fi
   [[ -n $(product_list) ]] || return 0
-  local what="PRODUCTS=$(product_list | paste -sd, -)"
+  local what="PRODUCTS=$(product_list | paste -sd, -)" chart
+  # Older charts have no ingress.tls: their Ingresses would answer HTTPS only, and the load balancer sends HTTP.
+  if tls_external; then
+    for chart in NABU_CHART_VERSION HAMMURAPI_CHART_VERSION; do
+      [[ $(printf '%s\n%s\n' "$TLS_EXTERNAL_CHART_MIN" "${!chart}" | sort -V | head -1) == "$TLS_EXTERNAL_CHART_MIN" ]] ||
+        die "$E_USAGE" "TLS_TERMINATION=external needs the charts of the products from $TLS_EXTERNAL_CHART_MIN: $chart is ${!chart}; set $chart=$TLS_EXTERNAL_CHART_MIN or newer in the config file"
+    done
+  fi
   [[ ${PUBLIC_ACCESS:-false} == true ]] ||
     CONFIG_MISSING+=("$what: set PUBLIC_ACCESS=true, as the products need HTTPS and OAuth callbacks")
   require_param "$what" AUTH_PROVIDER

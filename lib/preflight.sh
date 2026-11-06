@@ -52,6 +52,7 @@ preflight_storage_class() {
 preflight_ingress() {
   public_enabled && ingress_external || return 0
   kc get ingressclass "$INGRESS_CLASS" >/dev/null 2>&1 || preflight_error "ingress class $INGRESS_CLASS does not exist"
+  tls_external && return 0
   kc get clusterissuer "$ACME_ISSUER" >/dev/null 2>&1 || preflight_error "ClusterIssuer $ACME_ISSUER does not exist"
 }
 

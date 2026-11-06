@@ -25,7 +25,7 @@ answers() { printf '%s\n' "$@" >"$BATS_TEST_TMPDIR/answers"; }
 
 # Nabu on minikube with GitHub sign-in, built-in storages, no MCP server.
 nabu_answers() {
-  answers 1 1 "${1-}" ops@example.com 1 gh-client gh-secret "" alice 1 1 1 "" "" "" "" "" "" "${2:-yes}"
+  answers 1 1 1 "${1-}" ops@example.com 1 gh-client gh-secret "" alice 1 1 1 "" "" "" "" "" "" "${2:-yes}"
 }
 
 # load_file — the configuration of $FILE, as a new run reads it: the keys loaded by setup do not count as the environment.
@@ -68,6 +68,7 @@ PRODUCTS=nabu
 NABU_MODE=internal
 PUBLIC_EXTRA_HOSTS='nabu nabu-api'
 PUBLIC_ACCESS=true
+TLS_TERMINATION=ingress
 INGRESS_MODE=internal
 INGRESS_CLASS=traefik
 PUBLIC_BASE_DOMAIN=stand.example.com
@@ -110,7 +111,7 @@ EOF
   load_file
   stored_input() { [[ $1 == NABU_GITHUB_CLIENT_SECRET ]] && echo kept; }
   # Enter everywhere: the values in brackets stay, and the kept secret needs no new value.
-  answers "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" yes
+  answers "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" yes
   wizard
   [ "$status" -eq 0 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
   [[ $output == *"[old-client]"* && $output == *"[set, Enter keeps it]"* && $output == *"[bob]"* ]]
@@ -131,13 +132,35 @@ EOF
 
 @test "DOM-02: an existing cluster without a domain: the question again" {
   stub kubectl '[[ $* == *get-contexts* ]] && echo corp; exit 0'
-  answers 2 1 1 1 "" stand.example.com ops@example.com 1 gh-client gh-secret "" alice 1 1 1 "" "" "" yes
+  answers 2 1 1 1 1 "" stand.example.com ops@example.com 1 gh-client gh-secret "" alice 1 1 1 "" "" "" yes
   wizard
   [ "$status" -eq 0 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
   [[ $output == *"an existing cluster needs one"* ]]
   grep -qx 'KUBE_CONTEXT=corp' "$FILE"
   grep -qx 'PUBLIC_BASE_DOMAIN=stand.example.com' "$FILE"
   not_grep -q '^MK_MEMORY=' "$FILE"
+}
+
+@test "R17: TLS on a load balancer: no e-mail for Let's Encrypt; its addresses and the address of DNS" {
+  answers 1 1 2 stand.example.com 203.0.113.9 10.0.0.0/24,10.0.1.5 1 gh-client gh-secret "" alice 1 1 1 "" "" "" "" "" "" yes
+  wizard
+  [ "$status" -eq 0 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
+  grep -qx 'TLS_TERMINATION=external' "$FILE"
+  grep -qx 'TLS_PROXY_CIDRS=10.0.0.0/24,10.0.1.5' "$FILE"
+  grep -qx 'PUBLIC_IP=203.0.113.9' "$FILE"
+  grep -qx "NABU_CHART_VERSION=$TLS_EXTERNAL_CHART_MIN" "$FILE"
+  not_grep -q '^ACME_EMAIL=' "$FILE"
+  [[ $output != *sslip.io* ]]
+}
+
+@test "R17: back from a load balancer to TLS on the ingress: its address is no longer PUBLIC_IP" {
+  printf 'TLS_TERMINATION=external\nPUBLIC_IP=203.0.113.9\nTLS_PROXY_CIDRS=10.0.0.0/24\n' >"$FILE"
+  load_file
+  answers 1 1 1 stand.example.com ops@example.com 1 gh-client gh-secret "" alice 1 1 1 "" "" "" "" "" "" yes
+  wizard
+  [ "$status" -eq 0 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
+  grep -qx 'TLS_TERMINATION=ingress' "$FILE"
+  grep -qx 'PUBLIC_IP=' "$FILE"
 }
 
 @test "PRD-03: the site is not offered; its host is not in PUBLIC_EXTRA_HOSTS" {
@@ -167,7 +190,7 @@ EOF
 
 @test "R11: Hammurapi with an external Nabu: its client, the GitHub App and the key file" {
   printf -- '-----BEGIN KEY-----\nabc\n-----END KEY-----\n' >"$BATS_TEST_TMPDIR/app.pem"
-  answers 1 3 https://nabu.corp.example nabu-client nabu-secret stand.example.com ops@example.com \
+  answers 1 3 https://nabu.corp.example nabu-client nabu-secret 1 stand.example.com ops@example.com \
     1 "" alice 42 app-client app-secret "$BATS_TEST_TMPDIR/app.pem" acme/specs 1 1 1 "" "" "" "" "" yes
   wizard
   [ "$status" -eq 0 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
@@ -182,7 +205,7 @@ EOF
 }
 
 @test "MCP-04 (U): docling: the memory of the server, and the MK_MEMORY it needs" {
-  answers 1 1 stand.example.com ops@example.com 1 gh-client gh-secret "" alice 1 1 1 "" 2 "" "" "" "" yes
+  answers 1 1 1 stand.example.com ops@example.com 1 gh-client gh-secret "" alice 1 1 1 "" 2 "" "" "" "" yes
   wizard
   [ "$status" -eq 0 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
   [[ $output == *"docling, 1.5 GiB"* && $output == *"MK_MEMORY=15g is needed"* ]]
@@ -193,7 +216,7 @@ EOF
 
 @test "R4: a question refuses an invalid answer and asks again" {
   # OIDC with an issuer, then an empty client ID is refused by the question itself.
-  answers 1 1 stand.example.com ops@example.com 2 https://id.example.com "" client-id oidc-secret "" alice \
+  answers 1 1 1 stand.example.com ops@example.com 2 https://id.example.com "" client-id oidc-secret "" alice \
     1 1 1 "" "" "" "" "" "" yes
   wizard
   [ "$status" -eq 0 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
@@ -205,8 +228,8 @@ EOF
   printf 'MCP_DOCLING_MAX_MB=999\n' >"$FILE"
   load_file
   # The same answers twice: the cause is in the file, and the wizard names it instead of asking forever.
-  answers 1 1 s.example.com ops@example.com 1 c s "" alice 1 1 1 "" "" "" "" "" "" \
-    1 1 s.example.com ops@example.com 1 c s "" alice 1 1 1 "" "" "" "" "" ""
+  answers 1 1 1 s.example.com ops@example.com 1 c s "" alice 1 1 1 "" "" "" "" "" "" \
+    1 1 1 s.example.com ops@example.com 1 c s "" alice 1 1 1 "" "" "" "" "" ""
   wizard
   [ "$status" -eq 2 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
   [[ $output == *"do not pass the checks of install"*"MCP_DOCLING_MAX_MB"* && $output == *"fix $FILE"* ]]

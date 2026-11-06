@@ -415,6 +415,144 @@ external_ingress() {
   [[ ${CHECK_RESULTS[*]} == "public|fail|ClusterIssuer corp is not ready ('False')" ]]
 }
 
+# --- TLS on a load balancer in front (FTR.INFRA.INST-0001 R17, TLS_TERMINATION=external) ---
+
+external_tls() {
+  PUBLIC_ACCESS=true TLS_TERMINATION=external PUBLIC_BASE_DOMAIN=x.example TLS_PROXY_CIDRS=10.0.0.0/24,10.0.1.5 ACME_EMAIL=
+}
+
+@test "R17: TLS on a load balancer: a domain and its addresses, no e-mail of Let's Encrypt; a bad address is code 2" {
+  load_script
+  external_tls
+  run validate_public_strict
+  [ "$status" -eq 0 ]
+  TLS_PROXY_CIDRS=
+  run validate_public_strict
+  [ "$status" -eq 2 ]
+  [[ $output == *TLS_PROXY_CIDRS* ]]
+  external_tls
+  PUBLIC_BASE_DOMAIN=
+  run validate_public_strict
+  [[ $output == *"TLS_TERMINATION=external: parameter PUBLIC_BASE_DOMAIN"* ]]
+  external_tls
+  TLS_PROXY_CIDRS=10.0.0.0/24,lb.example
+  run validate_public_strict
+  [ "$status" -eq 2 ]
+  TLS_TERMINATION=both
+  run validate_public_strict
+  [ "$status" -eq 2 ]
+  # The ingress of the cluster: its class only, and no issuer.
+  external_tls
+  INGRESS_MODE=external INGRESS_CLASS=nginx TLS_PROXY_CIDRS='' ACME_ISSUER=''
+  CONFIG_EXPLICIT[INGRESS_CLASS]=1
+  run validate_public_strict
+  [ "$status" -eq 0 ]
+}
+
+@test "R17: TLS on a load balancer: Traefik without cert-manager, redirect or certificate, trusting only its addresses" {
+  load_script
+  external_tls
+  PUBLIC_DOMAIN=x.example
+  metallb_range() { echo 192.168.49.200-192.168.49.209; }
+  metallb_addon() { :; }
+  install_forward() { echo "install_forward" >>"$CALLS"; }
+  stub kubectl '[[ $* == *"get svc traefik"* ]] && echo 192.168.49.200; exit 0'
+  run deploy_public
+  [ "$status" -eq 0 ]
+  not_called "cert-manager"
+  not_called "kind: ClusterIssuer"
+  not_called "certificate"
+  called "upgrade --install traefik"
+  called 'ports.web.http.redirections.entryPoint={}'
+  called 'ports.web.forwardedHeaders.trustedIPs=\["10.0.0.0/24","10.0.1.5"\]'
+  called "tlsStore=null"
+  called install_forward
+  [[ $output == *"TLS on the load balancer"* ]]
+}
+
+@test "R17: TLS on a load balancer: Grafana and the products get Ingresses without tls" {
+  load_script
+  external_tls
+  PUBLIC_DOMAIN=x.example
+  grafana_public_values "$BATS_TEST_TMPDIR/g.yaml"
+  not_grep -q 'tls:' "$BATS_TEST_TMPDIR/g.yaml"
+  not_grep -q 'cluster-issuer' "$BATS_TEST_TMPDIR/g.yaml"
+  grep -q 'root_url: "https://grafana.x.example"' "$BATS_TEST_TMPDIR/g.yaml"
+  [ "$(ingress_helm_args | paste -sd' ')" = "--set-string ingress.className=traefik --set ingress.tls=false" ]
+  # A rollout of a product follows what up recorded.
+  TLS_TERMINATION=ingress
+  ingress_from_status '{"public":{"enabled":true,"tlsTermination":"external"}}'
+  tls_external
+  ingress_from_status '{"public":{"enabled":true}}'
+  run tls_external
+  [ "$status" -ne 0 ]
+}
+
+@test "R17: TLS on a load balancer: DNS is checked against its address, or not at all without one" {
+  load_script
+  external_tls
+  getent() { echo "198.51.100.1 STREAM $2"; }
+  PUBLIC_IP=203.0.113.9
+  run public_prepare
+  [ "$status" -eq 19 ]
+  [[ $output == *"does not point to the load balancer 203.0.113.9"* ]]
+  getent() { echo "203.0.113.9 STREAM $2"; }
+  run public_prepare
+  [ "$status" -eq 0 ]
+  PUBLIC_IP=
+  run public_prepare
+  [ "$status" -eq 0 ]
+  [[ $output == *"is not checked"* ]]
+  not_called "curl"
+}
+
+@test "R17: TLS on a load balancer: the check asks Traefik over HTTP; a redirect of its own fails" {
+  load_script
+  external_tls
+  LB_IP=192.168.49.200 PUBLIC_DOMAIN=x.example
+  public_curl() { [[ $2 == http ]] && echo 302; }
+  check_public
+  [[ ${CHECK_RESULTS[*]} == "public|ok|http://grafana.x.example through 192.168.49.200 answers 302; TLS on the load balancer" ]]
+  CHECK_RESULTS=()
+  public_curl() { echo 404; }
+  check_public
+  [[ ${CHECK_RESULTS[*]} == "public|fail|"* ]]
+  # A redirect of Traefik to HTTPS would loop behind the load balancer.
+  CHECK_RESULTS=()
+  public_curl() { echo 308; }
+  check_public
+  [[ ${CHECK_RESULTS[*]} == "public|fail|"*"no redirect to HTTPS"* ]]
+  # Without Grafana the first host of a product.
+  CHECK_RESULTS=()
+  OBSERVABILITY=false PRODUCTS=nabu PUBLIC_EXTRA_HOSTS="nabu nabu-api"
+  stub helm 'exit 1'
+  public_curl() { echo "$1" >>"$CALLS"; echo 200; }
+  check_public
+  called nabu.x.example
+  # On an existing cluster no request: the address of Traefik may not be reachable from here.
+  CHECK_RESULTS=()
+  INSTALL_TARGET=external
+  public_curl() { echo "unexpected" >&2; return 1; }
+  check_public
+  [[ ${CHECK_RESULTS[*]} == "public|ok|Traefik has the address 192.168.49.200"* ]]
+}
+
+@test "R17: TLS on a load balancer: old charts of the products are refused, with the version they need" {
+  load_script
+  external_tls
+  PRODUCTS=nabu AUTH_PROVIDER=github BOOTSTRAP_ADMINS=a NABU_GITHUB_CLIENT_ID=c NABU_GITHUB_CLIENT_SECRET=s
+  NABU_CHART_VERSION=0.3.0 HAMMURAPI_CHART_VERSION=0.3.0
+  run validate_products
+  [ "$status" -eq 2 ]
+  [[ $output == *"NABU_CHART_VERSION is 0.3.0"*"$TLS_EXTERNAL_CHART_MIN"* ]]
+  NABU_CHART_VERSION=$TLS_EXTERNAL_CHART_MIN HAMMURAPI_CHART_VERSION=0.4.0
+  run validate_products
+  [ "$status" -eq 0 ]
+  TLS_PROXY_CIDRS="10.0.0.0/24, 10.0.1.5"
+  run validate_public_strict
+  [ "$status" -eq 2 ]
+}
+
 # --- firewalld (FTR.INFRA.INST-0001 R9, tech §5) ---
 
 firewalld_stub() {

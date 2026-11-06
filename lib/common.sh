@@ -226,12 +226,22 @@ target_external() { [[ ${INSTALL_TARGET:-minikube} == external ]]; }
 
 ingress_external() { [[ ${INGRESS_MODE:-internal} == external ]]; }
 
+# tls_external — TLS terminates on a load balancer in front of the install (TLS_TERMINATION=external), which
+# sends HTTP to the ingress: no cert-manager, no certificates, no redirect to HTTPS here.
+tls_external() { [[ ${TLS_TERMINATION:-ingress} == external ]]; }
+
+# Addresses or CIDRs of IPv4, comma-separated without spaces: TLS_PROXY_CIDRS in the file and in the wizard.
+readonly CIDR_LIST_RE='^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?(,[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?)*$'
+# The first release of the charts of the products with ingress.tls (TLS_TERMINATION=external).
+readonly TLS_EXTERNAL_CHART_MIN=0.3.10
+
 # ingress_from_status <status JSON> — the ingress recorded by `up`: a rollout follows the stand, whatever
 # its own config says.
 ingress_from_status() {
   INGRESS_MODE=$(jq -r '.public.ingressMode // "internal"' <<<"$1")
   INGRESS_CLASS=$(jq -r '.public.ingressClass // "traefik"' <<<"$1")
   ACME_ISSUER=$(jq -r '.public.issuer // "letsencrypt"' <<<"$1")
+  TLS_TERMINATION=$(jq -r '.public.tlsTermination // "ingress"' <<<"$1")
 }
 
 # resource_ready <kubectl get arguments…> — True when the condition Ready of the object holds.
@@ -252,7 +262,7 @@ wait_certificate() {
 # wait_product_certificate <ns> <component> — external ingress: the certificate of a product's Ingress.
 # A warning only: a pending certificate is not a failed release, and DNS may still be on its way.
 wait_product_certificate() {
-  ingress_external || return 0
+  ingress_external && ! tls_external || return 0
   local secret=web-tls
   [[ $2 == *-core ]] && secret=api-tls
   wait_certificate "$1" "$secret" ||
@@ -262,7 +272,11 @@ wait_product_certificate() {
 # ingress_helm_args — chart values of a product's Ingress, one per line.
 ingress_helm_args() {
   printf '%s\n' --set-string "ingress.className=${INGRESS_CLASS:-traefik}"
-  if ingress_external; then printf '%s\n' --set-string "ingress.clusterIssuer=$ACME_ISSUER"; fi
+  if tls_external; then
+    printf '%s\n' --set ingress.tls=false
+  elif ingress_external; then
+    printf '%s\n' --set-string "ingress.clusterIssuer=$ACME_ISSUER"
+  fi
 }
 
 observability_enabled() { [[ ${OBSERVABILITY:-true} == true ]]; }
@@ -369,6 +383,13 @@ validate_config() {
 validate_ingress_internal() {
   [[ ${INGRESS_CLASS:-traefik} == traefik ]] ||
     die "$E_USAGE" "INGRESS_MODE=internal installs Traefik, so INGRESS_CLASS must be traefik or INGRESS_MODE external"
+  if tls_external; then
+    # Traefik trusts X-Forwarded-* of the load balancer only: a client past it must not claim HTTPS.
+    require_param TLS_TERMINATION=external TLS_PROXY_CIDRS
+    [[ -z ${TLS_PROXY_CIDRS:-} || $TLS_PROXY_CIDRS =~ $CIDR_LIST_RE ]] ||
+      die "$E_USAGE" "TLS_PROXY_CIDRS: addresses or CIDRs of the load balancer, comma-separated without spaces, not '$TLS_PROXY_CIDRS'"
+    return 0
+  fi
   require_param PUBLIC_ACCESS=true ACME_EMAIL
   [[ -z ${ACME_EMAIL:-} || $ACME_EMAIL == *@*.* ]] || die "$E_USAGE" "ACME_EMAIL: an email address is required"
   case ${ACME_ISSUER:-letsencrypt} in
@@ -379,8 +400,10 @@ validate_ingress_internal() {
 
 # validate_ingress_external — the defaults name what the stand installs, so they do not count here.
 validate_ingress_external() {
-  local key
-  for key in INGRESS_CLASS ACME_ISSUER; do
+  local key keys=(INGRESS_CLASS ACME_ISSUER)
+  # Behind a load balancer that terminates TLS the cluster issues no certificate.
+  tls_external && keys=(INGRESS_CLASS)
+  for key in "${keys[@]}"; do
     if [[ -z ${CONFIG_EXPLICIT[$key]+x} || -z ${!key} ]]; then
       CONFIG_MISSING+=("INGRESS_MODE=external: set $key to the name of an existing object of the cluster")
     elif ! [[ ${!key} =~ ^[a-z0-9][a-z0-9.-]*$ ]]; then
@@ -400,6 +423,11 @@ validate_public_config() {
   case ${PUBLIC_DNS_CHECK:-true} in
     true | false) ;;
     *) die "$E_USAGE" "PUBLIC_DNS_CHECK must be true or false" ;;
+  esac
+  case ${TLS_TERMINATION:-ingress} in
+    ingress) ;;
+    external) require_param TLS_TERMINATION=external PUBLIC_BASE_DOMAIN ;;
+    *) die "$E_USAGE" "TLS_TERMINATION must be ingress or external" ;;
   esac
   if target_external; then require_param INSTALL_TARGET=external PUBLIC_BASE_DOMAIN; fi
   case ${INGRESS_MODE:-internal} in

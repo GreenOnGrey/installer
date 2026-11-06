@@ -5,7 +5,7 @@ This page installs Nabu (and, if you want, Hammurapi) on one clean machine with 
 ## 1. Prepare
 
 - A machine of [minikube.md](minikube.md#machine-requirements): Debian 13, or RHEL, Rocky or AlmaLinux 9 and 10, x86_64, 4 vCPU, 16 GB of memory, 80 GB of free disk. Log in as a regular user with passwordless `sudo`, not as root.
-- Ports 80 and 443 of the machine open from the internet: Let's Encrypt checks them before issuing certificates.
+- Ports 80 and 443 of the machine open from the internet: Let's Encrypt checks them before issuing certificates. If a load balancer of your team terminates TLS in front of the machine, only port 80 has to be open to it; the wizard asks for that ([external-kubernetes.md](external-kubernetes.md#tls-on-a-load-balancer)).
 - A domain whose hosts point to the machine: `nabu.<domain>`, `nabu-api.<domain>`, `grafana.<domain>`, and `hammurapi.<domain>`, `hammurapi-api.<domain>` for Hammurapi. A wildcard record `*.<domain>` covers them all. Without a domain the installer uses `<IP>.sslip.io`, which shares the limits of Let's Encrypt with everyone else.
 - A way for people to sign in: a GitHub OAuth app, or an OpenID Connect client ([products.md](products.md#sign-in)). For Hammurapi, also its GitHub App ([products.md](products.md#hammurapi)).
 
