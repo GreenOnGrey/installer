@@ -27,7 +27,7 @@ ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 # shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh"
 
-readonly E_STAND=20 E_NS=22 E_SECRETS=23 E_HELM=25 E_READY=27 E_DNS=28 E_CERT=29
+readonly E_STAND=20 E_NS=22 E_SECRETS=23 E_HELM=25 E_READY=27 E_SITE_DNS=28 E_CERT=29
 readonly COMPONENT=landing
 NS=${LANDING_NAMESPACE:-landing}
 CHART_REPO=${CHART_REPO:-oci://ghcr.io/greenongrey/charts}
@@ -179,7 +179,7 @@ check_domain_dns() {
     ips=$(getent ahostsv4 "$name" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')
     ips=${ips% }
     [[ $ips == "$PUBLIC_IP_STAND" ]] ||
-      fail "$E_DNS" "$name points to '${ips:-no record}', but one A record for $PUBLIC_IP_STAND is required"
+      fail "$E_SITE_DNS" "$name points to '${ips:-no record}', but one A record for $PUBLIC_IP_STAND is required"
   done
   ok "$DOMAIN and www.$DOMAIN point to $PUBLIC_IP_STAND"
 }

@@ -293,3 +293,12 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   not_grep -q dockerconfigjson "$APPLIED/manifests"
   called "upgrade --install hammurapi-core"
 }
+
+@test "the deploy scripts start: their exit codes do not collide with those of lib/common.sh" {
+  local s
+  for s in hammurapi-deploy nabu-deploy landing-deploy; do
+    run bash "$ROOT/bin/$s" </dev/null
+    [[ $output != *"readonly variable"* ]] || { echo "$s: $output"; false; }
+    [[ ${lines[-1]} == "{"* ]] || { echo "$s: $output"; false; }
+  done
+}
