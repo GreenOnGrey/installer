@@ -420,7 +420,7 @@ external_tls() {
   PUBLIC_ACCESS=true TLS_TERMINATION=external PUBLIC_BASE_DOMAIN=x.example TLS_PROXY_CIDRS=10.0.0.0/24,10.0.1.5 ACME_EMAIL=
 }
 
-@test "R17: TLS on a load balancer: a domain and its addresses, no e-mail of Let's Encrypt; a bad address is code 2" {
+@test "RES-11 (U), R17: TLS on a load balancer: a domain and its addresses, no e-mail of Let's Encrypt; a bad address is code 2" {
   load_script
   external_tls
   run validate_public_strict
@@ -448,7 +448,7 @@ external_tls() {
   [ "$status" -eq 0 ]
 }
 
-@test "R17: TLS on a load balancer: Traefik without cert-manager, redirect or certificate, trusting only its addresses" {
+@test "RES-11 (U), R17: TLS on a load balancer: Traefik without cert-manager, redirect or certificate, trusting only its addresses" {
   load_script
   external_tls
   PUBLIC_DOMAIN=x.example
@@ -469,7 +469,7 @@ external_tls() {
   [[ $output == *"TLS on the load balancer"* ]]
 }
 
-@test "R17: TLS on a load balancer: Grafana and the products get Ingresses without tls" {
+@test "RES-11 (U), R17: TLS on a load balancer: Grafana and the products get Ingresses without tls" {
   load_script
   external_tls
   PUBLIC_DOMAIN=x.example
@@ -487,7 +487,7 @@ external_tls() {
   [ "$status" -ne 0 ]
 }
 
-@test "R17: TLS on a load balancer: DNS is checked against its address, or not at all without one" {
+@test "RES-11 (U), R17: TLS on a load balancer: DNS is checked against its address, or not at all without one" {
   load_script
   external_tls
   getent() { echo "198.51.100.1 STREAM $2"; }
@@ -505,7 +505,7 @@ external_tls() {
   not_called "curl"
 }
 
-@test "R17: TLS on a load balancer: the check asks Traefik over HTTP; a redirect of its own fails" {
+@test "RES-11 (U), R17: TLS on a load balancer: the check asks Traefik over HTTP; a redirect of its own fails" {
   load_script
   external_tls
   LB_IP=192.168.49.200 PUBLIC_DOMAIN=x.example
@@ -536,7 +536,7 @@ external_tls() {
   [[ ${CHECK_RESULTS[*]} == "public|ok|Traefik has the address 192.168.49.200"* ]]
 }
 
-@test "R17: TLS on a load balancer: old charts of the products are refused, with the version they need" {
+@test "RES-11 (U), R17: TLS on a load balancer: old charts of the products are refused, with the version they need" {
   load_script
   external_tls
   PRODUCTS=nabu AUTH_PROVIDER=github BOOTSTRAP_ADMINS=a NABU_GITHUB_CLIENT_ID=c NABU_GITHUB_CLIENT_SECRET=s

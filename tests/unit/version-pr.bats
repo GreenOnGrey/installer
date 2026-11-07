@@ -57,7 +57,7 @@ pr() {
 
 branch_file() { git -C "$W/installer" show "origin/$1:config/versions.env"; }
 
-@test "R25: a newer version on production opens one PR with one changed line, as the App" {
+@test "UPD-09 (U), R25: a newer version on production opens one PR with one changed line, as the App" {
   pr nabu-core v0.3.6
   [ "$status" -eq 0 ]
   grep -q ' versions/nabu-core-v0.3.6 ' "$PRS"

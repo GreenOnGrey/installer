@@ -144,7 +144,7 @@ nabu_github() {
   [[ $output == *"https://nabu.x.example"* && $output == *BOOTSTRAP_LLM_API_KEY* ]]
 }
 
-@test "R13: secrets of the products in the config file: code 2" {
+@test "RES-09, R13: secrets of the products in the config file: code 2" {
   printf 'NABU_GITHUB_CLIENT_SECRET=abc\n' >"$BATS_TEST_TMPDIR/c.env"
   run load_config "$ROOT" "$BATS_TEST_TMPDIR/c.env"
   [ "$status" -eq 2 ]

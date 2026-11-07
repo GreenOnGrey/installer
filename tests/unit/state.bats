@@ -150,7 +150,7 @@ put_cm() { jq -n --argjson d "$3" '{data: $d}' >"$CM_DIR/$1_$2.json"; }
   grep -q 'INSTALLER_STAND_ONLY=1 bash "$STATUS_CMD" status' "$ROOT/bin/landing-deploy"
 }
 
-@test "FTR.INFRA.INST-0001 R28: migrate_names relabels what an older tag labelled" {
+@test "PROD-04 (U), FTR.INFRA.INST-0001 R28: migrate_names relabels what an older tag labelled" {
   stub kubectl '[[ $* == *"get secret,configmap"* ]] && echo "{\"items\":[{\"kind\":\"Secret\",\"metadata\":{\"namespace\":\"storages\",\"name\":\"s3-root\"}}]}"; exit 0'
   run migrate_names
   [ "$status" -eq 0 ]
@@ -158,7 +158,7 @@ put_cm() { jq -n --argjson d "$3" '{data: $d}' >"$CM_DIR/$1_$2.json"; }
   called "-n storages label --overwrite Secret/s3-root app.kubernetes.io/managed-by=installer"
 }
 
-@test "FTR.INFRA.INST-0001 R28: migrate_names has nothing to do on a new install, and a failure stops nothing" {
+@test "PROD-04 (U), FTR.INFRA.INST-0001 R28: migrate_names has nothing to do on a new install, and a failure stops nothing" {
   stub kubectl '[[ $* == *"get secret,configmap"* ]] && echo "{\"items\":[]}"; exit 0'
   run migrate_names
   [ "$status" -eq 0 ]
