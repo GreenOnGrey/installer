@@ -142,6 +142,8 @@ EOF
 }
 
 @test "R17: TLS on a load balancer: no e-mail for Let's Encrypt; its addresses and the address of DNS" {
+  # Charts older than the minimum, whatever config/versions.env pins now: the wizard raises them.
+  NABU_CHART_VERSION=0.3.0 HAMMURAPI_CHART_VERSION=0.3.0
   answers 1 1 2 stand.example.com 203.0.113.9 10.0.0.0/24,10.0.1.5 1 gh-client gh-secret "" alice 1 1 1 "" "" "" "" "" "" yes
   wizard
   [ "$status" -eq 0 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
