@@ -68,8 +68,8 @@ nabu_github() {
   nabu_github
   secret_key() { [[ "$*" == "nabu nabu-secrets SECRETS_KEY" ]] && printf 'kept-key'; }
   run nabu_payload nabu-core
-  echo "$output" | jq -e '.secrets.SECRETS_KEY == "kept-key" and .secrets.GITHUB_CLIENT_SECRET == "gh-secret-XYZ"
-    and .config.AUTH_PROVIDER == "github" and .config.GITHUB_CLIENT_ID == "Iv1.abc" and .config.PI_VERSION == "1.5.0"
+  echo "$output" | jq -e --arg pi "$NABU_PI_VERSION" '.secrets.SECRETS_KEY == "kept-key" and .secrets.GITHUB_CLIENT_SECRET == "gh-secret-XYZ"
+    and .config.AUTH_PROVIDER == "github" and .config.GITHUB_CLIENT_ID == "Iv1.abc" and .config.PI_VERSION == $pi
     and (.config | has("OIDC_ISSUER") | not) and (.secrets | has("BOOTSTRAP_LLM_API_KEY") | not)
     and .image == "ghcr.io/greenongrey/nabu-core"'
   secret_key() { return 1; }
@@ -113,8 +113,8 @@ nabu_github() {
   apply_stdin() { cat >"$BATS_TEST_TMPDIR/recorded"; }
   CONFIG_FILE=/dev/null
   deploy_component nabu-deploy nabu nabu-core "$NABU_CORE_VERSION" "$NABU_CHART_VERSION"
-  called "nabu-deploy nabu-core v0.3.5 0.3.0"
-  jq -e '.data == {"nabu-core": "v0.3.5"}' "$BATS_TEST_TMPDIR/recorded"
+  called "nabu-deploy nabu-core $NABU_CORE_VERSION $NABU_CHART_VERSION"
+  jq -e --arg v "$NABU_CORE_VERSION" '.data == {"nabu-core": $v}' "$BATS_TEST_TMPDIR/recorded"
   [[ ${RESULT_UPDATED[*]} == nabu-core ]]
 }
 
@@ -323,7 +323,7 @@ hammurapi_github() {
   run deploy_products
   [ "$status" -eq 0 ]
   [ "$(grep -o 'deploy [a-z-]* v[0-9.]*' "$CALLS" | tr '\n' ' ')" = \
-    "deploy nabu-core v0.3.5 deploy nabu-web v0.3.4 deploy hammurapi-core v0.3.8 deploy hammurapi-web v0.3.7 " ]
+    "deploy nabu-core $NABU_CORE_VERSION deploy nabu-web $NABU_WEB_VERSION deploy hammurapi-core $HAMMURAPI_CORE_VERSION deploy hammurapi-web $HAMMURAPI_WEB_VERSION " ]
 }
 
 @test "R11: switching to an external Nabu needs its secret: the generated one of the internal Nabu does not count" {
