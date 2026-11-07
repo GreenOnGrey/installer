@@ -43,7 +43,7 @@ esac'
   [ "$status" -eq 0 ]
 }
 
-@test "FTR.INFRA.INST-0001 R20: a server from its description and option needs no installer code" {
+@test "MCP-02 (U), FTR.INFRA.INST-0001 R20: a server from its description and option needs no installer code" {
   local chart=$BATS_TEST_TMPDIR/chart cfg=$BATS_TEST_TMPDIR/local.env
   mkdir -p "$chart/files/servers"
   jq -n '{name: "new-one", valuesKey: "newOne", service: "new-one:9000", deployments: ["new-one"],
@@ -67,7 +67,7 @@ esac'
   not_called "helm pull"
 }
 
-@test "FTR.INFRA.INST-0001 R20: the chart downloads anonymously and once per export" {
+@test "OPEN-05 (U), FTR.INFRA.INST-0001 R20: the chart downloads anonymously and once per export" {
   local fake=$BATS_TEST_TMPDIR/root
   mkdir -p "$fake"
   stub helm '
@@ -204,7 +204,7 @@ esac'
   called "kubectl --context greenongrey delete ns mcp"
 }
 
-@test "STD-01: all off and no release: nothing installs" {
+@test "STD-01, MCP-03 (U): all off and no release: nothing installs" {
   deploy_mcp
   not_called "upgrade --install mcp-servers"
   not_called uninstall
@@ -220,7 +220,7 @@ esac'
   [[ $output == *"search.engines=[\"duckduckgo\""* ]]
 }
 
-@test "STD-17: creds: addresses and access mode of enabled servers only" {
+@test "STD-17, MCP-06: creds: addresses and access mode of enabled servers only" {
   MCP_SEARCH=true MCP_YANDEX_MAIL=true
   printf 'k-search' >"$KUBE_SECRETS/mcp-search-key"
   run mcp_creds_json
