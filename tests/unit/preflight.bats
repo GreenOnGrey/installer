@@ -203,7 +203,7 @@ esac'
   [[ $output == *INSTALL_TARGET* ]]
 }
 
-@test "R18: the external target with public access needs a domain" {
+@test "DOM-03, R18: the external target with public access needs a domain" {
   CONFIG_EXPLICIT[KUBE_CONTEXT]=1
   PUBLIC_ACCESS=true PUBLIC_BASE_DOMAIN='' ACME_EMAIL=a@b.example
   run validate_config

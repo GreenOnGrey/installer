@@ -174,7 +174,7 @@ setup() {
   not_grep -nE '(kubectl|helm) +--(kube-)?context' "$ROOT"/lib/[a-bd-z]*.sh "$ROOT"/lib/cluster.sh "$ROOT"/lib/checks.sh
 }
 
-@test "FTR.INFRA.INST-0001 R28: a new install has the names of the installer" {
+@test "PROD-05 (U), FTR.INFRA.INST-0001 R28: a new install has the names of the installer" {
   [ "$MK_PROFILE" = greenongrey ]
   [ "$UNIT_PREFIX" = greenongrey ]
   [ "$CERT_NAME" = greenongrey-public ]
@@ -182,7 +182,7 @@ setup() {
   [ "$(kube_context)" = greenongrey ]
 }
 
-@test "FTR.INFRA.INST-0001 R28: another profile exists: code 2, no second cluster" {
+@test "TGT-09, FTR.INFRA.INST-0001 R28: another profile exists: code 2, no second cluster" {
   mkdir -p "$MINIKUBE_HOME/profiles/hammurapi"
   : >"$MINIKUBE_HOME/profiles/hammurapi/config.json"
   run check_single_profile
