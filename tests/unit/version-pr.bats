@@ -20,7 +20,7 @@ setup() {
   git -C "$W/installer" push -q origin main
   PRS=$W/prs
   : >"$PRS"
-  # gh: PRs as lines "number branch url"; list answers with JSON through the given --jq.
+  # gh: PRs as lines "number branch url [fork]"; list answers with JSON through the given --jq.
   stub gh '
 prs=$PRS
 case "$1 $2" in
@@ -34,7 +34,7 @@ case "$1 $2" in
   "pr list")
     head="" q=""
     while (($#)); do case $1 in --head) head=$2 ;; --jq) q=$2 ;; esac; shift; done
-    awk -v h="$head" "h == \"\" || \$2 == h { printf \"{\\\"number\\\":%s,\\\"headRefName\\\":\\\"%s\\\",\\\"url\\\":\\\"%s\\\"}\\n\", \$1, \$2, \$3 }" "$prs" |
+    awk -v h="$head" "h == \"\" || \$2 == h { printf \"{\\\"number\\\":%s,\\\"headRefName\\\":\\\"%s\\\",\\\"url\\\":\\\"%s\\\",\\\"isCrossRepository\\\":%s}\\n\", \$1, \$2, \$3, (\$4 == \"fork\" ? \"true\" : \"false\") }" "$prs" |
       jq -s . | jq -r "$q" ;;
 esac'
   # deploy/versions.env of the component at its tag, as raw.githubusercontent.com serves it.
@@ -49,7 +49,7 @@ pr() {
   cd "$W/installer" || return
   git checkout -q main
   git reset -q --hard origin/main
-  COMPONENT=$1 TAG=$2 APP_SLUG=gog-versions RUN_URL=https://github.com/o/nabu-core/actions/runs/1 CALLER=o/nabu-core \
+  COMPONENT=$1 TAG=$2 APP_SLUG=gog-versions RUN_URL=https://github.com/o/nabu-core/actions/runs/1 REPOSITORY=o/nabu-core REBUILD=${REBUILD:-false} \
     RUNNER_TEMP=$W GITHUB_STEP_SUMMARY=/dev/null run bash "$W/pr.sh"
   # Each run of the workflow starts from a fresh checkout of main.
   git reset -q --hard origin/main
@@ -147,3 +147,77 @@ branch_file() { git -C "$W/installer" show "origin/$1:config/versions.env"; }
   [[ $output == *"exactly one line"* ]]
   [ ! -s "$PRS" ]
 }
+
+@test "UPD-11 (U), R25: after a change of the set every open PR of a version is made anew, other PRs are not" {
+  yq -r '.jobs.list.steps[] | select(.id == "list") | .run' "$ROOT/.github/workflows/versions-rebuild.yml" >"$W/list.sh"
+  printf '%s\n' "21 versions/nabu-core-v0.3.6 u" "22 versions/hammurapi-web-v0.4.0 u" "23 versions/nabu-web-v0.3.9 u fork" \
+    "24 versions/nabu-web-main u" "25 fix-tests u" >"$PRS"
+  GITHUB_OUTPUT=$W/out run bash "$W/list.sh"
+  [ "$status" -eq 0 ]
+  jq -e '. == [{"component": "nabu-core", "tag": "v0.3.6"}, {"component": "hammurapi-web", "tag": "v0.4.0"}]' <<<"$(sed -n 's/^prs=//p' "$W/out")"
+  # Each one goes to version-pr.yml with the repository of its component, where deploy/versions.env of the tag is.
+  local rebuild=$ROOT/.github/workflows/versions-rebuild.yml
+  [ "$(yq -r '.jobs.rebuild.uses' "$rebuild")" = ./.github/workflows/version-pr.yml ]
+  [ "$(yq -r '.jobs.rebuild.with.repository' "$rebuild")" = '${{ github.repository_owner }}/${{ matrix.component }}' ]
+  [ "$(yq -r '.jobs.rebuild.with.tag' "$rebuild")" = '${{ matrix.tag }}' ]
+  [ "$(yq -r '.on.push.paths | join(" ")' "$rebuild")" = config/versions.env ]
+  [ "$(yq -r '.jobs.pr.steps[] | select(.id == "pr") | .env.REPOSITORY' "$ROOT/.github/workflows/version-pr.yml")" = \
+    '${{ inputs.repository || github.repository }}' ]
+}
+
+# main_set <key> <value> — a commit on main that changes the line of <key>, as a merged PR does.
+main_set() {
+  sed -i "s/^$1=.*/$1=$2/" "$W/installer/config/versions.env"
+  git -C "$W/installer" -c user.name=t -c user.email=t@example.com commit -q -am "$1"
+  git -C "$W/installer" push -q origin main
+}
+branch_sha() { git -C "$W/installer" rev-parse "origin/$1"; }
+
+@test "UPD-11 (U), decision 43: a rebuild makes a conflicting PR anew from main and says why" {
+  pr nabu-core v0.3.6
+  main_set NABU_WEB_VERSION v0.3.5
+  REBUILD=true pr nabu-core v0.3.6
+  [ "$status" -eq 0 ]
+  [[ $output == *"conflicts with main"* ]]
+  branch_file versions/nabu-core-v0.3.6 | grep -qx 'NABU_WEB_VERSION=v0.3.5'
+  branch_file versions/nabu-core-v0.3.6 | grep -qx 'NABU_CORE_VERSION=v0.3.6'
+  git -C "$W/installer" log -1 --format=%B origin/versions/nabu-core-v0.3.6 | grep -q '^Made anew from main'
+  # The rollout that the PR stands for is still named.
+  git -C "$W/installer" log -1 --format=%B origin/versions/nabu-core-v0.3.6 | grep -q '^It runs on production: https://'
+  [ "$(wc -l <"$PRS")" -eq 1 ]
+}
+
+@test "UPD-11 (U), decision 43: a rebuild leaves a PR that merges cleanly as it is" {
+  pr nabu-core v0.3.6
+  before=$(branch_sha versions/nabu-core-v0.3.6)
+  printf '# a line far from the components\n' >>"$W/installer/config/versions.env"
+  git -C "$W/installer" -c user.name=t -c user.email=t@example.com commit -q -am far
+  git -C "$W/installer" push -q origin main
+  REBUILD=true pr nabu-core v0.3.6
+  [ "$status" -eq 0 ]
+  [[ $output == *"merges into main cleanly"* ]]
+  [ "$(branch_sha versions/nabu-core-v0.3.6)" = "$before" ]
+}
+
+@test "UPD-11 (U), decision 43: a rebuild closes only its own PR when the set has the version, and opens none" {
+  pr nabu-core v0.3.6
+  pr nabu-web v0.3.5
+  main_set NABU_CORE_VERSION v0.3.6
+  REBUILD=true pr nabu-core v0.3.6
+  [ "$status" -eq 0 ]
+  [ "$(awk '{print $2}' "$PRS")" = versions/nabu-web-v0.3.5 ]
+  # A PR closed meanwhile is not opened again.
+  REBUILD=true pr nabu-core v0.3.6
+  [[ $output == *"no open PR"* ]]
+  [ "$(awk '{print $2}' "$PRS")" = versions/nabu-web-v0.3.5 ]
+}
+
+@test "UPD-11 (U), decision 43: a rollout that superseded the PR wins over a rebuild listed before it" {
+  pr nabu-core v0.3.6
+  pr nabu-core v0.3.7
+  main_set NABU_WEB_VERSION v0.3.5
+  REBUILD=true pr nabu-core v0.3.6
+  [ "$status" -eq 0 ]
+  [ "$(awk '{print $2}' "$PRS")" = versions/nabu-core-v0.3.7 ]
+}
+

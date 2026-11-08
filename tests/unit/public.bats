@@ -253,7 +253,7 @@ config_step() {
 @test "QUAL-03: GitHub Actions are pinned by SHA" {
   local bad wf=${DEPLOY_WORKFLOW:-$ROOT/../hammurapi/.github/workflows/deploy-component.yml} files=("$ROOT"/.github/workflows/*.yml)
   [[ -f $wf ]] && files+=("$wf")
-  bad=$(grep -hE '^\s*(-\s*)?uses:\s*[^./]' "${files[@]}" | grep -vE '@[0-9a-f]{40}(\s|$)' || true)
+  bad=$(grep -hE '^\s*(-\s*)?uses:\s*[^./[:space:]]' "${files[@]}" | grep -vE '@[0-9a-f]{40}(\s|$)' || true)
   [ -z "$bad" ] || { echo "$bad"; return 1; }
 }
 
