@@ -14,6 +14,8 @@ on:
       component: { type: string, required: true }   # nabu-core | nabu-web | hammurapi-core | hammurapi-web
       tag: { type: string, required: true }         # vX.Y.Z, running on production
       app_id: { type: string, default: "" }         # vars.VERSIONS_APP_ID of the caller
+      repository: { type: string, default: "" }     # owner/name of the component; the caller by default
+      rebuild: { type: boolean, default: false }    # versions-rebuild.yml: only make an open PR anew, decision 43
     secrets:
       VERSIONS_APP_PRIVATE_KEY: { required: false }
 
@@ -21,12 +23,16 @@ jobs:
   pr:
     runs-on: ubuntu-24.04  # pinned: ubuntu-latest is moving to Ubuntu 26
     continue-on-error: true
-    concurrency: { group: "versions-${{ inputs.component }}", cancel-in-progress: false }
+    # A rebuild has a group per tag: a pending job of a group is replaced by the next one, and each PR needs its own.
+    concurrency:
+      group: "versions-${{ inputs.component }}${{ inputs.rebuild && format('-rebuild-{0}', inputs.tag) || '' }}"
+      cancel-in-progress: false
     permissions: {}
     timeout-minutes: 10
     env:
       COMPONENT: ${{ inputs.component }}
       TAG: ${{ inputs.tag }}
+      REBUILD: ${{ inputs.rebuild }}
       HAS_APP: ${{ inputs.app_id != '' && secrets.VERSIONS_APP_PRIVATE_KEY != '' }}
     steps:
       - name: Without the App
@@ -48,6 +54,8 @@ jobs:
           repository: ${{ github.repository_owner }}/installer
           token: ${{ steps.app.outputs.token }}
           path: installer
+          # A rebuild needs the merge base of main and the branch. Strings: the number 0 is false in an expression.
+          fetch-depth: ${{ inputs.rebuild && '0' || '1' }}
       - name: PR of the version
         id: pr
         if: env.HAS_APP == 'true'
@@ -56,7 +64,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           APP_SLUG: ${{ steps.app.outputs.app-slug }}
-          CALLER: ${{ github.repository }}
+          REPOSITORY: ${{ inputs.repository || github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -83,8 +91,37 @@ jobs:
           }
           newer() { [[ $1 != "$2" && $(printf '%s\n%s\n' "${1#v}" "${2#v}" | sort -V | tail -1) == "${1#v}" ]]; }
           key=$(tr '[:lower:]-' '[:upper:]_' <<<"$COMPONENT")_VERSION
+          # A rebuild works on the tip of main, whatever ref or commit started its run.
+          if [[ $REBUILD == true ]]; then
+            git fetch -q origin main
+            git checkout -q -B main FETCH_HEAD
+          fi
           current=$(value "$key" config/versions.env)
           branch="versions/$COMPONENT-$TAG"
+          # A rebuild (versions-rebuild.yml) speaks for main, not for production: it touches only its own open PR, and
+          # a rollout of the component in its own repository, which no concurrency group shares with this one, wins.
+          if [[ $REBUILD == true ]]; then
+            own=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')
+            [[ -n $own ]] || { echo "no open PR of $branch: nothing to make anew"; exit 0; }
+            if ! newer "$TAG" "$current"; then
+              gh pr close "$own" --delete-branch --comment "The set on main already has $COMPONENT $current: $RUN_URL"
+              exit 0
+            fi
+            git fetch -q origin "$branch"
+            # The rollout that the PR stands for stays named in the commit made anew.
+            rollout=$(git log -1 --format=%b FETCH_HEAD | grep -m1 '^It runs on production' || true)
+            # merge-tree: 0 a clean merge, 1 a conflict, anything else an error of git.
+            rc=0
+            git merge-tree --write-tree HEAD FETCH_HEAD >/dev/null || rc=$?
+            case $rc in
+              0)
+                echo "$branch merges into main cleanly: left as it is"
+                echo "- $branch merges into main cleanly" >>"$GITHUB_STEP_SUMMARY"
+                exit 0 ;;
+              1) echo "$branch conflicts with main: made anew" ;;
+              *) echo "::error::git merge-tree failed with code $rc"; exit 1 ;;
+            esac
+          fi
           # close_others <keep> <comment> — open PRs of the component other than <keep>: they no longer run on production.
           close_others() {
             gh pr list --state open --limit 500 --json number,headRefName \
@@ -97,7 +134,7 @@ jobs:
             exit 0
           fi
           pinned=$RUNNER_TEMP/versions.env
-          curl -fsSL --retry 3 "https://raw.githubusercontent.com/$CALLER/$TAG/deploy/versions.env" -o "$pinned"
+          curl -fsSL --retry 3 "https://raw.githubusercontent.com/$REPOSITORY/$TAG/deploy/versions.env" -o "$pinned"
           sed -i -E "s/^$key=.*/$key=$TAG/" config/versions.env
           for c in "${companions[@]}"; do
             read -r from to mode <<<"$c"
@@ -112,9 +149,23 @@ jobs:
           fi
           # The branch is made anew from main every time: a PR merged next to it leaves no conflict.
           id=$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)
+          why=("It runs on production: $RUN_URL (FTR.INFRA.INST-0001 R25).")
+          if [[ $REBUILD == true ]]; then
+            why=(${rollout:+"$rollout"} "Made anew from main, which conflicted with it: $RUN_URL (FTR.INFRA.INST-0001 R25).")
+          fi
           git -c user.name="${APP_SLUG}[bot]" -c user.email="$id+${APP_SLUG}[bot]@users.noreply.github.com" \
-            commit -q -am "$COMPONENT $TAG in the set of versions" -m "It runs on production: $RUN_URL (FTR.INFRA.INST-0001 R25)."
+            commit -q -am "$COMPONENT $TAG in the set of versions" "${why[@]/#/-m}"
           git push -q -f origin "HEAD:refs/heads/$branch"
+          if [[ $REBUILD == true ]]; then
+            # A rollout may have closed the PR and deleted its branch meanwhile: no branch without its PR.
+            if [[ -z $(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty') ]]; then
+              git push -q origin --delete "$branch"
+              echo "the PR of $branch was closed meanwhile: its branch is deleted"
+              exit 0
+            fi
+            echo "- $branch made anew from main" >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           pr=$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')
           if [[ -z $pr ]]; then
             pr=$(gh pr create --head "$branch" --title "$COMPONENT $TAG in the set of versions" \

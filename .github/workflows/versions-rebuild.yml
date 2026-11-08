@@ -1,0 +1,53 @@
+# The PRs of versions follow main (FTR.INFRA.INST-0001 R25, tech §7, decision 43): two PRs of versions change
+# neighbouring lines of config/versions.env, so the one merged second conflicts. After every change of the set on main,
+# version-pr.yml in its rebuild mode takes each open PR of a version, by the component and the tag of its branch: one that
+# conflicts with main is made anew from it, one whose version the set already has, or a newer one, is closed. The App
+# pushes, so the checks of the PR run. The branches of versions belong to the App: a commit added by hand is lost.
+name: versions-rebuild
+on:
+  push:
+    branches: [main]
+    paths: [config/versions.env]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  list:
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest is moving to Ubuntu 26
+    permissions: { pull-requests: read }
+    timeout-minutes: 5
+    outputs:
+      prs: ${{ steps.list.outputs.prs }}
+    steps:
+      - name: Open PRs of versions
+        id: list
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Branches of this repository only; version-pr.yml refuses a component that is not in the set.
+          prs=$(gh pr list --state open --limit 500 --json headRefName,isCrossRepository --jq '[.[]
+            | select(.isCrossRepository | not) | .headRefName
+            | capture("^versions/(?<component>[a-z][a-z0-9-]*)-(?<tag>v[0-9]+\\.[0-9]+\\.[0-9]+)$")]' | jq -c .)
+          # One line: GITHUB_OUTPUT takes name=value per line.
+          echo "prs=$prs" >>"$GITHUB_OUTPUT"
+          echo "open PRs of versions: $prs"
+
+  rebuild:
+    needs: list
+    if: needs.list.outputs.prs != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.list.outputs.prs) }}
+    uses: ./.github/workflows/version-pr.yml
+    with:
+      component: ${{ matrix.component }}
+      tag: ${{ matrix.tag }}
+      app_id: ${{ vars.VERSIONS_APP_ID }}
+      repository: ${{ github.repository_owner }}/${{ matrix.component }}
+      rebuild: true
+    secrets:
+      VERSIONS_APP_PRIVATE_KEY: ${{ secrets.VERSIONS_APP_PRIVATE_KEY }}

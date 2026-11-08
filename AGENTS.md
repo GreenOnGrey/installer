@@ -54,7 +54,8 @@ values/                  Helm values of the stand's components
 dashboards/              Grafana dashboards; alert rules are in values/grafana.yaml (alerting)
 .github/workflows/       checks, deploy-prod (tags), e2e, el; version-pr: reusable, the PR of a version after a
                          rollout of a product to production (R25), called by deploy-component.yml of nabu and
-                         hammurapi by the SHA of a tag
+                         hammurapi by the SHA of a tag; versions-rebuild: the open PRs of versions made anew
+                         after the set changes on main
 tests/unit/*.bats        unit tests (Linux); tests/manifests.sh — rendered manifests; tests/kind — the external
                          target on kind (CI job kind); tests/el — Rocky under KVM (workflow el); tests/e2e
 ```
