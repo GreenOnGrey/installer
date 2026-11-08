@@ -221,3 +221,54 @@ branch_sha() { git -C "$W/installer" rev-parse "origin/$1"; }
   [ "$(awk '{print $2}' "$PRS")" = versions/nabu-core-v0.3.7 ]
 }
 
+
+# auto_merge <author> <sender> <auto> [error of --auto] — the step of versions-auto-merge.yml for PR 31 of the App gog-versions.
+auto_merge() {
+  yq -r '.jobs.auto-merge.steps[] | select(.id == "merge") | .run' "$ROOT/.github/workflows/versions-auto-merge.yml" >"$W/merge.sh"
+  export FAILS=${4:-}
+  rm -f "$PRS.merge"
+  stub gh '
+[[ "$1 $2" == "pr merge" ]] || exit 0
+echo "${*:3}" >>"$PRS.merge"
+[[ -n $FAILS && " $* " == *" --auto "* ]] && { echo "$FAILS" >&2; exit 1; }
+exit 0'
+  GH_REPO=o/installer APP_SLUG=gog-versions PR=31 HEAD_SHA=abc AUTHOR=$1 SENDER=$2 AUTO=$3 ACTION=${ACTION:-synchronize} \
+    run bash "$W/merge.sh"
+}
+
+@test "UPD-12 (U), decision 44: the App turns on auto-merge of its own PR of a version, once" {
+  auto_merge 'gog-versions[bot]' 'gog-versions[bot]' false
+  [ "$status" -eq 0 ]
+  [ "$(cat "$PRS.merge")" = '31 --auto --squash' ]
+  auto_merge 'gog-versions[bot]' 'gog-versions[bot]' true
+  [ "$status" -eq 0 ] && [[ $output == *"merges itself already"* ]]
+  [ ! -e "$PRS.merge" ]
+  # A PR of another bot, or of a person, on a branch versions/*: nothing.
+  auto_merge 'renovate[bot]' 'renovate[bot]' false
+  [ "$status" -eq 0 ] && [ ! -e "$PRS.merge" ]
+}
+
+@test "UPD-12 (U), decision 44: a commit pushed by anybody else turns auto-merge off" {
+  auto_merge 'gog-versions[bot]' alice true
+  [ "$status" -eq 0 ]
+  [ "$(cat "$PRS.merge")" = '31 --disable-auto' ]
+  [[ $output == *"::warning::alice pushed to #31"* ]]
+  # Reopened by a person: nothing was pushed, the PR merges itself.
+  ACTION=reopened auto_merge 'gog-versions[bot]' alice false
+  [ "$(cat "$PRS.merge")" = '31 --auto --squash' ]
+}
+
+@test "UPD-12 (U), decision 44: checks passed already: merged at once; another refusal: a warning with the reason" {
+  auto_merge 'gog-versions[bot]' 'gog-versions[bot]' false "GraphQL: Pull request is in clean status (enablePullRequestAutoMerge)"
+  [ "$status" -eq 0 ] && [[ $output == *"merged: its checks had passed"* ]]
+  [ "$(sed -n 2p "$PRS.merge")" = '31 --squash --match-head-commit abc' ]
+  auto_merge 'gog-versions[bot]' 'gog-versions[bot]' false "GraphQL: Auto merge is not allowed for this repository"
+  [ "$status" -eq 0 ]
+  [[ $output == *"::warning::no auto-merge for #31: GraphQL: Auto merge is not allowed for this repository"* ]]
+  [ "$(wc -l <"$PRS.merge")" -eq 1 ]
+}
+
+@test "UPD-12 (U): the job runs for branches versions/* of this repository only" {
+  [ "$(yq -r '.jobs.auto-merge.if' "$ROOT/.github/workflows/versions-auto-merge.yml")" = \
+    "startsWith(github.head_ref, 'versions/') && github.event.pull_request.head.repo.full_name == github.repository" ]
+}

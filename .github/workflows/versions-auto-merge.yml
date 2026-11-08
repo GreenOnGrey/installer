@@ -1,0 +1,79 @@
+# A PR of a version merges itself (FTR.INFRA.INST-0001 R25, decision 44): the version already runs on production and
+# passed its checks there, the set only records it. When the App opens or pushes a branch versions/<component>-<tag>
+# of this repository, auto-merge is turned on with the token of the App, so the merge, done in its name, starts the
+# workflows of main (versions-rebuild). GitHub squashes the PR once the required checks of main pass; the protection of
+# main must not require branches to be up to date, since versions-rebuild leaves a branch without a conflict as it is.
+# A commit pushed to the branch by anybody else turns auto-merge off: a person reviews it. A tag of the installer stays a
+# decision of a person.
+name: versions-auto-merge
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  auto-merge:
+    if: startsWith(github.head_ref, 'versions/') && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest is moving to Ubuntu 26
+    continue-on-error: true
+    timeout-minutes: 5
+    steps:
+      - name: Without the App
+        if: vars.VERSIONS_APP_ID == ''
+        run: |
+          echo "::warning::VERSIONS_APP_ID is not set for installer: merge the PR of the version by hand"
+      - name: Token of the App
+        id: app
+        if: vars.VERSIONS_APP_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.VERSIONS_APP_ID }}
+          private-key: ${{ secrets.VERSIONS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: installer
+      - name: Auto-merge
+        id: merge
+        if: vars.VERSIONS_APP_ID != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          SENDER: ${{ github.event.sender.login }}
+          ACTION: ${{ github.event.action }}
+          AUTO: ${{ github.event.pull_request.auto_merge != null }}
+        run: |
+          set -euo pipefail
+          bot="${APP_SLUG}[bot]"
+          if [[ $AUTHOR != "$bot" ]]; then
+            echo "#$PR was opened by $AUTHOR, not by $bot: nothing to do"
+            exit 0
+          fi
+          # A push of anybody else; a person who reopens the PR pushes nothing.
+          if [[ $ACTION == synchronize && $SENDER != "$bot" ]]; then
+            [[ $AUTO != true ]] || gh pr merge "$PR" --disable-auto
+            echo "::warning::$SENDER pushed to #$PR: it no longer merges itself; review it and merge it by hand"
+            exit 0
+          fi
+          if [[ $AUTO == true ]]; then
+            echo "#$PR merges itself already"
+            exit 0
+          fi
+          if err=$(gh pr merge "$PR" --auto --squash 2>&1); then
+            echo "#$PR merges itself once the required checks pass"
+            exit 0
+          fi
+          # The required checks have passed already: GitHub refuses --auto and merges at once without it.
+          if [[ $err == *"clean status"* ]] && err=$(gh pr merge "$PR" --squash --match-head-commit "$HEAD_SHA" 2>&1); then
+            echo "#$PR merged: its checks had passed"
+            exit 0
+          fi
+          echo "::warning::no auto-merge for #$PR: $err"
+      - name: The reason of a failure
+        if: failure()
+        run: |
+          echo "::warning::the PR of a version does not merge itself: the token of the App or gh failed, see the steps above"
