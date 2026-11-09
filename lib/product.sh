@@ -268,12 +268,13 @@ hammurapi_payload() {
     jq -cn --arg image "$repo/hammurapi-core" --arg provider "$AUTH_PROVIDER" --arg repo_name "$HAMMURAPI_SPEC_REPO" \
     --arg app "$HAMMURAPI_GITHUB_APP_ID" --arg client "$HAMMURAPI_GITHUB_CLIENT_ID" --arg admins "$BOOTSTRAP_ADMINS" \
     --arg org "${GITHUB_ALLOWED_ORG:-}" --arg issuer "${OIDC_ISSUER:-}" --arg oidc_id "${OIDC_CLIENT_ID:-}" \
-    --arg oidc_name "${OIDC_PROVIDER_NAME:-}" --arg nabu_url "$nabu_url" --arg nabu_id "$nabu_id" --arg nabu_web "$nabu_web" '
+    --arg oidc_name "${OIDC_PROVIDER_NAME:-}" --arg nabu_url "$nabu_url" --arg nabu_id "$nabu_id" --arg nabu_web "$nabu_web" \
+    --arg spec_lang "${SPEC_LANGUAGE:-}" '
     def nonempty: with_entries(select(.value != null and .value != ""));
     {image: $image,
      config: ({GIT_PROVIDER: "github", GIT_REPO: $repo_name, GITHUB_APP_ID: $app, GITHUB_CLIENT_ID: $client,
        BOOTSTRAP_ADMINS: $admins, AUTH_PROVIDER: $provider, NABU_URL: $nabu_url, NABU_CLIENT_ID: $nabu_id,
-       NABU_WEB_URL: $nabu_web}
+       NABU_WEB_URL: $nabu_web, SPEC_LANGUAGE: $spec_lang}
        + (if $provider == "github" then {GITHUB_ALLOWED_ORG: $org}
           else {OIDC_ISSUER: $issuer, OIDC_CLIENT_ID: $oidc_id, OIDC_PROVIDER_NAME: $oidc_name} end) | nonempty),
      secrets: ({GITHUB_APP_PRIVATE_KEY: $ENV.P_APP_KEY, GITHUB_CLIENT_SECRET: $ENV.P_CLIENT_SECRET,

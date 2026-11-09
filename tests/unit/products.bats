@@ -310,6 +310,14 @@ hammurapi_github() {
     and (.config | has("NABU_WEB_URL") | not) and .secrets.NABU_CLIENT_SECRET == "given-secret"'
 }
 
+@test "FTR.HMR.DEV-0003 R23: SPEC_LANGUAGE reaches Hammurapi when it is set" {
+  hammurapi_github
+  PRODUCTS=hammurapi NABU_MODE=external NABU_URL=https://nabu-api.other.example NABU_CLIENT_ID=ham
+  export NABU_CLIENT_SECRET=given-secret
+  SPEC_LANGUAGE=ru hammurapi_payload hammurapi-core | jq -e '.config.SPEC_LANGUAGE == "ru"'
+  SPEC_LANGUAGE= hammurapi_payload hammurapi-core | jq -e '.config | has("SPEC_LANGUAGE") | not'
+}
+
 @test "R11: Nabu, then Hammurapi, each core before its web" {
   hammurapi_github
   hm() { return 1; }

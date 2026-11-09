@@ -197,6 +197,12 @@ wizard_products() {
     wizard_set PUBLIC_EXTRA_HOSTS "$nabu_hosts${extra[*]:+ ${extra[*]}}"
   fi
   wizard_set PUBLIC_ACCESS true
+  if [[ $PRODUCTS == *hammurapi* ]]; then
+    # FTR.HMR.DEV-0003 R23: the language of the documents, apart from the language of the interface
+    [[ ${SPEC_LANGUAGE:-} == ru || ${SPEC_LANGUAGE:-} == en ]] || SPEC_LANGUAGE=$([[ ${DEFAULT_LANGUAGE:-en} == ru ]] && echo ru || echo en)
+    ask_choice SPEC_LANGUAGE "The language of the specifications (the headings Hammurapi reads and writes in them):" \
+      "ru=Russian" "en=English"
+  fi
 }
 
 wizard_domain() {

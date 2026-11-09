@@ -136,6 +136,7 @@ Built-in or external, each on its own ([resources.md](resources.md)).
 | `OIDC_PROVIDER_NAME` | empty | The name on the sign-in button |
 | `DEFAULT_LANGUAGE` | `en` | Language of new users |
 | `DEFAULT_TIMEZONE` | `UTC` | Time zone of new users |
+| `SPEC_LANGUAGE` | empty | Hammurapi: the language of the specifications, `ru` or `en`; empty — `DEFAULT_LANGUAGE` when it is `ru` or `en`, otherwise `en` |
 | `BOOTSTRAP_LLM_API_KEY` | secret, optional | The model key of the first connection of Nabu |
 | `HAMMURAPI_GITHUB_APP_ID`, `HAMMURAPI_GITHUB_CLIENT_ID` | empty | The GitHub App of Hammurapi |
 | `HAMMURAPI_GITHUB_APP_PRIVATE_KEY` | secret | Its private key; usually `HAMMURAPI_GITHUB_APP_PRIVATE_KEY_FILE` with the `.pem` |
