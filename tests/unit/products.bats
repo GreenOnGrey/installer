@@ -315,7 +315,7 @@ hammurapi_github() {
   PRODUCTS=hammurapi NABU_MODE=external NABU_URL=https://nabu-api.other.example NABU_CLIENT_ID=ham
   export NABU_CLIENT_SECRET=given-secret
   SPEC_LANGUAGE=ru hammurapi_payload hammurapi-core | jq -e '.config.SPEC_LANGUAGE == "ru"'
-  SPEC_LANGUAGE= hammurapi_payload hammurapi-core | jq -e '.config | has("SPEC_LANGUAGE") | not'
+  SPEC_LANGUAGE='' hammurapi_payload hammurapi-core | jq -e '.config | has("SPEC_LANGUAGE") | not'
 }
 
 @test "R11: Nabu, then Hammurapi, each core before its web" {
