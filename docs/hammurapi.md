@@ -89,7 +89,7 @@ The SSH tunnel to Grafana from `FTR.HMR.INFRA-0001` stays as a fallback.
    - Callback URL: `https://hammurapi-api.<base domain>/api/v1/auth/callback`;
    - Expire user authorization tokens: on;
    - Webhook: on, with any address, since the core rollout writes `https://hammurapi-api.<domain>/hooks/v1/git` and the secret itself;
-   - Repository permissions: Contents — Read and write, Pull requests — Read and write, Issues — Read and write, Metadata — Read, Actions — Read and write;
+   - Repository permissions: Contents — Read and write, Pull requests — Read and write, Issues — Read and write, Metadata — Read, Actions — Read and write, Workflows — Read and write (the check of speclint in CI, FTR.HMR.SPEC-0002);
    - Subscribe to events: Push, Pull request, Pull request review, Pull request review comment, Issue comment.
 3. Generate a private key and a client secret. Install the app on `hammurapi-spec` and on the service repositories.
 
