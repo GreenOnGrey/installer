@@ -192,7 +192,7 @@ EOF
 
 @test "R11: Hammurapi with an external Nabu: its client, the GitHub App and the key file" {
   printf -- '-----BEGIN KEY-----\nabc\n-----END KEY-----\n' >"$BATS_TEST_TMPDIR/app.pem"
-  answers 1 3 https://nabu.corp.example nabu-client nabu-secret 1 stand.example.com ops@example.com \
+  answers 1 3 https://nabu.corp.example nabu-client nabu-secret 1 1 stand.example.com ops@example.com \
     1 "" alice 42 app-client app-secret "$BATS_TEST_TMPDIR/app.pem" acme/specs 1 1 1 "" "" "" "" "" yes
   wizard
   [ "$status" -eq 0 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
@@ -200,6 +200,7 @@ EOF
   grep -qx 'PRODUCTS=hammurapi' "$FILE"
   grep -qx 'PUBLIC_EXTRA_HOSTS=' "$FILE"
   grep -qx 'HAMMURAPI_SPEC_REPO=acme/specs' "$FILE"
+  grep -qx 'SPEC_LANGUAGE=ru' "$FILE" # FTR.HMR.DEV-0003 R23: the first choice
   not_grep -q "$BATS_TEST_TMPDIR/app.pem" "$FILE"
   not_grep -q 'BEGIN KEY' "$FILE"
   grep -q 'HAMMURAPI_GITHUB_APP_PRIVATE_KEY=-----BEGIN KEY-----' "$BATS_TEST_TMPDIR/install-env"
