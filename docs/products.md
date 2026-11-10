@@ -35,7 +35,7 @@ Hammurapi works on a repository of specifications through its GitHub App. Create
 
 - callback URL: `https://hammurapi-api.<domain>/api/v1/auth/callback`;
 - webhook: off, because the repository webhook below is used;
-- repository permissions: **Contents**, **Pull requests**, **Issues** and **Actions**: read and write; **Metadata**: read;
+- repository permissions: **Contents**, **Pull requests**, **Issues**, **Actions** and **Workflows**: read and write; **Metadata**: read (**Workflows** lets Hammurapi propose the check of speclint in `.github/workflows/`, FTR.HMR.SPEC-0002);
 - install it on the repository of specifications and on the repositories of services.
 
 Set:
