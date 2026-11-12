@@ -367,3 +367,69 @@ hammurapi_github() {
   [[ $output == *NABU_MODE=external* ]]
   not_called "deploy hammurapi"
 }
+
+# --- Hammurapi on GitLab ---
+
+# hammurapi_gitlab — Nabu and Hammurapi on a self-hosted GitLab, people sign in with OIDC.
+hammurapi_gitlab() {
+  PUBLIC_ACCESS=true AUTH_PROVIDER=oidc BOOTSTRAP_ADMINS=admin@example.com OIDC_ISSUER=https://sso.example/realms/x
+  OIDC_CLIENT_ID=gog
+  export OIDC_CLIENT_SECRET=oidc-secret-XYZ
+  PRODUCTS=nabu,hammurapi HAMMURAPI_GIT_PROVIDER=gitlab HAMMURAPI_GITLAB_URL=https://gitlab.corp.example/
+  HAMMURAPI_GITLAB_CLIENT_ID=gl-app HAMMURAPI_SPEC_REPO=platform/product/specs
+  export HAMMURAPI_GITLAB_CLIENT_SECRET=gl-secret-XYZ HAMMURAPI_GITLAB_BOT_TOKEN=glpat-bot-XYZ
+  PUBLIC_DOMAIN=x.example
+}
+
+@test "Hammurapi on GitLab: its application, the bot token and a project of a subgroup; no GitHub App" {
+  hammurapi_gitlab
+  validate_products
+  [ "${#CONFIG_MISSING[@]}" -eq 0 ] || { echo "${CONFIG_MISSING[*]}"; false; }
+  unset HAMMURAPI_GITLAB_CLIENT_SECRET HAMMURAPI_GITLAB_BOT_TOKEN
+  HAMMURAPI_GITLAB_CLIENT_ID=
+  validate_products
+  local m=${CONFIG_MISSING[*]}
+  [[ $m == *HAMMURAPI_GITLAB_CLIENT_ID* && $m == *HAMMURAPI_GITLAB_CLIENT_SECRET* && $m == *HAMMURAPI_GITLAB_BOT_TOKEN* ]]
+  [[ $m != *HAMMURAPI_GITHUB* ]]
+}
+
+@test "Hammurapi on GitLab: GitHub sign-in, a wrong project, address or provider: code 2" {
+  hammurapi_gitlab
+  AUTH_PROVIDER=github NABU_GITHUB_CLIENT_ID=x NABU_GITHUB_CLIENT_SECRET=y
+  run validate_products
+  [ "$status" -eq 2 ]
+  [[ $output == *AUTH_PROVIDER=oidc* ]]
+  hammurapi_gitlab
+  HAMMURAPI_SPEC_REPO=specs
+  run validate_products
+  [ "$status" -eq 2 ]
+  hammurapi_gitlab
+  HAMMURAPI_GITLAB_URL=gitlab.corp.example
+  run validate_products
+  [ "$status" -eq 2 ]
+  hammurapi_gitlab
+  HAMMURAPI_GIT_PROVIDER=bitbucket
+  run validate_products
+  [ "$status" -eq 2 ]
+}
+
+@test "Hammurapi on GitLab: the payload has GIT_PROVIDER=gitlab, the address, the application and the bot" {
+  hammurapi_gitlab
+  secret_key() { return 1; }
+  ensure_nabu_client
+  hammurapi_payload hammurapi-core | jq -e '.config.GIT_PROVIDER == "gitlab"
+    and .config.GIT_BASE_URL == "https://gitlab.corp.example" and .config.GITLAB_CLIENT_ID == "gl-app"
+    and .config.GIT_REPO == "platform/product/specs" and .config.AUTH_PROVIDER == "oidc"
+    and .secrets.GITLAB_CLIENT_SECRET == "gl-secret-XYZ" and .secrets.GITLAB_BOT_TOKEN == "glpat-bot-XYZ"
+    and (.config | has("GITHUB_APP_ID") | not) and (.secrets | has("GITHUB_APP_PRIVATE_KEY") | not)
+    and (.secrets.WEBHOOK_SECRET | test("^[0-9a-f]{64}$"))'
+}
+
+@test "Hammurapi on GitHub stays the default: the payload has GIT_PROVIDER=github" {
+  hammurapi_github
+  unset HAMMURAPI_GIT_PROVIDER
+  secret_key() { return 1; }
+  ensure_nabu_client
+  hammurapi_payload hammurapi-core | jq -e '.config.GIT_PROVIDER == "github" and (.config | has("GIT_BASE_URL") | not)
+    and (.secrets | has("GITLAB_BOT_TOKEN") | not)'
+}

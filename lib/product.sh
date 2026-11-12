@@ -23,6 +23,9 @@ product_list() { tr ', ' '\n\n' <<<"${PRODUCTS:-}" | sed '/^$/d'; }
 
 has_product() { product_list | grep -qx "$1"; }
 
+# hammurapi_git — where the repositories of Hammurapi live: github (the default) or gitlab.
+hammurapi_git() { echo "${HAMMURAPI_GIT_PROVIDER:-github}"; }
+
 nabu_external() { [[ ${NABU_MODE:-internal} == external ]]; }
 
 read_product_inputs() {
@@ -118,14 +121,33 @@ validate_products() {
     *) die "$E_USAGE" "AUTH_PROVIDER must be github or oidc, not '$AUTH_PROVIDER'" ;;
   esac
   has_product hammurapi || return 0
-  require_param "$what" HAMMURAPI_GITHUB_APP_ID
-  require_param "$what" HAMMURAPI_GITHUB_CLIENT_ID
   require_param "$what" HAMMURAPI_SPEC_REPO
-  require_product_secret "$what" HAMMURAPI_GITHUB_APP_PRIVATE_KEY
-  require_product_secret "$what" HAMMURAPI_GITHUB_CLIENT_SECRET
-  if [[ -n ${HAMMURAPI_SPEC_REPO:-} && ! $HAMMURAPI_SPEC_REPO =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
-    die "$E_USAGE" "HAMMURAPI_SPEC_REPO: owner/name of a GitHub repository, not '$HAMMURAPI_SPEC_REPO'"
-  fi
+  case $(hammurapi_git) in
+    github)
+      require_param "$what" HAMMURAPI_GITHUB_APP_ID
+      require_param "$what" HAMMURAPI_GITHUB_CLIENT_ID
+      require_product_secret "$what" HAMMURAPI_GITHUB_APP_PRIVATE_KEY
+      require_product_secret "$what" HAMMURAPI_GITHUB_CLIENT_SECRET
+      if [[ -n ${HAMMURAPI_SPEC_REPO:-} && ! $HAMMURAPI_SPEC_REPO =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+        die "$E_USAGE" "HAMMURAPI_SPEC_REPO: owner/name of a GitHub repository, not '$HAMMURAPI_SPEC_REPO'"
+      fi
+      ;;
+    gitlab)
+      # GitHub sign-in next to GitLab would need one more OAuth App of GitHub for Hammurapi.
+      [[ ${AUTH_PROVIDER:-oidc} == oidc ]] ||
+        die "$E_USAGE" "HAMMURAPI_GIT_PROVIDER=gitlab: people sign in with AUTH_PROVIDER=oidc, not '$AUTH_PROVIDER'"
+      require_param "$what" HAMMURAPI_GITLAB_CLIENT_ID
+      require_product_secret "$what" HAMMURAPI_GITLAB_CLIENT_SECRET
+      require_product_secret "$what" HAMMURAPI_GITLAB_BOT_TOKEN
+      if [[ -n ${HAMMURAPI_SPEC_REPO:-} && ! $HAMMURAPI_SPEC_REPO =~ ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$ ]]; then
+        die "$E_USAGE" "HAMMURAPI_SPEC_REPO: group/project of a GitLab project, not '$HAMMURAPI_SPEC_REPO'"
+      fi
+      if [[ -n ${HAMMURAPI_GITLAB_URL:-} && ! $HAMMURAPI_GITLAB_URL =~ ^https?://[^/[:space:]]+(/[^[:space:]]*)?$ ]]; then
+        die "$E_USAGE" "HAMMURAPI_GITLAB_URL: the http(s):// address of GitLab, not '$HAMMURAPI_GITLAB_URL'"
+      fi
+      ;;
+    *) die "$E_USAGE" "HAMMURAPI_GIT_PROVIDER must be github or gitlab, not '$HAMMURAPI_GIT_PROVIDER'" ;;
+  esac
   if nabu_external; then
     require_param "NABU_MODE=external" NABU_URL
     require_param "NABU_MODE=external" NABU_CLIENT_ID
@@ -262,23 +284,37 @@ hammurapi_payload() {
     nabu_web="https://${NABU_WEB_HOST:-nabu}.$PUBLIC_DOMAIN"
   fi
   if [[ $AUTH_PROVIDER == oidc ]]; then oidc_secret=$(product_secret OIDC_CLIENT_SECRET); fi
-  P_APP_KEY=$(product_secret HAMMURAPI_GITHUB_APP_PRIVATE_KEY) P_CLIENT_SECRET=$(product_secret HAMMURAPI_GITHUB_CLIENT_SECRET) \
+  local git app_key="" client_secret="" bot_token=""
+  git=$(hammurapi_git)
+  if [[ $git == gitlab ]]; then
+    client_secret=$(product_secret HAMMURAPI_GITLAB_CLIENT_SECRET)
+    bot_token=$(product_secret HAMMURAPI_GITLAB_BOT_TOKEN)
+  else
+    app_key=$(product_secret HAMMURAPI_GITHUB_APP_PRIVATE_KEY)
+    client_secret=$(product_secret HAMMURAPI_GITHUB_CLIENT_SECRET)
+  fi
+  P_APP_KEY=$app_key P_CLIENT_SECRET=$client_secret P_BOT_TOKEN=$bot_token \
     P_WEBHOOK=$(kept_key "$ns" hammurapi-secrets WEBHOOK_SECRET) P_TOKEN_KEY=$(kept_key "$ns" hammurapi-secrets TOKEN_ENCRYPTION_KEY) \
     P_OIDC_SECRET=$oidc_secret P_NABU_SECRET=$(hammurapi_nabu_secret) \
     jq -cn --arg image "$repo/hammurapi-core" --arg provider "$AUTH_PROVIDER" --arg repo_name "$HAMMURAPI_SPEC_REPO" \
-    --arg app "$HAMMURAPI_GITHUB_APP_ID" --arg client "$HAMMURAPI_GITHUB_CLIENT_ID" --arg admins "$BOOTSTRAP_ADMINS" \
+    --arg git "$git" --arg app "${HAMMURAPI_GITHUB_APP_ID:-}" --arg client "${HAMMURAPI_GITHUB_CLIENT_ID:-}" \
+    --arg gl_url "${HAMMURAPI_GITLAB_URL:-}" --arg gl_client "${HAMMURAPI_GITLAB_CLIENT_ID:-}" --arg admins "$BOOTSTRAP_ADMINS" \
     --arg org "${GITHUB_ALLOWED_ORG:-}" --arg issuer "${OIDC_ISSUER:-}" --arg oidc_id "${OIDC_CLIENT_ID:-}" \
     --arg oidc_name "${OIDC_PROVIDER_NAME:-}" --arg nabu_url "$nabu_url" --arg nabu_id "$nabu_id" --arg nabu_web "$nabu_web" \
     --arg spec_lang "${SPEC_LANGUAGE:-}" '
     def nonempty: with_entries(select(.value != null and .value != ""));
     {image: $image,
-     config: ({GIT_PROVIDER: "github", GIT_REPO: $repo_name, GITHUB_APP_ID: $app, GITHUB_CLIENT_ID: $client,
+     config: ({GIT_PROVIDER: $git, GIT_REPO: $repo_name,
        BOOTSTRAP_ADMINS: $admins, AUTH_PROVIDER: $provider, NABU_URL: $nabu_url, NABU_CLIENT_ID: $nabu_id,
        NABU_WEB_URL: $nabu_web, SPEC_LANGUAGE: $spec_lang}
+       + (if $git == "gitlab" then {GIT_BASE_URL: ($gl_url | rtrimstr("/")), GITLAB_CLIENT_ID: $gl_client}
+          else {GITHUB_APP_ID: $app, GITHUB_CLIENT_ID: $client} end)
        + (if $provider == "github" then {GITHUB_ALLOWED_ORG: $org}
           else {OIDC_ISSUER: $issuer, OIDC_CLIENT_ID: $oidc_id, OIDC_PROVIDER_NAME: $oidc_name} end) | nonempty),
-     secrets: ({GITHUB_APP_PRIVATE_KEY: $ENV.P_APP_KEY, GITHUB_CLIENT_SECRET: $ENV.P_CLIENT_SECRET,
-       WEBHOOK_SECRET: $ENV.P_WEBHOOK, TOKEN_ENCRYPTION_KEY: $ENV.P_TOKEN_KEY, OIDC_CLIENT_SECRET: $ENV.P_OIDC_SECRET,
+     secrets: ((if $git == "gitlab"
+         then {GITLAB_CLIENT_SECRET: $ENV.P_CLIENT_SECRET, GITLAB_BOT_TOKEN: $ENV.P_BOT_TOKEN}
+         else {GITHUB_APP_PRIVATE_KEY: $ENV.P_APP_KEY, GITHUB_CLIENT_SECRET: $ENV.P_CLIENT_SECRET} end)
+       + {WEBHOOK_SECRET: $ENV.P_WEBHOOK, TOKEN_ENCRYPTION_KEY: $ENV.P_TOKEN_KEY, OIDC_CLIENT_SECRET: $ENV.P_OIDC_SECRET,
        NABU_CLIENT_SECRET: $ENV.P_NABU_SECRET} | nonempty)}'
 }
 

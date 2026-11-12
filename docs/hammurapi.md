@@ -149,7 +149,7 @@ The site's own domain is set not on the stand but in the repository `landing` (t
 
 In Hammurapi (Administration → Deploy → production), for rolling out itself: type `github-actions`, workflow `release.yml`, `ref` is `{ref}`, parameters `service={service}`, `ref={ref}`, `environment={environment}`, `run_id={run_id}`, `callback_url={callback_url}`.
 
-**First install** is the same core rollout. If there is no release, `hammurapi-deploy` creates the namespace `hammurapi`, the configuration secrets and `ghcr-pull`, copies `*-conn` from `storages`, installs the chart (migrations run as a hook before `api` and `worker`) and configures the GitHub App: the webhook address and secret and a check of access to `hammurapi-spec`. Web does not roll out before core and answers "roll out hammurapi-core first".
+**First install** is the same core rollout. If there is no release, `hammurapi-deploy` creates the namespace `hammurapi`, the configuration secrets and `ghcr-pull`, copies `*-conn` from `storages`, installs the chart (migrations run as a hook before `api` and `worker`) and configures the git provider: for the GitHub App, the webhook address and secret and a check of access to `hammurapi-spec`; on GitLab (`config.GIT_PROVIDER=gitlab`), a check of the token and of the Maintainer role of the bot and the webhook of the project of specifications ([products.md](products.md#hammurapi-on-gitlab)). It runs again when the address, the provider or the repository changes. Web does not roll out before core and answers "roll out hammurapi-core first".
 
 **Agent (FTR.HMR.CMN-0007).** The core chart has no agent or runner: code tasks run in Nabu sandboxes, and the worker's MCP (`worker-mcp:8083`) is open only to the Nabu namespace.
 
@@ -166,7 +166,7 @@ In Hammurapi (Administration → Deploy → production), for rolling out itself:
 | 23 | secrets and configuration |
 | 24 | the token encryption key changed (run with `allow_key_rotation` to do it on purpose) |
 | 25 | the Helm release was not deployed, the previous revision is restored |
-| 26 | GitHub App: no access to `hammurapi-spec` (with an installation link), missing permissions, or not subscribed to events |
+| 26 | GitHub App: no access to `hammurapi-spec` (with an installation link), missing permissions, or not subscribed to events; GitLab: the token of the bot is refused, the bot is not a Maintainer of the project, or the webhook cannot be written |
 | 27 | pods are not ready |
 
 ## 5. Implementation decisions (recorded in FTR.HMR.INFRA-0002 v1.1)

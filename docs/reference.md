@@ -138,10 +138,15 @@ Built-in or external, each on its own ([resources.md](resources.md)).
 | `DEFAULT_TIMEZONE` | `UTC` | Time zone of new users |
 | `SPEC_LANGUAGE` | empty | Hammurapi: the language of the specifications, `ru` or `en`; empty — `DEFAULT_LANGUAGE` when it is `ru` or `en`, otherwise `en` |
 | `BOOTSTRAP_LLM_API_KEY` | secret, optional | The model key of the first connection of Nabu |
+| `HAMMURAPI_GIT_PROVIDER` | `github` | Where the repositories of Hammurapi live: `github` or `gitlab` |
 | `HAMMURAPI_GITHUB_APP_ID`, `HAMMURAPI_GITHUB_CLIENT_ID` | empty | The GitHub App of Hammurapi |
 | `HAMMURAPI_GITHUB_APP_PRIVATE_KEY` | secret | Its private key; usually `HAMMURAPI_GITHUB_APP_PRIVATE_KEY_FILE` with the `.pem` |
 | `HAMMURAPI_GITHUB_CLIENT_SECRET` | secret | Its client secret |
-| `HAMMURAPI_SPEC_REPO` | empty | The repository of specifications, `owner/name` |
+| `HAMMURAPI_GITLAB_URL` | empty | `gitlab`: the address of GitLab; empty — `https://gitlab.com` |
+| `HAMMURAPI_GITLAB_CLIENT_ID` | empty | `gitlab`: the OAuth application of Hammurapi in GitLab |
+| `HAMMURAPI_GITLAB_CLIENT_SECRET` | secret | Its secret |
+| `HAMMURAPI_GITLAB_BOT_TOKEN` | secret | `gitlab`: the token of the bot, scope `api`, a Maintainer of the project of specifications |
+| `HAMMURAPI_SPEC_REPO` | empty | The repository of specifications: `owner/name` on GitHub, `group/project` (subgroups too) on GitLab |
 | `NABU_WHISPER` | `true` | Speech recognition of Nabu |
 | `NABU_WHISPER_MODEL` | `small` | `tiny`, `base`, `small`, `medium`, `large-v3` or `large-v3-turbo` |
 | `NABU_SANDBOX_CUSTOM_IMAGES` | `false` | Administrators may create sandbox profiles from custom images |

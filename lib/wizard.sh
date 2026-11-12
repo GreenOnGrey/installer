@@ -16,20 +16,59 @@ readonly SSLIP_WARNING="Without a domain the stand uses <IP>.sslip.io. Let's Enc
 # wizard_running — install runs from the wizard in a terminal, so it may ask (R18).
 wizard_running() { [[ ${INSTALLER_WIZARD:-0} == 1 ]] && interactive; }
 
+# Colors of the wizard in a terminal: what the installer says, the headings of the steps, what to do outside
+# (in GitHub, GitLab, the identity provider), a refused answer, and what the user types. Empty without colors.
+W_SAY="" W_HEAD="" W_TODO="" W_WARN="" W_IN="" W_OFF=""
+
+# wizard_colors — on when the colors of the run are on and the wizard talks to a terminal.
+wizard_colors() {
+  [[ $COLOR == 1 && -t 2 ]] || return 0
+  W_SAY=$'\e[36m' W_HEAD=$'\e[1;34m' W_TODO=$'\e[33m' W_WARN=$'\e[31m' W_IN=$'\e[1;32m' W_OFF=$'\e[0m'
+}
+
 # say <text…> — the wizard talks on stderr: stdout of install ends with its JSON.
-say() { printf '%s\n' "$@" >&2; }
+say() {
+  local line
+  for line in "$@"; do printf '%s%s%s\n' "$W_SAY" "$line" "$W_OFF" >&2; done
+}
+
+# say_warn <text> — an answer is refused: why.
+say_warn() { printf '%s%s%s\n' "$W_WARN" "$1" "$W_OFF" >&2; }
+
+# prompt <text> — the question, then the color of what the user types.
+prompt() { printf '%s%s%s%s' "$W_SAY" "$1" "$W_OFF" "$W_IN" >&2; }
 
 # wizard_read <var> — one line of the answer; no answer (end of input) cancels.
 wizard_read() {
-  IFS= read -r "$1" || die "$E_CANCELLED" "cancelled: no answer, nothing was written or changed"
+  local rc=0
+  IFS= read -r "$1" || rc=$?
+  printf '%s' "$W_OFF" >&2
+  ((rc == 0)) || die "$E_CANCELLED" "cancelled: no answer, nothing was written or changed"
 }
 
 # wizard_confirm <question> — yes or not.
 wizard_confirm() {
-  local answer
-  printf '%s Type yes: ' "$1" >&2
-  IFS= read -r answer || return 1
-  [[ $answer == yes ]]
+  local answer rc=0
+  prompt "$1 Type yes: "
+  IFS= read -r answer || rc=$?
+  printf '%s' "$W_OFF" >&2
+  ((rc == 0)) && [[ $answer == yes ]]
+}
+
+# wizard_todo <where> <item…> — what to do outside the installer before the next answers, numbered.
+# An item starting with "-" continues the item before it.
+wizard_todo() {
+  local where=$1 item n=0
+  shift
+  printf '\n%s%s%s\n' "$W_TODO" "Do in $where, then answer below:" "$W_OFF" >&2
+  for item in "$@"; do
+    if [[ $item == -* ]]; then
+      printf '%s     %s%s\n' "$W_TODO" "${item#-}" "$W_OFF" >&2
+    else
+      n=$((n + 1))
+      printf '%s  %d. %s%s\n' "$W_TODO" "$n" "$item" "$W_OFF" >&2
+    fi
+  done
 }
 
 # wizard_set <key> <value> — an answer: the variable of this run and a line of the file.
@@ -45,14 +84,14 @@ ask() {
   local key=$1 question=$2 re=${3:-} hint=${4:-} value=${!1:-} answer
   [[ -n $value ]] || value=${5:-}
   while true; do
-    printf '%s%s: ' "$question" "${value:+ [$value]}" >&2
+    prompt "$question${value:+ [$value]}: "
     wizard_read answer
     case $answer in
       "") answer=$value ;;
       -) answer="" ;;
     esac
     if [[ -n $re && ! $answer =~ $re ]]; then
-      say "  ${hint:-not a valid value}"
+      say_warn "  ${hint:-not a valid value}"
       continue
     fi
     break
@@ -74,14 +113,14 @@ ask_choice() {
   done
   [[ -n $def ]] || def=1
   while true; do
-    printf 'Choice [%s]: ' "$def" >&2
+    prompt "Choice [$def]: "
     wizard_read answer
     answer=${answer:-$def}
     if [[ $answer =~ ^[0-9]+$ ]] && ((answer >= 1 && answer <= ${#values[@]})); then
       wizard_set "$key" "${values[answer - 1]}"
       return
     fi
-    say "  a number from 1 to ${#values[@]}"
+    say_warn "  a number from 1 to ${#values[@]}"
   done
 }
 
@@ -90,7 +129,7 @@ ask_yes_no() {
   local key=$1 def=n answer
   [[ ${!1:-false} == true ]] && def=y
   while true; do
-    printf '%s (y/n) [%s]: ' "$2" "$def" >&2
+    prompt "$2 (y/n) [$def]: "
     wizard_read answer
     case ${answer:-$def} in
       y | yes) wizard_set "$key" true && return ;;
@@ -117,11 +156,11 @@ ask_secret() {
   # Tracing would print the value.
   [[ $- == *x* ]] && xtrace=1 && set +x
   while true; do
-    if ((known)); then printf '%s [set, Enter keeps it]: ' "$2" >&2; else printf '%s%s: ' "$2" "${3:+ [optional]}" >&2; fi
-    IFS= read -rs answer || die "$E_CANCELLED" "cancelled: no answer, nothing was written or changed"
-    printf '\n' >&2
+    if ((known)); then prompt "$2 [set, Enter keeps it]: "; else prompt "$2${3:+ [optional]}: "; fi
+    IFS= read -rs answer || { printf '%s\n' "$W_OFF" >&2; die "$E_CANCELLED" "cancelled: no answer, nothing was written or changed"; }
+    printf '%s\n' "$W_OFF" >&2
     [[ -n $answer || $known == 1 || -n ${3:-} ]] && break
-    say "  a value is required"
+    say_warn "  a value is required"
   done
   if [[ -n $answer ]]; then WIZARD_SECRETS[$key]=$answer; fi
   ((xtrace)) && set -x
@@ -133,22 +172,44 @@ ask_secret_file() {
   local key=$1 path known=0
   secret_known "$key" && known=1
   while true; do
-    if ((known)); then printf '%s [set, Enter keeps it]: ' "$2" >&2; else printf '%s: ' "$2" >&2; fi
+    if ((known)); then prompt "$2 [set, Enter keeps it]: "; else prompt "$2: "; fi
     wizard_read path
     path=${path/#\~/$HOME}
     if [[ -z $path ]]; then
       ((known)) && return 0
-      say "  a file is required"
+      say_warn "  a file is required"
     elif [[ -r $path ]]; then
       WIZARD_SECRETS[$key]=$(<"$path")
       return 0
     else
-      say "  cannot read $path"
+      say_warn "  cannot read $path"
     fi
   done
 }
 
-wizard_section() { say "" "== $1 =="; }
+# wizard_steps — the steps of the wizard for the answers so far: Hammurapi, Models and the size of minikube
+# come and go with the products and the cluster, so the count may change after those answers.
+wizard_steps() {
+  local steps=("Where to install" "Products" "Domain and certificates" "Sign-in")
+  [[ ${PRODUCTS:-} == *hammurapi* ]] && steps+=("Hammurapi")
+  steps+=("Storages" "Observability" "MCP servers")
+  [[ ${NABU_MODE:-internal} == internal ]] && steps+=("Models")
+  [[ ${INSTALL_TARGET:-minikube} == minikube ]] && steps+=("Size of minikube")
+  steps+=("Summary")
+  printf '%s\n' "${steps[@]}"
+}
+
+# wizard_section <step> — the heading with the number of the step and the count.
+wizard_section() {
+  local steps=() i n=0
+  mapfile -t steps < <(wizard_steps)
+  for i in "${!steps[@]}"; do [[ ${steps[i]} == "$1" ]] && n=$((i + 1)); done
+  if ((n)); then
+    printf '\n%s== Step %d of %d: %s ==%s\n' "$W_HEAD" "$n" "${#steps[@]}" "$1" "$W_OFF" >&2
+  else
+    printf '\n%s== %s ==%s\n' "$W_HEAD" "$1" "$W_OFF" >&2
+  fi
+}
 
 wizard_target() {
   wizard_section "Where to install"
@@ -188,7 +249,9 @@ wizard_products() {
   if [[ $PRODUCTS == hammurapi ]]; then
     wizard_set NABU_MODE external
     wizard_set PUBLIC_EXTRA_HOSTS "${extra[*]}"
-    say "Register a client for Hammurapi in that Nabu: Admin → Clients."
+    wizard_todo "that Nabu" \
+      "Sign in as an administrator and open Admin → Clients." \
+      "Add a client for Hammurapi; copy its ID and secret: the secret is shown once."
     ask NABU_URL "The API of Nabu, https://…" '^https://[^ ]+$' "an https:// address"
     ask NABU_CLIENT_ID "The client ID" '.' "a value is required"
     ask_secret NABU_CLIENT_SECRET "The client secret"
@@ -202,6 +265,8 @@ wizard_products() {
     [[ ${SPEC_LANGUAGE:-} == ru || ${SPEC_LANGUAGE:-} == en ]] || SPEC_LANGUAGE=$([[ ${DEFAULT_LANGUAGE:-en} == ru ]] && echo ru || echo en)
     ask_choice SPEC_LANGUAGE "The language of the specifications (the headings Hammurapi reads and writes in them):" \
       "ru=Russian" "en=English"
+    ask_choice HAMMURAPI_GIT_PROVIDER "The repositories of Hammurapi live on:" \
+      "github=GitHub (github.com or GitHub Enterprise)" "gitlab=GitLab (gitlab.com or self-hosted)"
   fi
 }
 
@@ -263,16 +328,35 @@ wizard_auth() {
   wizard_section "Sign-in"
   local api="https://${NABU_API_HOST:-nabu-api}.${PUBLIC_BASE_DOMAIN:-<domain>}"
   local hmr="https://${HAMMURAPI_API_HOST:-hammurapi-api}.${PUBLIC_BASE_DOMAIN:-<domain>}"
-  ask_choice AUTH_PROVIDER "People sign in with:" "github=GitHub" "oidc=OpenID Connect (Keycloak, Google, Entra ID…)"
+  if [[ $PRODUCTS == *hammurapi* && ${HAMMURAPI_GIT_PROVIDER:-github} == gitlab ]]; then
+    say "People sign in with OpenID Connect (Keycloak, Google, Entra ID, GitLab itself…): Hammurapi works with GitLab."
+    wizard_set AUTH_PROVIDER oidc
+  else
+    ask_choice AUTH_PROVIDER "People sign in with:" "github=GitHub" "oidc=OpenID Connect (Keycloak, Google, Entra ID…)"
+  fi
+  local web="https://${NABU_WEB_HOST:-nabu}.${PUBLIC_BASE_DOMAIN:-<domain>}"
   if [[ $AUTH_PROVIDER == github ]]; then
     if [[ $NABU_MODE == internal ]]; then
-      say "Create a GitHub OAuth App for Nabu (Settings → Developer settings → OAuth Apps), callback $api/auth/callback."
+      wizard_todo "GitHub: the OAuth App of Nabu" \
+        "Open Settings → Developer settings → OAuth Apps → New OAuth App, of the organization or of your account:" \
+        "-https://github.com/settings/applications/new" \
+        "Application name: Nabu; Homepage URL: $web" \
+        "Authorization callback URL: $api/auth/callback" \
+        "Register application; copy the Client ID, then Generate a new client secret and copy it."
       ask NABU_GITHUB_CLIENT_ID "Its client ID" '.' "a value is required"
       ask_secret NABU_GITHUB_CLIENT_SECRET "Its client secret"
     fi
     ask GITHUB_ALLOWED_ORG "Only members of this GitHub organization, Enter for anyone" '^[A-Za-z0-9-]*$' "the login of an organization"
   else
-    say "Create one client for all products. Callbacks: $api/auth/callback$([[ $PRODUCTS == *hammurapi* ]] && echo ", $hmr/api/v1/auth/callback")."
+    local callbacks=()
+    [[ $NABU_MODE == internal ]] && callbacks+=("$api/auth/callback")
+    [[ $PRODUCTS == *hammurapi* ]] && callbacks+=("$hmr/api/v1/auth/callback")
+    wizard_todo "the identity provider (Keycloak, Google, Entra ID…): one client for all products" \
+      "Create an OpenID Connect client with a secret (Keycloak: Clients → Create client;" \
+      "-Client authentication on, Standard flow on)." \
+      "Valid redirect URIs, each of them:" "${callbacks[@]/#/-}" \
+      "Copy the client ID and its secret (Keycloak: the tab Credentials)." \
+      "The issuer is the address of the realm or tenant, such as https://sso.example.com/realms/<realm>."
     ask OIDC_ISSUER "The issuer, https://…" '^https://[^ ]+$' "an https:// address"
     ask OIDC_CLIENT_ID "The client ID" '.' "a value is required"
     ask_secret OIDC_CLIENT_SECRET "The client secret"
@@ -285,15 +369,65 @@ wizard_hammurapi() {
   [[ $PRODUCTS == *hammurapi* ]] || return 0
   local hmr="https://${HAMMURAPI_API_HOST:-hammurapi-api}.${PUBLIC_BASE_DOMAIN:-<domain>}"
   wizard_section "Hammurapi"
-  say "Create a GitHub App (Settings → Developer settings → GitHub Apps):" \
-    "  callback $hmr/api/v1/auth/callback; webhook off;" \
-    "  repository permissions Contents, Pull requests, Issues, Actions, Workflows: read and write;" \
-    "  install it on the repository of specifications. Its webhook secret is generated by the installer."
+  if [[ ${HAMMURAPI_GIT_PROVIDER:-github} == gitlab ]]; then
+    wizard_hammurapi_gitlab "$hmr"
+    return
+  fi
+  wizard_todo "GitHub: the GitHub App of Hammurapi" \
+    "Create the repository of specifications, if there is none, with rules/ of the repository hammurapi." \
+    "Open Settings → Developer settings → GitHub Apps → New GitHub App, of the organization:" \
+    "-https://github.com/organizations/<organization>/settings/apps/new" \
+    "GitHub App name: any free name, such as hammurapi-<company>; Homepage URL: https://${HAMMURAPI_WEB_HOST:-hammurapi}.${PUBLIC_BASE_DOMAIN:-<domain>}" \
+    "Callback URL: $hmr/api/v1/auth/callback; Expire user authorization tokens: on." \
+    "Webhook: Active, URL $hmr/hooks/v1/git, secret empty: the installer writes the address and the secret." \
+    "Repository permissions, Read and write: Contents, Pull requests, Issues, Actions, Workflows;" \
+    "-Read-only: Checks, Commit statuses, Metadata." \
+    "Subscribe to events: Push, Pull request, Pull request review, Pull request review comment, Issue comment," \
+    "-Check suite, Status." \
+    "Create GitHub App; copy the App ID and the Client ID from its page." \
+    "Generate a new client secret and copy it; Generate a private key: a .pem downloads, copy it to this machine." \
+    "Install App: on the repository of specifications and on the repositories of services."
   ask HAMMURAPI_GITHUB_APP_ID "The App ID" '^[0-9]+$' "a number"
   ask HAMMURAPI_GITHUB_CLIENT_ID "Its client ID" '.' "a value is required"
   ask_secret HAMMURAPI_GITHUB_CLIENT_SECRET "Its client secret"
   ask_secret_file HAMMURAPI_GITHUB_APP_PRIVATE_KEY "The file of its private key (.pem)"
   ask HAMMURAPI_SPEC_REPO "The repository of specifications, owner/name" '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' "owner/name"
+}
+
+# wizard_hammurapi_gitlab <api of Hammurapi> — the OAuth application links the GitLab account of a person
+# (commits and merge requests in their name); the bot commits, merges and keeps the webhook of the project.
+wizard_hammurapi_gitlab() {
+  ask HAMMURAPI_GITLAB_URL "The address of GitLab" '^https?://[^/[:space:]]+(/[^[:space:]]*)?$' "an http(s):// address" \
+    https://gitlab.com
+  local gl=${HAMMURAPI_GITLAB_URL%/}
+  wizard_todo "GitLab: the application of Hammurapi (people link their GitLab accounts through it)" \
+    "Open User settings → Applications → Add new application:" \
+    "-$gl/-/user_settings/applications" \
+    "-(or Settings → Applications of a group, or Admin → Applications of the instance)" \
+    "Name: Hammurapi; Redirect URI: $1/api/v1/auth/git/callback" \
+    "Confidential: on; scopes: api, read_user." \
+    "Save application; copy the Application ID and the Secret."
+  ask HAMMURAPI_GITLAB_CLIENT_ID "Its application ID" '.' "a value is required"
+  ask_secret HAMMURAPI_GITLAB_CLIENT_SECRET "Its secret"
+  wizard_todo "GitLab: the project of specifications" \
+    "Create the project, if there is none, with rules/ of the repository hammurapi and the default branch main." \
+    "Its path is what follows $gl/ in its address, such as platform/specs."
+  ask HAMMURAPI_SPEC_REPO "The project of specifications, group/project" '^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$' \
+    "group/project, subgroups too"
+  wizard_todo "GitLab: the bot of Hammurapi (it commits, merges at a release and keeps the webhook)" \
+    "Either a user, such as hammurapi-bot: add it to $gl/$HAMMURAPI_SPEC_REPO/-/project_members as a Maintainer," \
+    "-sign in as it and create a personal access token: $gl/-/user_settings/personal_access_tokens" \
+    "Or a project or group access token: Settings → Access tokens of the project or of its group," \
+    "-role Maintainer." \
+    "Scope of the token: api. Mind its expiry date: Hammurapi stops working on it when it expires." \
+    "Copy the token. The installer adds the webhook of the project and generates its secret." \
+    "After the install, add the same webhook to the projects of services (or once to their group, GitLab Premium):" \
+    "-docs/products.md, section Hammurapi on GitLab, shows its address and how to read its secret." \
+    "Self-hosted GitLab refuses webhooks to private addresses (such as 10.x, 192.168.x) by default: if" \
+    "-${HAMMURAPI_API_HOST:-hammurapi-api}.${PUBLIC_BASE_DOMAIN:-<domain>} resolves to one, an administrator of GitLab allows it in" \
+    "-Admin → Settings → Network → Outbound requests: Allow requests to the local network from webhooks," \
+    "-or adds ${HAMMURAPI_API_HOST:-hammurapi-api}.${PUBLIC_BASE_DOMAIN:-<domain>} to the allowlist there."
+  ask_secret HAMMURAPI_GITLAB_BOT_TOKEN "The token of the bot"
 }
 
 wizard_storages() {
@@ -347,10 +481,10 @@ wizard_mcp() {
     i=$((i + 1))
   done < <(mcp_catalog)
   while true; do
-    printf 'Numbers of the servers to install, "-" for none, Enter keeps the marked ones: ' >&2
+    prompt 'Numbers of the servers to install, "-" for none, Enter keeps the marked ones: '
     wizard_read answer
     [[ -z $answer || $answer == - || $answer =~ ^[0-9\ ,]+$ ]] && break
-    say "  numbers such as 1 3"
+    say_warn "  numbers such as 1 3"
   done
   if [[ -n $answer ]]; then
     for i in "${!names[@]}"; do
@@ -493,8 +627,16 @@ wizard_install() {
 
 cmd_wizard() {
   local file=$1 err last_err=""
+  wizard_colors
+  # Ctrl-C or a cancel at a prompt leaves the color of the input on: the terminal gets it back.
+  trap 'printf "%s" "$W_OFF" >&2' EXIT
+  trap 'printf "%s\n" "$W_OFF" >&2; exit 130' INT
   say "GreenOnGrey installer $(installer_version): questions first, then the same install as ./installer install."
   say "Enter keeps the value in brackets; nothing changes until you confirm the summary."
+  if [[ -n $W_OFF ]]; then
+    printf '%s%s%s, %s%s%s, %s%s%s, %s%s%s.\n' "$W_HEAD" "Blue: the steps" "$W_OFF" "$W_SAY" "cyan: the installer" "$W_OFF" \
+      "$W_TODO" "yellow: what to do in GitHub, GitLab or the identity provider" "$W_OFF" "$W_IN" "green: your answers" "$W_OFF" >&2
+  fi
   if have kubectl && have jq; then WIZARD_CLUSTER=1; fi
   # R4: on an installed system the cluster holds the MCP options and the kept secrets.
   if ((WIZARD_CLUSTER)) && cluster_reachable 2>/dev/null; then restore_config; fi

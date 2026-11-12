@@ -41,7 +41,7 @@ case "$*" in
   *"apply -f -"*) cat >>"$APPLIED/manifests" ; echo >>"$APPLIED/manifests" ;;
   *"--dry-run=client -o yaml"*) echo "kind: Dummy" ;;
   *"get configmap hammurapi-key-fingerprint"*) printf "%s" "$FINGERPRINT" ;;
-  *"get configmap hammurapi-deploy-state"*) exit 1 ;;
+  *"get configmap hammurapi-deploy-state"*) [[ -n ${DEPLOY_STATE:-} ]] && echo "$DEPLOY_STATE" || exit 1 ;;
   *"get secret postgres-conn -o json"*|*"get secret kafka-conn -o json"*) echo "{\"metadata\":{\"name\":\"x\"},\"data\":{\"uri\":\"cA==\"}}" ;;
   *"get secret s3-conn -o json"*) echo "{\"metadata\":{\"name\":\"s3-conn\"},\"data\":{\"endpoint\":\"$(printf http://s3.storages.svc:9000 | base64)\"}}" ;;
   *) exit 0 ;;
@@ -301,4 +301,105 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
     [[ $output != *"readonly variable"* ]] || { echo "$s: $output"; false; }
     [[ ${lines[-1]} == "{"* ]] || { echo "$s: $output"; false; }
   done
+}
+
+# gitlab_setup — the payload of Hammurapi on GitLab and the API of GitLab: BOT_LEVEL is the role of the bot,
+# BOT_TOKEN_OK whether GitLab takes its token, HOOKS the webhooks of the project.
+gitlab_setup() {
+  export BOT_LEVEL=40 BOT_TOKEN_OK=true HOOKS='[]' HOOK_BODY=$BATS_TEST_TMPDIR/hook-body
+  stub curl '
+url=${*: -1}
+[[ $url == https://gitlab.corp.example/api/v4/* ]] || exit 7
+case "$url" in
+  */user) [[ $BOT_TOKEN_OK == true ]] && echo "{\"username\":\"hammurapi-bot\",\"id\":7}" || exit 22 ;;
+  */projects/platform%2Fspecs) echo "{\"id\":11}" ;;
+  */projects/platform%2Fspecs/members/all/7) echo "{\"access_level\":$BOT_LEVEL}" ;;
+  */projects/platform%2Fspecs/hooks*)
+    if [[ "$*" == *"-X GET"* ]]; then echo "$HOOKS"; else cat >"$HOOK_BODY"; [[ -z ${HOOK_REFUSED:-} ]] || { echo "{\"message\":\"$HOOK_REFUSED\"}"; exit 22; }; echo "{}"; fi ;;
+  *) exit 22 ;;
+esac'
+  PAYLOAD=$(jq -cn '{
+    image: "ghcr.io/greenongrey/hammurapi-core",
+    config: {GIT_PROVIDER: "gitlab", GIT_BASE_URL: "https://gitlab.corp.example", GIT_REPO: "platform/specs",
+      GITLAB_CLIENT_ID: "gl-app", BOOTSTRAP_ADMINS: "owner"},
+    secrets: {GITLAB_CLIENT_SECRET: "gl-secret-XYZ", GITLAB_BOT_TOKEN: "glpat-bot-XYZ",
+      WEBHOOK_SECRET: "webhook-secret-XYZ", TOKEN_ENCRYPTION_KEY: "token-key-XYZ"}}')
+  export PAYLOAD
+}
+
+@test "GitLab: core rolls out with the bot as HAMMURAPI_BOT_LOGIN and adds the webhook of the project" {
+  gitlab_setup
+  run deploy hammurapi-core v1.8.0 0.4.0
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  grep -q '"GIT_PROVIDER":"gitlab"' "$APPLIED/manifests"
+  grep -q '"HAMMURAPI_BOT_LOGIN":"hammurapi-bot"' "$APPLIED/manifests"
+  grep -q '"GITLAB_BOT_TOKEN":"glpat-bot-XYZ"' "$APPLIED/manifests"
+  called "-X POST"
+  jq -e '.url == "https://hammurapi-api.34-12-5-6.sslip.io/hooks/v1/git" and .token == "webhook-secret-XYZ"
+    and .push_events and .tag_push_events and .merge_requests_events and .note_events and .pipeline_events' "$HOOK_BODY"
+  not_called "api.github.com"
+  local s
+  for s in glpat-bot-XYZ gl-secret-XYZ webhook-secret-XYZ; do
+    not_called "$s"
+    [[ $output != *"$s"* ]] || { echo "in the log: $s"; return 1; }
+  done
+  [ -z "$(find "$TMPDIR" -type f)" ]
+}
+
+@test "GitLab: a webhook of the same address is updated, not added again" {
+  gitlab_setup
+  export HOOKS='[{"id":5,"url":"https://hammurapi-api.34-12-5-6.sslip.io/hooks/v1/git"}]'
+  run deploy hammurapi-core v1.8.0 0.4.0
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  called "-X PUT"
+  called "hooks/5"
+  not_called "-X POST"
+}
+
+@test "GitLab: the bot is not a Maintainer of the project: code 26" {
+  gitlab_setup
+  export BOT_LEVEL=30
+  run deploy hammurapi-core v1.8.0 0.4.0
+  [ "$status" -eq 26 ]
+  [[ $output == *"@hammurapi-bot is not a Maintainer of platform/specs"* ]]
+}
+
+@test "GitLab: the token of the bot is refused: code 26 before the release" {
+  gitlab_setup
+  export BOT_TOKEN_OK=false
+  run deploy hammurapi-core v1.8.0 0.4.0
+  [ "$status" -eq 26 ]
+  [[ $output == *HAMMURAPI_GITLAB_BOT_TOKEN* ]]
+  not_called "upgrade --install hammurapi-core"
+}
+
+@test "GitLab: the same webhook address after GitHub or another project: the webhook is written again" {
+  gitlab_setup
+  export CORE_INSTALLED=true
+  export DEPLOY_STATE='{"data":{"webhookUrl":"https://hammurapi-api.34-12-5-6.sslip.io/hooks/v1/git","webhookTarget":"github github acme/specs"}}'
+  run deploy hammurapi-core v1.8.0 0.4.0
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  called "-X POST"
+  : >"$CALLS"
+  export DEPLOY_STATE='{"data":{"webhookUrl":"https://hammurapi-api.34-12-5-6.sslip.io/hooks/v1/git","webhookTarget":"gitlab https://gitlab.corp.example/api/v4 platform/specs"}}'
+  run deploy hammurapi-core v1.8.0 0.4.0
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  not_called "/hooks"
+}
+
+@test "GitLab: the webhook is refused (a private address on a self-hosted GitLab): code 26 that names the setting" {
+  gitlab_setup
+  export HOOK_REFUSED="Invalid url given"
+  run deploy hammurapi-core v1.8.0 0.4.0
+  [ "$status" -eq 26 ]
+  [[ $output == *'GitLab answered "Invalid url given"'* ]]
+  [[ $output == *"Outbound requests"* && $output == *"hammurapi-api.34-12-5-6.sslip.io"* ]]
+}
+
+@test "GitLab: another refusal of the webhook names the answer of GitLab, not the network setting" {
+  gitlab_setup
+  export HOOK_REFUSED="403 Forbidden"
+  run deploy hammurapi-core v1.8.0 0.4.0
+  [ "$status" -eq 26 ]
+  [[ $output == *'GitLab answered "403 Forbidden"'* && $output != *"Outbound requests"* ]]
 }
