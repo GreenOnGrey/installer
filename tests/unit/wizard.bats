@@ -192,7 +192,7 @@ EOF
 
 @test "R11: Hammurapi with an external Nabu: its client, the GitHub App and the key file" {
   printf -- '-----BEGIN KEY-----\nabc\n-----END KEY-----\n' >"$BATS_TEST_TMPDIR/app.pem"
-  answers 1 3 https://nabu.corp.example nabu-client nabu-secret 1 1 stand.example.com ops@example.com \
+  answers 1 3 https://nabu.corp.example nabu-client nabu-secret 1 1 1 stand.example.com ops@example.com \
     1 "" alice 42 app-client app-secret "$BATS_TEST_TMPDIR/app.pem" acme/specs 1 1 1 "" "" "" "" "" yes
   wizard
   [ "$status" -eq 0 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
@@ -205,6 +205,50 @@ EOF
   not_grep -q 'BEGIN KEY' "$FILE"
   grep -q 'HAMMURAPI_GITHUB_APP_PRIVATE_KEY=-----BEGIN KEY-----' "$BATS_TEST_TMPDIR/install-env"
   grep -qx 'NABU_CLIENT_SECRET=nabu-secret' "$BATS_TEST_TMPDIR/install-env"
+}
+
+@test "Hammurapi on GitLab: OIDC sign-in without the question, the application, the project and the bot" {
+  answers 1 2 1 2 1 stand.example.com ops@example.com \
+    https://sso.example/realms/x gog oidc-secret "" alice \
+    https://gitlab.corp.example gl-app gl-secret platform/product/specs glpat-bot 1 1 1 "" "" "" "" "" "" yes
+  wizard
+  [ "$status" -eq 0 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
+  grep -qx 'HAMMURAPI_GIT_PROVIDER=gitlab' "$FILE"
+  grep -qx 'AUTH_PROVIDER=oidc' "$FILE"
+  grep -qx 'HAMMURAPI_GITLAB_URL=https://gitlab.corp.example' "$FILE"
+  grep -qx 'HAMMURAPI_GITLAB_CLIENT_ID=gl-app' "$FILE"
+  grep -qx 'HAMMURAPI_SPEC_REPO=platform/product/specs' "$FILE"
+  grep -q 'https://hammurapi-api.stand.example.com/api/v1/auth/git/callback' "$BATS_TEST_TMPDIR/out"
+  not_grep -q 'People sign in with:' "$BATS_TEST_TMPDIR/out"
+  not_grep -q 'GitHub App' "$BATS_TEST_TMPDIR/out"
+  not_grep -q 'glpat-bot' "$FILE"
+  grep -qx 'HAMMURAPI_GITLAB_BOT_TOKEN=glpat-bot' "$BATS_TEST_TMPDIR/install-env"
+  grep -qx 'HAMMURAPI_GITLAB_CLIENT_SECRET=gl-secret' "$BATS_TEST_TMPDIR/install-env"
+}
+
+@test "the steps are numbered for the answers so far, and what to do outside is a numbered list" {
+  nabu_answers
+  wizard
+  [ "$status" -eq 0 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
+  grep -qx '== Step 1 of 10: Where to install ==' "$BATS_TEST_TMPDIR/out"
+  grep -qx '== Step 10 of 10: Summary ==' "$BATS_TEST_TMPDIR/out"
+  grep -qx 'Do in GitHub: the OAuth App of Nabu, then answer below:' "$BATS_TEST_TMPDIR/out"
+  grep -q '^  3. Authorization callback URL: https://nabu-api\.' "$BATS_TEST_TMPDIR/out"
+  # Without a terminal there are no colors.
+  not_grep -q $'\e\\[' "$BATS_TEST_TMPDIR/out"
+}
+
+@test "Hammurapi on GitLab: the steps count Hammurapi, the instructions name the links of that GitLab" {
+  answers 1 2 1 2 1 stand.example.com ops@example.com \
+    https://sso.example/realms/x gog oidc-secret "" alice \
+    https://gitlab.corp.example gl-app gl-secret platform/specs glpat-bot 1 1 1 "" "" "" "" "" "" yes
+  wizard
+  [ "$status" -eq 0 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
+  grep -q '== Step 5 of 11: Hammurapi ==' "$BATS_TEST_TMPDIR/out"
+  grep -q 'https://gitlab.corp.example/-/user_settings/applications' "$BATS_TEST_TMPDIR/out"
+  grep -q 'https://gitlab.corp.example/platform/specs/-/project_members' "$BATS_TEST_TMPDIR/out"
+  grep -q 'https://hammurapi-api.stand.example.com/api/v1/auth/callback' "$BATS_TEST_TMPDIR/out"
+  grep -q 'https://nabu-api.stand.example.com/auth/callback' "$BATS_TEST_TMPDIR/out"
 }
 
 @test "MCP-04 (U): docling: the memory of the server, and the MK_MEMORY it needs" {

@@ -12,7 +12,9 @@
 # Codes: 17 a rollout of the component is running; 20 the stand is not ready or has no public
 # access; 21 web without core; 22 namespace; 23 secrets and configuration; 24 the token
 # encryption key changed; 25 Helm release (--atomic restored the previous revision);
-# 26 GitHub App; 27 pod readiness.
+# 26 the git provider: the GitHub App, or the bot and the project of GitLab; 27 pod readiness.
+# config.GIT_PROVIDER is github (the default) or gitlab; GitLab takes GIT_BASE_URL, GITLAB_CLIENT_ID and the
+# secrets GITLAB_CLIENT_SECRET and GITLAB_BOT_TOKEN instead of the GitHub App.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
@@ -29,7 +31,7 @@ STATUS_CMD=${STATUS_CMD:-"$ROOT/installer"}
 
 COMPONENT="" TAG="" CHART_VERSION="" ALLOW_KEY_ROTATION=0
 FIRST_INSTALL=false BASE_DOMAIN="" REVISION="" DIAG="" PAYLOAD="" HELM_REG=""
-FAIL_MSG=""
+FAIL_MSG="" GIT_PROVIDER="" BOT_LOGIN="" BOT_ID="" BOT_ADMIN=false GITLAB_API="" HOOK_URL="" OLD_HOOK_URL=""
 
 usage() {
   echo "usage: hammurapi-deploy <hammurapi-core|hammurapi-web> <vX.Y.Z> <chart version> [--allow-key-rotation]" >&2
@@ -193,19 +195,36 @@ require_payload() {
 
 sync_core_config() {
   step secrets
-  require_payload .config.GIT_REPO .config.GITHUB_APP_ID .config.GITHUB_CLIENT_ID .config.BOOTSTRAP_ADMINS \
-    .secrets.GITHUB_APP_PRIVATE_KEY .secrets.GITHUB_CLIENT_SECRET \
-    .secrets.WEBHOOK_SECRET .secrets.TOKEN_ENCRYPTION_KEY
+  GIT_PROVIDER=$(payload .config.GIT_PROVIDER)
+  GIT_PROVIDER=${GIT_PROVIDER:-github}
+  case $GIT_PROVIDER in
+    github)
+      require_payload .config.GIT_REPO .config.GITHUB_APP_ID .config.GITHUB_CLIENT_ID .config.BOOTSTRAP_ADMINS \
+        .secrets.GITHUB_APP_PRIVATE_KEY .secrets.GITHUB_CLIENT_SECRET \
+        .secrets.WEBHOOK_SECRET .secrets.TOKEN_ENCRYPTION_KEY
+      ;;
+    gitlab)
+      require_payload .config.GIT_REPO .config.GITLAB_CLIENT_ID .config.BOOTSTRAP_ADMINS \
+        .secrets.GITLAB_CLIENT_SECRET .secrets.GITLAB_BOT_TOKEN \
+        .secrets.WEBHOOK_SECRET .secrets.TOKEN_ENCRYPTION_KEY
+      ;;
+    *) fail "$E_SECRETS" "config.GIT_PROVIDER must be github or gitlab, not '$GIT_PROVIDER'" ;;
+  esac
   check_key_fingerprint
-  app_jwt
-  APP_SLUG=$(github GET /app | jq -r '.slug // empty')
-  [[ -n $APP_SLUG ]] || fail "$E_APP" "GitHub App is unavailable: check HAMMURAPI_GITHUB_APP_ID and the key"
+  if [[ $GIT_PROVIDER == gitlab ]]; then
+    gitlab_bot
+  else
+    app_jwt
+    APP_SLUG=$(github GET /app | jq -r '.slug // empty')
+    [[ -n $APP_SLUG ]] || fail "$E_APP" "GitHub App is unavailable: check HAMMURAPI_GITHUB_APP_ID and the key"
+    BOT_LOGIN="${APP_SLUG}[bot]"
+  fi
 
   # Non-secret configuration → ConfigMap hammurapi-config.
-  printf '%s' "$PAYLOAD" | jq -c --arg ns "$NS" --arg bot "${APP_SLUG}[bot]" '
+  printf '%s' "$PAYLOAD" | jq -c --arg ns "$NS" --arg bot "$BOT_LOGIN" --arg git "$GIT_PROVIDER" '
     {apiVersion: "v1", kind: "ConfigMap",
      metadata: {name: "hammurapi-config", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
-     data: ({GIT_PROVIDER: "github", HAMMURAPI_BOT_LOGIN: $bot} + (.config // {} | with_entries(.value |= tostring)))}' |
+     data: ({GIT_PROVIDER: $git, HAMMURAPI_BOT_LOGIN: $bot} + (.config // {} | with_entries(.value |= tostring)))}' |
     apply_json || fail "$E_SECRETS" "failed to write hammurapi-config"
 
   # Secrets → Secret hammurapi-secrets. The agent operator token is gone:
@@ -215,11 +234,11 @@ sync_core_config() {
     | {apiVersion: "v1", kind: "Secret", type: "Opaque",
        metadata: {name: "hammurapi-secrets", namespace: $ns, labels: {"app.kubernetes.io/managed-by": "hammurapi-deploy"}},
        stringData: ($s | del(.DEPLOY_CALLBACK_SECRET, .ACP_AGENT_ENV)
-         | .GITHUB_APP_PRIVATE_KEY = (.GITHUB_APP_PRIVATE_KEY | gsub("\\\\n"; "\n")))}' |
+         | if .GITHUB_APP_PRIVATE_KEY then .GITHUB_APP_PRIVATE_KEY |= gsub("\\\\n"; "\n") else . end)}' |
     apply_json || fail "$E_SECRETS" "failed to write hammurapi-secrets"
 
   copy_conn_secrets
-  ok "configuration and secrets are in sync with GitHub"
+  ok "configuration and secrets are in sync with $GIT_PROVIDER"
 }
 
 # --- GitHub App ---
@@ -248,16 +267,28 @@ github() {
     "$GITHUB_API$path"
 }
 
-configure_app() {
-  step github-app
-  local repo inst perms url state
-  repo=$(payload .config.GIT_REPO)
-  url="https://${HAMMURAPI_API_HOST:-hammurapi-api}.$BASE_DOMAIN/hooks/v1/git"
-  state=$(kc -n "$NS" get configmap hammurapi-deploy-state -o jsonpath='{.data.webhookUrl}' 2>/dev/null || true)
-  if [[ $FIRST_INSTALL != true && $state == "$url" ]]; then
-    debug "the GitHub App webhook address did not change"
+# configure_git — the provider takes the webhook of Hammurapi and gives the bot access to the repository of
+# specifications. Skipped while the address, the provider and the repository are those of the last rollout.
+configure_git() {
+  local state old_target target
+  HOOK_URL="https://${HAMMURAPI_API_HOST:-hammurapi-api}.$BASE_DOMAIN/hooks/v1/git"
+  target="$GIT_PROVIDER ${GITLAB_API:-github} $(payload .config.GIT_REPO)"
+  state=$(kc -n "$NS" get configmap hammurapi-deploy-state -o json 2>/dev/null | jq -c '.data // {}') || state='{}'
+  OLD_HOOK_URL=$(jq -r '.webhookUrl // empty' <<<"$state")
+  old_target=$(jq -r '.webhookTarget // empty' <<<"$state")
+  if [[ $FIRST_INSTALL != true && $OLD_HOOK_URL == "$HOOK_URL" && $old_target == "$target" ]]; then
+    debug "the webhook address, the provider and the repository did not change"
     return
   fi
+  if [[ $GIT_PROVIDER == gitlab ]]; then configure_gitlab; else configure_app; fi
+  kc -n "$NS" create configmap hammurapi-deploy-state --from-literal="webhookUrl=$HOOK_URL" \
+    --from-literal="webhookTarget=$target" --dry-run=client -o yaml | apply_stdin
+}
+
+configure_app() {
+  step github-app
+  local repo inst perms url=$HOOK_URL
+  repo=$(payload .config.GIT_REPO)
   # Address and secret of the app webhook (R13); the secret is in the jq body, not arguments.
   printf '%s' "$PAYLOAD" | jq -c --arg url "$url" '{url: $url, content_type: "json", secret: .secrets.WEBHOOK_SECRET, insecure_ssl: "0"}' |
     github PATCH /app/hook/config >/dev/null || fail "$E_APP" "failed to write the GitHub App webhook address"
@@ -270,8 +301,70 @@ configure_app() {
   if [[ $(jq -r '(.e | index("push")) != null and (.e | index("pull_request")) != null' <<<"$perms") != true ]]; then
     fail "$E_APP" "the GitHub App is not subscribed to push and pull_request events"
   fi
-  kc -n "$NS" create configmap hammurapi-deploy-state --from-literal="webhookUrl=$url" --dry-run=client -o yaml | apply_stdin
   ok "GitHub App: webhook $url, access to $repo"
+}
+
+# --- GitLab ---
+
+# gitlab <method> <path> [JSON body from stdin] — the API of GitLab (GITLAB_API) as the bot; the token
+# reaches curl through /dev/fd, not an argument.
+gitlab() {
+  local method=$1 path=$2 data=()
+  [[ $method != GET ]] && data=(--data-binary @- -H 'Content-Type: application/json')
+  curl -sS --fail-with-body --max-time 30 -X "$method" "${data[@]}" \
+    -H @<(printf 'PRIVATE-TOKEN: %s\n' "$(payload .secrets.GITLAB_BOT_TOKEN)") \
+    "$GITLAB_API$path"
+}
+
+# gitlab_bot — the API of GitLab, and the bot from its token: HAMMURAPI_BOT_LOGIN, its id and whether it
+# administers the instance.
+gitlab_bot() {
+  local me base
+  base=$(payload .config.GIT_BASE_URL)
+  base=${base:-https://gitlab.com}
+  GITLAB_API="${base%/}/api/v4"
+  me=$(gitlab GET /user 2>/dev/null) || me='{}'
+  BOT_LOGIN=$(jq -r '.username // empty' <<<"$me" 2>/dev/null) || true
+  BOT_ID=$(jq -r '.id // empty' <<<"$me" 2>/dev/null) || true
+  BOT_ADMIN=$(jq -r '.is_admin // false' <<<"$me" 2>/dev/null) || BOT_ADMIN=false
+  [[ -n $BOT_LOGIN && -n $BOT_ID ]] ||
+    fail "$E_APP" "GitLab refused the token of the bot: check HAMMURAPI_GITLAB_BOT_TOKEN (scope api) and HAMMURAPI_GITLAB_URL"
+}
+
+# configure_gitlab — the bot is a Maintainer of the project of specifications (it merges into the protected
+# default branch at a release), and the project sends its events to Hammurapi: the webhook with the secret.
+configure_gitlab() {
+  step gitlab
+  local repo id url=$HOOK_URL level hooks hook method path
+  repo=$(payload .config.GIT_REPO)
+  id=$(jq -rn --arg r "$repo" '$r | @uri')
+  gitlab GET "/projects/$id" >/dev/null 2>&1 ||
+    fail "$E_APP" "no access to $repo: add the bot @$BOT_LOGIN to the project as a Maintainer"
+  # Membership through parent groups counts; an administrator of the instance is no member at all.
+  level=$(gitlab GET "/projects/$id/members/all/$BOT_ID" 2>/dev/null | jq -r '.access_level // 0') || level=0
+  if ((${level:-0} < 40)) && [[ $BOT_ADMIN != true ]]; then
+    fail "$E_APP" "the bot @$BOT_LOGIN is not a Maintainer of $repo (access level ${level:-0}): it merges and manages the webhook"
+  fi
+  # The webhook (R13): one per address; the one of the old address is moved. The secret is in the jq body.
+  hooks=$(gitlab GET "/projects/$id/hooks?per_page=100") || fail "$E_APP" "failed to read the webhooks of $repo"
+  hook=$(jq -r --arg u "$url" --arg o "${OLD_HOOK_URL:-}" \
+    '[.[] | select(.url == $u or ($o != "" and .url == $o))][0].id // empty' <<<"$hooks")
+  method=POST path="/projects/$id/hooks"
+  [[ -n $hook ]] && method=PUT path="/projects/$id/hooks/$hook"
+  local answer reason host
+  if ! answer=$(printf '%s' "$PAYLOAD" | jq -c --arg url "$url" '{url: $url, token: .secrets.WEBHOOK_SECRET,
+      push_events: true, tag_push_events: true, merge_requests_events: true, note_events: true, pipeline_events: true,
+      enable_ssl_verification: true}' | gitlab "$method" "$path"); then
+    # GitLab says why in the body: {"message": …} or {"error": …}.
+    reason=$(jq -r '(.message // .error // empty) | tostring' <<<"$answer" 2>/dev/null | head -c 300) || reason=""
+    host=$(sed -E 's#^https://([^/]+)/.*#\1#' <<<"$url")
+    local msg="failed to write the webhook of $repo to $url${reason:+: GitLab answered \"$reason\"}"
+    if [[ -z $reason || $reason == *[Ii]nvalid\ url* || $reason == *local\ network* ]]; then
+      msg+="; a self-hosted GitLab refuses private addresses unless Admin → Settings → Network → Outbound requests allows them or lists $host"
+    fi
+    fail "$E_APP" "$msg"
+  fi
+  ok "GitLab: bot @$BOT_LOGIN, webhook $url on $repo"
 }
 
 # --- 5. Helm ---
@@ -377,7 +470,7 @@ main() {
   ghcr_pull
   helm_deploy
   if [[ $COMPONENT == hammurapi-core ]]; then
-    configure_app
+    configure_git
   fi
   wait_ready
 }

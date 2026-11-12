@@ -7,7 +7,7 @@ This page installs Nabu (and, if you want, Hammurapi) on one clean machine with 
 - A machine of [minikube.md](minikube.md#machine-requirements): Debian 13, or RHEL, Rocky or AlmaLinux 9 and 10, x86_64, 4 vCPU, 16 GB of memory, 80 GB of free disk. Log in as a regular user with passwordless `sudo`, not as root.
 - Ports 80 and 443 of the machine open from the internet: Let's Encrypt checks them before issuing certificates. If a load balancer of your team terminates TLS in front of the machine, only port 80 has to be open to it; the wizard asks for that ([external-kubernetes.md](external-kubernetes.md#tls-on-a-load-balancer)).
 - A domain whose hosts point to the machine: `nabu.<domain>`, `nabu-api.<domain>`, `grafana.<domain>`, and `hammurapi.<domain>`, `hammurapi-api.<domain>` for Hammurapi. A wildcard record `*.<domain>` covers them all. Without a domain the installer uses `<IP>.sslip.io`, which shares the limits of Let's Encrypt with everyone else.
-- A way for people to sign in: a GitHub OAuth app, or an OpenID Connect client ([products.md](products.md#sign-in)). For Hammurapi, also its GitHub App ([products.md](products.md#hammurapi)).
+- A way for people to sign in: a GitHub OAuth app, or an OpenID Connect client ([products.md](products.md#sign-in)). For Hammurapi, also its GitHub App ([products.md](products.md#hammurapi)), or on GitLab an OAuth application and a bot ([products.md](products.md#hammurapi-on-gitlab)).
 
 ## 2. Download
 
@@ -23,13 +23,18 @@ To check the archive first, see [security.md](security.md#verifying-a-release). 
 ./installer/installer
 ```
 
+The wizard numbers its steps (`== Step 4 of 11: Sign-in ==`; the count follows the products and the cluster you
+choose). Before the answers that need something set up outside, in GitHub, GitLab or the identity provider, it lists
+what to do there, numbered, with the addresses of the install. In a terminal with colors: blue for the steps, cyan for
+the installer, yellow for what to do outside, green for your answers.
+
 The wizard asks:
 
 1. where to install: this machine (minikube) or an existing cluster;
 2. the products: Nabu, Nabu and Hammurapi, or Hammurapi with a Nabu that runs elsewhere;
 3. the domain and an e-mail for Let's Encrypt;
 4. how people sign in, and the first administrators;
-5. for Hammurapi, its GitHub App and the repository of specifications;
+5. for Hammurapi, GitHub or GitLab: its GitHub App, or the OAuth application and the bot of GitLab, and the repository of specifications;
 6. Postgres, Kafka and S3: built in or external ([resources.md](resources.md));
 7. metrics, logs and Grafana;
 8. MCP servers for agents, with the memory each one needs ([mcp.md](mcp.md));
