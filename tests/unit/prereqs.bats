@@ -257,6 +257,15 @@ setup() {
   [[ $output == *"update the kernel, reboot"* ]]
 }
 
+@test "R9: Docker enabled but stopped is started" {
+  stub dpkg-query "printf '%s' '$DOCKER_VERSION_DEB'"
+  stub systemctl '[[ $* == *is-active* ]] && exit 3; exit 0'
+  stub id '[[ $1 == -nG ]] && echo "user docker" || /usr/bin/id "$@"'
+  run install_docker
+  [ "$status" -eq 0 ]
+  called "systemctl enable --now docker"
+}
+
 @test "R9: Docker that does not start names the journal" {
   stub dpkg-query "printf '%s' '$DOCKER_VERSION_DEB'"
   stub systemctl 'exit 1'

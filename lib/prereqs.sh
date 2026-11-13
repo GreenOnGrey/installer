@@ -154,7 +154,8 @@ install_docker() {
     if os_is_el; then install_docker_el; else install_docker_deb; fi
   fi
   if os_is_el; then ensure_el_kernel_modules; fi
-  if ! systemctl is-enabled --quiet docker 2>/dev/null; then
+  # Enabled is not enough: a Docker of the machine, or one whose package start failed, may be stopped.
+  if ! systemctl is-enabled --quiet docker 2>/dev/null || ! systemctl is-active --quiet docker 2>/dev/null; then
     as_root systemctl enable --now docker >/dev/null ||
       die "$E_PREREQ" "Docker did not start, see journalctl -u docker"
   fi

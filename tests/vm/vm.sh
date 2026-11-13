@@ -163,7 +163,8 @@ state_ok || fail "$STATE did not stay"
 pass "dependencies install, the versions are locked, $STATE"
 
 # TGT-12: the real unit and script, a container in place of Traefik in a network like that of minikube.
-on_vm "sudo docker network create --subnet 192.168.49.0/24 minikube >/dev/null; sudo docker run -d --name whoami --restart=always --network minikube --ip 192.168.49.200 $WHOAMI_IMAGE >/dev/null"
+on_vm "sudo docker network create --subnet 192.168.49.0/24 minikube >/dev/null && sudo docker run -d --name whoami --restart=always --network minikube --ip 192.168.49.200 $WHOAMI_IMAGE >/dev/null" ||
+  fail "Docker does not run after the dependencies: $(on_vm 'systemctl is-enabled docker; systemctl is-active docker' 2>&1 | tr '\n' ' ')"
 on_vm "$RUN WORK_DIR=\$PWD/.work bash -c 'source ./installer; COLOR=0; setup_color; load_config \"\$PWD\" /dev/null; LB_IP=192.168.49.200; install_forward'" >"$WORK/forward.log" 2>&1 ||
   { cat "$WORK/forward.log"; fail "the forwarding unit did not start"; }
 if [[ $OS == rocky ]]; then
