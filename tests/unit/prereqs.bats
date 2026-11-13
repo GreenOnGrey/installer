@@ -259,11 +259,27 @@ setup() {
 
 @test "R9: Docker enabled but stopped is started, with its socket that a purge of docker.io left off" {
   stub dpkg-query "printf '%s' '$DOCKER_VERSION_DEB'"
-  stub systemctl '[[ $* == *is-active* ]] && exit 3; [[ $* == "list-unit-files docker.socket" ]] && echo "docker.socket disabled enabled"; exit 0'
+  # is-active fails until the socket restarts; the socket of a purged docker.io is restarted, not just started.
+  stub systemctl '[[ $* == *is-active* ]] && { [[ -f '"$BATS_TEST_TMPDIR"'/up ]] || exit 3; exit 0; }
+    [[ $* == "restart docker.socket" ]] && touch '"$BATS_TEST_TMPDIR"'/up
+    [[ $* == "list-unit-files docker.socket" ]] && echo "docker.socket disabled enabled"; exit 0'
   stub id '[[ $1 == -nG ]] && echo "user docker" || /usr/bin/id "$@"'
+  as_root() { "$@"; }
   run install_docker
   [ "$status" -eq 0 ]
-  called "as_root systemctl enable --now docker.socket docker"
+  called "systemctl enable docker.socket docker"
+  called "systemctl restart docker.socket"
+  called "systemctl start docker"
+}
+
+@test "R9: systemctl reports success but Docker stays down: code 11, not a false success" {
+  stub dpkg-query "printf '%s' '$DOCKER_VERSION_DEB'"
+  stub systemctl '[[ $* == *is-active* ]] && exit 3; exit 0'
+  stub id '[[ $1 == -nG ]] && echo "user docker" || /usr/bin/id "$@"'
+  as_root() { "$@"; }
+  run install_docker
+  [ "$status" -eq 11 ]
+  [[ $output == *"Docker did not start"* ]]
 }
 
 @test "R9: Docker that does not start names the journal" {

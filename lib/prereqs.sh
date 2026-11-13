@@ -155,14 +155,25 @@ install_docker() {
   fi
   if os_is_el; then ensure_el_kernel_modules; fi
   # Enabled is not enough: a Docker of the machine, or one whose package start failed, may be stopped. docker.service
-  # listens on fd:// of docker.socket, which a purge of docker.io leaves disabled: without it dockerd exits at once.
-  local units=(docker) sockets
+  # listens on fd:// of docker.socket, and a socket left running by a purged docker.io loses its descriptor when
+  # docker-ce replaces the unit ("not functional until restarted"): the socket is restarted, not just started.
+  # systemctl enable --now may report success when the start failed, so the result is checked apart.
+  local sockets
   sockets=$(systemctl list-unit-files docker.socket 2>/dev/null || true)
-  if grep -q '^docker\.socket' <<<"$sockets"; then units=(docker.socket docker); fi
   if ! systemctl is-enabled --quiet docker 2>/dev/null || ! systemctl is-active --quiet docker 2>/dev/null; then
-    as_root systemctl reset-failed docker >/dev/null 2>&1 || true
-    as_root systemctl enable --now "${units[@]}" >/dev/null ||
-      die "$E_PREREQ" "Docker did not start, see journalctl -u docker"
+    if grep -q '^docker\.socket' <<<"$sockets"; then
+      as_root systemctl reset-failed docker.socket docker >/dev/null 2>&1 || true
+      as_root systemctl enable docker.socket docker >/dev/null 2>&1 &&
+        as_root systemctl restart docker.socket >/dev/null 2>&1 &&
+        as_root systemctl start docker >/dev/null 2>&1 ||
+        die "$E_PREREQ" "Docker did not start, see journalctl -u docker -u docker.socket"
+    else
+      as_root systemctl reset-failed docker >/dev/null 2>&1 || true
+      as_root systemctl enable --now docker >/dev/null 2>&1 ||
+        die "$E_PREREQ" "Docker did not start, see journalctl -u docker"
+    fi
+    systemctl is-active --quiet docker 2>/dev/null ||
+      die "$E_PREREQ" "Docker did not start, see journalctl -u docker -u docker.socket"
   fi
   local user=${SUDO_USER:-$(id -un)}
   if [[ $user != root ]] && ! id -nG "$user" | tr ' ' '\n' | grep -qx docker; then
