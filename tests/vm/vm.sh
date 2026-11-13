@@ -151,7 +151,7 @@ on_vm "$remove"
 pass "TGT-05: $conflict gives code 10 and stays"
 
 # Dependencies through the code of the installer. The group docker reaches this session only through sg.
-on_vm "$RUN WORK_DIR=\$PWD/.work bash -c 'mkdir -p .work; source ./installer; COLOR=0; setup_color; load_config \"\$PWD\" /dev/null; check_host; install_prereqs'" >"$WORK/prereqs.log" 2>&1 ||
+on_vm "$RUN VERBOSE=1 WORK_DIR=\$PWD/.work bash -c 'mkdir -p .work; source ./installer; COLOR=0; setup_color; load_config \"\$PWD\" /dev/null; check_host; install_prereqs'" >"$WORK/prereqs.log" 2>&1 ||
   { tail -20 "$WORK/prereqs.log"; fail "dependencies did not install"; }
 for tool in docker kubectl helm minikube; do on_vm "command -v $tool >/dev/null" || fail "$tool is not installed"; done
 if [[ $OS == rocky ]]; then
@@ -164,7 +164,13 @@ pass "dependencies install, the versions are locked, $STATE"
 
 # TGT-12: the real unit and script, a container in place of Traefik in a network like that of minikube.
 on_vm "sudo docker network create --subnet 192.168.49.0/24 minikube >/dev/null && sudo docker run -d --name whoami --restart=always --network minikube --ip 192.168.49.200 $WHOAMI_IMAGE >/dev/null" ||
-  fail "Docker does not run after the dependencies: $(on_vm 'systemctl is-enabled docker; systemctl is-active docker' 2>&1 | tr '\n' ' ')"
+  {
+    echo "--- the dependencies, at $(on_vm date -u +%T)"
+    grep -i docker "$WORK/prereqs.log" || true
+    on_vm 'systemctl list-unit-files "docker*" --no-pager; systemctl status docker.socket docker --no-pager -l | head -40
+      sudo journalctl -b -u docker.socket --no-pager | tail -20' 2>&1 || true
+    fail "Docker does not run after the dependencies"
+  }
 on_vm "$RUN WORK_DIR=\$PWD/.work bash -c 'source ./installer; COLOR=0; setup_color; load_config \"\$PWD\" /dev/null; LB_IP=192.168.49.200; install_forward'" >"$WORK/forward.log" 2>&1 ||
   { cat "$WORK/forward.log"; fail "the forwarding unit did not start"; }
 if [[ $OS == rocky ]]; then
