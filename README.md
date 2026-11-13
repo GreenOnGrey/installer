@@ -4,7 +4,7 @@ Installs GreenOnGrey products, Nabu and Hammurapi, with one command. It installs
 
 ## Quick start
 
-On Debian 13, or RHEL, Rocky or AlmaLinux 9 and 10, as a user with `sudo`:
+On Debian 13, Ubuntu 24.04 or 26.04 LTS, or RHEL, Rocky or AlmaLinux 9 and 10, as a user with `sudo`:
 
 ```sh
 curl -fsSL https://github.com/GreenOnGrey/installer/releases/latest/download/installer.tar.gz | tar xz && ./installer/installer
@@ -86,4 +86,4 @@ bats tests/unit             # bats-core ≥ 1.5
 tests/manifests.sh          # helm ≥ 3.17, kubeconform, jq, yq
 ```
 
-The e2e workflow (`.github/workflows/e2e.yml`, run manually) creates an `e2-standard-4` machine with a clean Debian 13, runs `install`, a repeated `install`, a reboot, failure scenarios and `uninstall`, writes stage times to a report and deletes the machine. Run it before a release of this repository and when `config/versions.env`, `values/` or `charts/` change.
+The e2e workflow (`.github/workflows/e2e.yml`, run manually) creates an `e2-standard-4` machine with a clean Debian 13 (or Ubuntu 24.04 or 26.04, input `os`), runs `install`, a repeated `install`, a reboot, failure scenarios and `uninstall`, writes stage times to a report and deletes the machine. Run it before a release of this repository and when `config/versions.env`, `values/` or `charts/` change. The vm workflow (`.github/workflows/vm.yml`) runs on a pull request that changes the preparation of the machine: Rocky 9 and 10 and Ubuntu 24.04 and 26.04 under KVM, with conflicts, dependencies, forwarding of ports, `up` and a reboot.

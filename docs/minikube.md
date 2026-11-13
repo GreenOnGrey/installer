@@ -6,7 +6,7 @@
 
 | | Minimum |
 |---|---|
-| OS | x86_64: Debian 13 (trixie), or RHEL, Rocky or AlmaLinux 9 and 10. SELinux may stay enforcing. `podman` and `runc` conflict with Docker CE: remove them first |
+| OS | x86_64: Debian 13 (trixie), Ubuntu 24.04 (noble) or 26.04 (resolute) LTS, or RHEL, Rocky or AlmaLinux 9 and 10. SELinux may stay enforcing, ufw may stay on. Docker Engine already installed from packages (Docker CE, `docker.io` of Ubuntu or Debian), version 20.10 or newer, is used as it is: the installer neither replaces nor updates it. Without one, the installer sets up Docker CE, and what Docker CE would replace stops it: `podman` and `runc` on EL; `containerd`, `runc`, `podman-docker` on Debian and Ubuntu. The snap `docker` stops it always: the stand needs `docker.service`. A Docker CE whose packages are held (`apt-mark hold`, `dnf versionlock`) counts as the installer's own and follows its pinned version |
 | CPU, memory | 4 vCPU, 16 GB (the default profile takes 3 CPU and 12 GB) |
 | Disk | 80 GB free; a 100 GB disk is recommended |
 | User | A regular user with passwordless `sudo`. Not root: minikube with the docker driver does not run as root |
