@@ -4,7 +4,7 @@
 #
 #   GCP_PROJECT=… GCP_ZONE=europe-west1-b tests/e2e/e2e.sh
 #
-# Creates an e2-standard-4 machine with a clean Debian 13, copies the working copy,
+# Creates an e2-standard-4 machine with a clean E2E_OS (debian-13 by default; ubuntu-2404, ubuntu-2604), copies the working copy,
 # runs the scenarios and deletes the machine. Stage times are in the report (success metrics).
 # E2E_UPGRADE_FROM=<tag> runs only the upgrade from that tag (PROD-01).
 set -euo pipefail
@@ -15,6 +15,13 @@ INSTANCE=${GCP_INSTANCE:-installer-e2e-$(date -u +%Y%m%d%H%M%S)}
 MACHINE_TYPE=${MACHINE_TYPE:-e2-standard-4}
 REPORT=${REPORT:-$ROOT/.work/e2e-report.md}
 KEEP=${KEEP:-0}
+E2E_OS=${E2E_OS:-debian-13}
+case $E2E_OS in
+  debian-13) IMAGE=(--image-family debian-13 --image-project debian-cloud) OS_NAME="Debian 13" ;;
+  ubuntu-2404) IMAGE=(--image-family ubuntu-2404-lts-amd64 --image-project ubuntu-os-cloud) OS_NAME="Ubuntu 24.04" ;;
+  ubuntu-2604) IMAGE=(--image-family ubuntu-2604-lts-amd64 --image-project ubuntu-os-cloud) OS_NAME="Ubuntu 26.04" ;;
+  *) echo "E2E_OS: debian-13, ubuntu-2404 or ubuntu-2604, not $E2E_OS" >&2; exit 2 ;;
+esac
 REMOTE_DIR=installer
 FAILED=0
 
@@ -22,7 +29,7 @@ mkdir -p "$(dirname "$REPORT")"
 {
   echo "# e2e installer — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo
-  echo "Machine: $MACHINE_TYPE, Debian 13, $GCP_ZONE. Commit: $(git -C "$ROOT" rev-parse --short HEAD)."
+  echo "Machine: $MACHINE_TYPE, $OS_NAME, $GCP_ZONE. Commit: $(git -C "$ROOT" rev-parse --short HEAD)."
   echo
   echo "| ID | Scenario | Result | Time, s |"
   echo "|---|---|---|---|"
@@ -57,7 +64,7 @@ trap cleanup EXIT
 
 echo "=== creating machine $INSTANCE"
 g compute instances create "$INSTANCE" --zone "$GCP_ZONE" --machine-type "$MACHINE_TYPE" \
-  --image-family debian-13 --image-project debian-cloud --boot-disk-size 100GB --boot-disk-type pd-balanced \
+  "${IMAGE[@]}" --boot-disk-size 100GB --boot-disk-type pd-balanced \
   --metadata enable-oslogin=TRUE >/dev/null
 for _ in $(seq 1 30); do on_vm true 2>/dev/null && break || sleep 10; done 2>/dev/null || true
 git -C "$ROOT" archive --format=tar.gz --prefix="$REMOTE_DIR/" HEAD >"$ROOT/.work/e2e.tar.gz"

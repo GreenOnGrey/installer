@@ -1,20 +1,20 @@
 # shellcheck shell=bash
 # Installs dependencies (R2, FTR.INFRA.INST-0001 R9): utilities, Docker Engine, kubectl, Helm, minikube.
-# A component of the right version is skipped.
+# A component of the right version is skipped. apt waits for the lock: on a fresh Ubuntu, unattended-upgrades holds it.
 
 BIN_DIR=${BIN_DIR:-/usr/local/bin}
 APT_UPDATED=0
 
 apt_update_once() {
   if [[ $APT_UPDATED == 0 ]]; then
-    retry 3 10 as_root apt-get update -qq || die "$E_PREREQ" "apt-get update failed"
+    retry 3 10 as_root apt-get -o DPkg::Lock::Timeout=300 update -qq || die "$E_PREREQ" "apt-get update failed"
     APT_UPDATED=1
   fi
 }
 
 apt_install() {
   apt_update_once
-  retry 3 10 as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --allow-downgrades "$@" >/dev/null ||
+  retry 3 10 as_root env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -qq --allow-downgrades "$@" >/dev/null ||
     die "$E_PREREQ" "failed to install: $*"
 }
 
@@ -27,7 +27,7 @@ pkg_installed() {
     # whatprovides: curl of EL comes as curl-minimal, and installing curl over it is a conflict.
     rpm -q --whatprovides "$1" >/dev/null 2>&1
   else
-    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q '^install ok installed$'
+    host_deb_installed "$1"
   fi
 }
 
@@ -52,24 +52,61 @@ docker_installed_version() {
   fi
 }
 
+# docker_version_suffix — the part of the names DOCKER_VERSION_*, CONTAINERD_VERSION_* of this machine:
+# DEB, UBUNTU_2404, RPM_EL9. Docker builds packages for each release apart (FTR.INFRA.INST-0001 tech §5).
+docker_version_suffix() {
+  if os_is_el; then
+    echo "RPM_EL$(os_major)"
+  elif os_is_ubuntu; then
+    local v
+    v=$(os_field VERSION_ID)
+    echo "UBUNTU_${v//./}"
+  else
+    echo DEB
+  fi
+}
+
 docker_wanted_version() {
-  local var=DOCKER_VERSION_DEB
-  if os_is_el; then var=DOCKER_VERSION_RPM_EL$(os_major); fi
+  local var
+  var=DOCKER_VERSION_$(docker_version_suffix)
   echo "${!var}"
 }
 
+# docker_apt_repo — the distribution and suite of the apt repository of Docker.
+docker_apt_repo() {
+  if os_is_ubuntu; then
+    case $(os_field VERSION_ID) in
+      24.04) echo "ubuntu noble" ;;
+      26.04) echo "ubuntu resolute" ;;
+    esac
+  else
+    echo "debian trixie"
+  fi
+}
+
 install_docker_deb() {
+  local dist suite docker containerd suffix
+  read -r dist suite <<<"$(docker_apt_repo)"
+  suffix=$(docker_version_suffix)
+  docker=DOCKER_VERSION_$suffix containerd=CONTAINERD_VERSION_$suffix
   as_root install -m 0755 -d /etc/apt/keyrings
+  # The key is one for Debian and Ubuntu; the file stays from an earlier run.
   if [[ ! -s /etc/apt/keyrings/docker.asc ]]; then
-    retry 3 10 curl -fsSL https://download.docker.com/linux/debian/gpg -o "$WORK_DIR/docker.asc" ||
+    retry 3 10 curl -fsSL "https://download.docker.com/linux/$dist/gpg" -o "$WORK_DIR/docker.asc" ||
       die "$E_PREREQ" "failed to download the Docker repository key"
     as_root install -m 0644 "$WORK_DIR/docker.asc" /etc/apt/keyrings/docker.asc
   fi
-  echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian trixie stable" |
+  echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$dist $suite stable" |
     as_root tee /etc/apt/sources.list.d/docker.list >/dev/null
   APT_UPDATED=0
-  apt_install "docker-ce=$DOCKER_VERSION_DEB" "docker-ce-cli=$DOCKER_VERSION_DEB" "containerd.io=$CONTAINERD_VERSION_DEB"
-  as_root apt-mark hold docker-ce docker-ce-cli containerd.io >/dev/null
+  # The hold of an older run would stop the version asked for, as the versionlock does on EL.
+  if dpkg-query -W docker-ce >/dev/null 2>&1; then
+    retry 3 10 as_root apt-mark unhold docker-ce docker-ce-cli containerd.io >/dev/null ||
+      die "$E_PREREQ" "apt-mark unhold of Docker failed"
+  fi
+  apt_install "docker-ce=${!docker}" "docker-ce-cli=${!docker}" "containerd.io=${!containerd}"
+  retry 3 10 as_root apt-mark hold docker-ce docker-ce-cli containerd.io >/dev/null ||
+    die "$E_PREREQ" "apt-mark hold of Docker failed"
 }
 
 # ensure_el_kernel_modules — on EL10 the netfilter modules that Docker needs are in kernel-modules-extra, which a
@@ -106,16 +143,37 @@ EOF
 }
 
 install_docker() {
-  if [[ $(docker_installed_version) == "$(docker_wanted_version)" ]]; then
+  local engine
+  engine=$(docker_engine_version)
+  if [[ -n $engine ]] && ! docker_managed; then
+    log "Docker $engine of the machine is used as it is"
+  elif [[ $(docker_installed_version) == "$(docker_wanted_version)" ]]; then
     debug "Docker $(docker_wanted_version) is already installed"
   else
     log "Docker Engine $(docker_wanted_version)"
     if os_is_el; then install_docker_el; else install_docker_deb; fi
   fi
   if os_is_el; then ensure_el_kernel_modules; fi
-  if ! systemctl is-enabled --quiet docker 2>/dev/null; then
-    as_root systemctl enable --now docker >/dev/null ||
-      die "$E_PREREQ" "Docker did not start, see journalctl -u docker"
+  # Enabled is not enough: a Docker of the machine, or one whose package start failed, may be stopped. docker.service
+  # listens on fd:// of docker.socket, and a socket left running by a purged docker.io loses its descriptor when
+  # docker-ce replaces the unit ("not functional until restarted"): the socket is restarted, not just started.
+  # systemctl enable --now may report success when the start failed, so the result is checked apart.
+  local sockets
+  sockets=$(systemctl list-unit-files docker.socket 2>/dev/null || true)
+  if ! systemctl is-enabled --quiet docker 2>/dev/null || ! systemctl is-active --quiet docker 2>/dev/null; then
+    if grep -q '^docker\.socket' <<<"$sockets"; then
+      as_root systemctl reset-failed docker.socket docker >/dev/null 2>&1 || true
+      as_root systemctl enable docker.socket docker >/dev/null 2>&1 &&
+        as_root systemctl restart docker.socket >/dev/null 2>&1 &&
+        as_root systemctl start docker >/dev/null 2>&1 ||
+        die "$E_PREREQ" "Docker did not start, see journalctl -u docker -u docker.socket"
+    else
+      as_root systemctl reset-failed docker >/dev/null 2>&1 || true
+      as_root systemctl enable --now docker >/dev/null 2>&1 ||
+        die "$E_PREREQ" "Docker did not start, see journalctl -u docker"
+    fi
+    systemctl is-active --quiet docker 2>/dev/null ||
+      die "$E_PREREQ" "Docker did not start, see journalctl -u docker -u docker.socket"
   fi
   local user=${SUDO_USER:-$(id -un)}
   if [[ $user != root ]] && ! id -nG "$user" | tr ' ' '\n' | grep -qx docker; then
@@ -205,5 +263,5 @@ install_prereqs() {
   install_kubectl
   install_helm
   install_minikube
-  ok "Docker $(docker_installed_version), kubectl $(kubectl_minor), Helm $(helm_installed_version), minikube $(minikube_installed_version)"
+  ok "Docker $(docker_engine_version), kubectl $(kubectl_minor), Helm $(helm_installed_version), minikube $(minikube_installed_version)"
 }

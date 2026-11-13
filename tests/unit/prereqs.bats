@@ -9,6 +9,36 @@ setup() {
   load_script
   os_release debian 13
   as_root() { echo "as_root $*" >>"$CALLS"; }
+  # The runner of CI has its own Docker: a test that needs one says so.
+  docker_engine_version() { :; }
+}
+
+@test "TGT-14: Docker of the machine that the installer did not put: used as it is, nothing installs or holds" {
+  os_release ubuntu 24.04
+  docker_engine_version() { echo 28.2.2; }
+  stub apt-mark 'exit 0'
+  stub systemctl 'exit 0'
+  stub id '[[ $1 == -nG ]] && echo "user" || /usr/bin/id "$@"'
+  run install_docker
+  [ "$status" -eq 0 ]
+  [[ $output == *"Docker 28.2.2 of the machine is used as it is"* ]]
+  not_called "apt-get"
+  not_called "docker-ce="
+  not_called "apt-mark hold"
+  called "usermod -aG docker"
+}
+
+@test "TGT-14: Docker that the installer put (held) follows versions.env" {
+  os_release ubuntu 24.04
+  docker_engine_version() { echo 29.0.0; }
+  stub apt-mark '[[ $1 == showhold ]] && echo docker-ce; exit 0'
+  stub dpkg-query "[[ \$* == *Version* ]] && printf '%s' '5:29.0.0-1~ubuntu.24.04~noble'; exit 0"
+  stub curl 'exit 0'
+  stub systemctl 'exit 0'
+  stub id '[[ $1 == -nG ]] && echo "user docker" || /usr/bin/id "$@"'
+  run install_docker
+  [ "$status" -eq 0 ]
+  called "docker-ce=$DOCKER_VERSION_UBUNTU_2404"
 }
 
 @test "PRE-02: Docker of the right version: no apt-get install, the service does not restart" {
@@ -58,13 +88,69 @@ setup() {
 
 @test "R2: all versions of components and charts are set in versions.env" {
   local k
-  for k in DOCKER_VERSION_DEB DOCKER_VERSION_RPM_EL9 DOCKER_VERSION_RPM_EL10 KUBECTL_BIN_VERSION K8S_VERSION KUBECTL_MINOR HELM_VERSION HELM_SHA256 MINIKUBE_VERSION MINIKUBE_SHA256 \
+  for k in DOCKER_VERSION_DEB DOCKER_VERSION_UBUNTU_2404 CONTAINERD_VERSION_UBUNTU_2404 DOCKER_VERSION_UBUNTU_2604 CONTAINERD_VERSION_UBUNTU_2604 DOCKER_VERSION_RPM_EL9 DOCKER_VERSION_RPM_EL10 KUBECTL_BIN_VERSION K8S_VERSION KUBECTL_MINOR HELM_VERSION HELM_SHA256 MINIKUBE_VERSION MINIKUBE_SHA256 \
     STRIMZI_CHART_VERSION KAFKA_VERSION CNPG_CHART_VERSION POSTGRES_IMAGE SEAWEEDFS_CHART_VERSION \
     VM_SINGLE_CHART_VERSION VL_SINGLE_CHART_VERSION VMAGENT_CHART_VERSION KSM_CHART_VERSION \
     NODE_EXPORTER_CHART_VERSION VECTOR_CHART_VERSION GRAFANA_CHART_VERSION VL_PLUGIN_VERSION; do
     grep -q "^$k=." "$ROOT/config/versions.env" || { echo "no $k"; return 1; }
   done
   [[ $HELM_SHA256 =~ ^[0-9a-f]{64}$ && $MINIKUBE_SHA256 =~ ^[0-9a-f]{64}$ && $KUBECTL_SHA256 =~ ^[0-9a-f]{64}$ ]]
+}
+
+# --- Ubuntu (FTR.INFRA.INST-0001 R9) ---
+
+@test "R9: Docker on Ubuntu 24.04 and 26.04: the repository of ubuntu, the versions of the release, apt-mark" {
+  local release suite var
+  for release in 24.04:noble 26.04:resolute; do
+    suite=${release#*:} release=${release%:*}
+    os_release ubuntu "$release"
+    : >"$CALLS"
+    stub dpkg-query 'exit 1'
+    stub curl 'exit 0'
+    stub systemctl 'exit 0'
+    stub id '[[ $1 == -nG ]] && echo "user docker" || /usr/bin/id "$@"'
+    as_root() { echo "as_root $*" >>"$CALLS"; [[ $1 == tee ]] && cat >"$BATS_TEST_TMPDIR/repo"; return 0; }
+    run install_docker
+    [ "$status" -eq 0 ] || { echo "$release: $output"; return 1; }
+    var=DOCKER_VERSION_UBUNTU_${release//./}
+    [[ ${!var} == *"~ubuntu.$release~$suite" ]]
+    called "docker-ce=${!var}"
+    var=CONTAINERD_VERSION_UBUNTU_${release//./}
+    called "containerd.io=${!var}"
+    called "download.docker.com/linux/ubuntu/gpg"
+    called "apt-mark hold docker-ce docker-ce-cli containerd.io"
+    grep -qx "deb \[arch=amd64 signed-by=/etc/apt/keyrings/docker.asc\] https://download.docker.com/linux/ubuntu $suite stable" "$BATS_TEST_TMPDIR/repo"
+  done
+}
+
+@test "R9: Docker of another version on Ubuntu: the hold of the earlier run is released before the install" {
+  os_release ubuntu 24.04
+  stub dpkg-query "[[ \$* == *Version* ]] && printf '%s' '5:28.0.0-1~ubuntu.24.04~noble'; exit 0"
+  stub curl 'exit 0'
+  stub systemctl 'exit 0'
+  stub id '[[ $1 == -nG ]] && echo "user docker" || /usr/bin/id "$@"'
+  run install_docker
+  [ "$status" -eq 0 ]
+  [ "$(grep -n 'apt-mark unhold' "$CALLS" | cut -d: -f1)" -lt "$(grep -n "docker-ce=$DOCKER_VERSION_UBUNTU_2404" "$CALLS" | cut -d: -f1)" ]
+  [ "$(grep -n "docker-ce=$DOCKER_VERSION_UBUNTU_2404" "$CALLS" | cut -d: -f1)" -lt "$(grep -n 'apt-mark hold' "$CALLS" | cut -d: -f1)" ]
+}
+
+@test "R9: Docker of the right version on Ubuntu: apt-get is not called" {
+  os_release ubuntu 26.04
+  stub dpkg-query "printf '%s' '$DOCKER_VERSION_UBUNTU_2604'"
+  stub systemctl 'exit 0'
+  stub id '[[ $1 == -nG ]] && echo "user docker" || /usr/bin/id "$@"'
+  run install_docker
+  [ "$status" -eq 0 ]
+  not_called "apt-get"
+}
+
+@test "R9: apt waits for the lock that unattended-upgrades of a fresh Ubuntu holds" {
+  as_root() { echo "as_root $*" >>"$CALLS"; }
+  run apt_install jq
+  [ "$status" -eq 0 ]
+  called "apt-get -o DPkg::Lock::Timeout=300 update"
+  called "apt-get -o DPkg::Lock::Timeout=300 install -y -qq --allow-downgrades jq"
 }
 
 # --- RHEL and its rebuilds (FTR.INFRA.INST-0001 R9) ---
@@ -169,6 +255,31 @@ setup() {
   run ensure_el_kernel_modules
   [ "$status" -eq 11 ]
   [[ $output == *"update the kernel, reboot"* ]]
+}
+
+@test "R9: Docker enabled but stopped is started, with its socket that a purge of docker.io left off" {
+  stub dpkg-query "printf '%s' '$DOCKER_VERSION_DEB'"
+  # is-active fails until the socket restarts; the socket of a purged docker.io is restarted, not just started.
+  stub systemctl '[[ $* == *is-active* ]] && { [[ -f '"$BATS_TEST_TMPDIR"'/up ]] || exit 3; exit 0; }
+    [[ $* == "restart docker.socket" ]] && touch '"$BATS_TEST_TMPDIR"'/up
+    [[ $* == "list-unit-files docker.socket" ]] && echo "docker.socket disabled enabled"; exit 0'
+  stub id '[[ $1 == -nG ]] && echo "user docker" || /usr/bin/id "$@"'
+  as_root() { "$@"; }
+  run install_docker
+  [ "$status" -eq 0 ]
+  called "systemctl enable docker.socket docker"
+  called "systemctl restart docker.socket"
+  called "systemctl start docker"
+}
+
+@test "R9: systemctl reports success but Docker stays down: code 11, not a false success" {
+  stub dpkg-query "printf '%s' '$DOCKER_VERSION_DEB'"
+  stub systemctl '[[ $* == *is-active* ]] && exit 3; exit 0'
+  stub id '[[ $1 == -nG ]] && echo "user docker" || /usr/bin/id "$@"'
+  as_root() { "$@"; }
+  run install_docker
+  [ "$status" -eq 11 ]
+  [[ $output == *"Docker did not start"* ]]
 }
 
 @test "R9: Docker that does not start names the journal" {

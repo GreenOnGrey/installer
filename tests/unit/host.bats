@@ -13,6 +13,8 @@ setup() {
   host_cpus() { echo 4; }
   host_has_sudo() { return 0; }
   host_free_disk_gb() { echo 100; }
+  # The runner of CI has its own Docker: a test that needs one says so.
+  docker_engine_version() { :; }
 }
 
 @test "HOST-01: Debian 12: code 10, nothing installs" {
@@ -84,16 +86,122 @@ setup() {
   done
 }
 
+@test "R9: Ubuntu 24.04 and 26.04 LTS fit" {
+  host_deb_installed() { return 1; }
+  host_snap_installed() { return 1; }
+  local d
+  for d in "ubuntu 24.04" "ubuntu 26.04"; do
+    # shellcheck disable=SC2086
+    os_release $d
+    run check_host
+    [ "$status" -eq 0 ] || { echo "$d: $output"; return 1; }
+    [[ $output == *"machine is suitable: $d"* ]]
+  done
+}
+
 @test "TGT-04: other systems and versions: code 10, the supported ones are named" {
   host_rpm_installed() { return 1; }
+  host_deb_installed() { return 1; }
+  host_snap_installed() { return 1; }
   local d
-  for d in "ubuntu 24.04" "rocky 8.10" "centos 9" "fedora 41"; do
+  for d in "ubuntu 22.04" "ubuntu 25.10" "rocky 8.10" "centos 9" "fedora 41"; do
     # shellcheck disable=SC2086
     os_release $d
     run check_host
     [ "$status" -eq 10 ] || { echo "$d: $status"; return 1; }
-    [[ $output == *"RHEL, Rocky or AlmaLinux 9 and 10"* ]]
+    [[ $output == *"Debian 13, Ubuntu 24.04 or 26.04 LTS, RHEL, Rocky or AlmaLinux 9 and 10"* ]]
   done
+  # A derivative of Ubuntu on the base of 24.04 is not Ubuntu (tech decision 49).
+  printf 'ID=linuxmint\nID_LIKE="ubuntu debian"\nVERSION_ID="22"\nUBUNTU_CODENAME=noble\n' >"$OS_RELEASE_FILE"
+  run check_host
+  [ "$status" -eq 10 ]
+  [[ $output == *"unsupported OS: linuxmint 22"* ]]
+}
+
+@test "TGT-05: Ubuntu with docker.io or the snap of Docker: code 10 with the reason, nothing removed" {
+  os_release ubuntu 24.04
+  stub apt-get 'exit 0'
+  stub dpkg-query '[[ $* == *docker.io* ]] && echo "install ok installed"'
+  stub snap 'exit 1'
+  run check_host
+  [ "$status" -eq 10 ]
+  [[ $output == *"docker.io conflicts with Docker CE"* && $output == *"nothing was removed"* ]]
+  not_called apt-get
+
+  stub dpkg-query 'exit 1'
+  stub snap '[[ $* == "list docker" ]]'
+  run check_host
+  [ "$status" -eq 10 ]
+  [[ $output == *"snap docker conflicts with Docker CE"* ]]
+}
+
+@test "TGT-14: Docker of the machine is used: docker.io on Ubuntu, podman beside Docker on EL pass" {
+  docker_engine_version() { echo 28.2.2; }
+  docker_managed() { return 1; }
+  stub snap 'exit 1'
+  os_release ubuntu 24.04
+  stub dpkg-query 'echo "install ok installed"'
+  run check_host
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  os_release rocky 9.4
+  stub rpm 'exit 0'
+  run check_host
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "TGT-14: Docker of the machine older than the minimum: code 10, update or remove it" {
+  docker_engine_version() { echo 19.03.13; }
+  docker_managed() { return 1; }
+  stub snap 'exit 1'
+  stub dpkg-query 'exit 1'
+  local d
+  for d in "debian 13" "ubuntu 24.04" "rocky 9.4"; do
+    # shellcheck disable=SC2086
+    os_release $d
+    run check_host
+    [ "$status" -eq 10 ] || { echo "$d: $status $output"; return 1; }
+    [[ $output == *"Docker 19.03.13 of the machine is older than $DOCKER_MIN_VERSION: update or remove it"* ]]
+  done
+}
+
+@test "R9: the Docker Engine of the machine is the one with dockerd and docker.service" {
+  # shellcheck source=../../lib/host.sh
+  source "$ROOT/lib/host.sh"
+  stub dockerd 'echo "Docker version 28.2.2, build 28.2.2-0ubuntu1~24.04.1"'
+  stub systemctl 'echo "docker.service enabled enabled"'
+  [ "$(docker_engine_version)" = 28.2.2 ]
+  # No docker.service: the snap of Docker or a dockerd without its unit.
+  stub systemctl 'echo "0 unit files listed."'
+  # shellcheck disable=SC2218 # restored from lib/host.sh above, not the stub of setup
+  [ -z "$(docker_engine_version)" ]
+}
+
+@test "TGT-05: the snap of Docker stops the run even beside a Docker Engine; Debian checks what docker-ce replaces" {
+  docker_engine_version() { echo 28.2.2; }
+  os_release ubuntu 26.04
+  stub dpkg-query 'exit 1'
+  stub snap '[[ $* == "list docker" ]]'
+  run check_host
+  [ "$status" -eq 10 ]
+  [[ $output == *"snap docker conflicts with Docker CE"* ]]
+
+  docker_engine_version() { :; }
+  os_release debian 13
+  stub snap 'exit 1'
+  stub dpkg-query '[[ $* == *runc* ]] && echo "install ok installed"'
+  run check_host
+  [ "$status" -eq 10 ]
+  [[ $output == *"runc conflicts with Docker CE"* ]]
+}
+
+@test "TGT-14: the Docker that the installer locked may be updated, so its conflicts are still checked" {
+  docker_engine_version() { echo 29.0.0; }
+  docker_managed() { return 0; }
+  os_release rocky 9.4
+  stub rpm '[[ $* == *podman* ]]'
+  run check_host
+  [ "$status" -eq 10 ]
+  [[ $output == *"podman conflicts with Docker CE"* ]]
 }
 
 @test "TGT-05: EL with podman: code 10 with the reason, nothing removed" {

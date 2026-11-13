@@ -40,7 +40,7 @@ Anyone with access to the cluster can read these secrets. Limit access to the ku
 ## What the installer changes
 
 **On minikube**:
-- packages: Docker Engine, kubectl, Helm, minikube;
+- packages: Docker Engine (unless the machine has one already: that one stays as it is), kubectl, Helm, minikube;
 - the systemd units `<prefix>-stand` and `<prefix>-ingress-forward`;
 - the forwarding of ports 80 and 443 (iptables, or `forward-port` with firewalld);
 - the minikube profile.

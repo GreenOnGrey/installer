@@ -214,7 +214,7 @@ wizard_section() {
 wizard_target() {
   wizard_section "Where to install"
   ask_choice INSTALL_TARGET "The cluster:" \
-    "minikube=this machine: the installer sets up Docker and minikube (Debian 13; RHEL, Rocky or AlmaLinux 9 and 10)" \
+    "minikube=this machine: the installer sets up Docker and minikube (Debian 13; Ubuntu 24.04 or 26.04 LTS; RHEL, Rocky or AlmaLinux 9 and 10)" \
     "external=an existing Kubernetes cluster from kubeconfig: nothing changes on this machine"
   if [[ $INSTALL_TARGET == minikube ]]; then
     wizard_set KUBE_CONTEXT ""

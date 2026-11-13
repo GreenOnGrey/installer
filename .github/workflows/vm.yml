@@ -1,6 +1,6 @@
-# RHEL's relatives on a real machine: a Rocky cloud image under KVM with SELinux enforcing and firewalld
-# (FTR.INFRA.INST-0001 R9). Runs when the code of the machine changes, and by hand.
-name: el
+# The supported OS on a real machine: cloud images under KVM — Rocky with SELinux enforcing and firewalld,
+# Ubuntu LTS with ufw (FTR.INFRA.INST-0001 R9). Runs when the code of the machine changes, and by hand.
+name: vm
 on:
   workflow_dispatch:
   pull_request:
@@ -13,18 +13,23 @@ on:
       - lib/host.sh
       - lib/prereqs.sh
       - lib/public.sh
-      - tests/el/**
-      - .github/workflows/el.yml
+      - tests/vm/**
+      - .github/workflows/vm.yml
 permissions: { contents: read }
 
 jobs:
-  rocky:
+  vm:
+    name: ${{ matrix.os }} ${{ matrix.release }}
     runs-on: ubuntu-24.04  # pinned: ubuntu-latest is moving to Ubuntu 26
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        release: ["9", "10"]
+        include:
+          - { os: rocky, release: "9" }
+          - { os: rocky, release: "10" }
+          - { os: ubuntu, release: "24.04" }
+          - { os: ubuntu, release: "26.04" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: QEMU with KVM
@@ -34,5 +39,5 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils genisoimage
-      - name: Rocky ${{ matrix.release }}
-        run: bash tests/el/el.sh "${{ matrix.release }}" full
+      - name: ${{ matrix.os }} ${{ matrix.release }}
+        run: bash tests/vm/vm.sh "${{ matrix.os }}" "${{ matrix.release }}" full
