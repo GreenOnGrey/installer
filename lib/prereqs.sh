@@ -154,9 +154,14 @@ install_docker() {
     if os_is_el; then install_docker_el; else install_docker_deb; fi
   fi
   if os_is_el; then ensure_el_kernel_modules; fi
-  # Enabled is not enough: a Docker of the machine, or one whose package start failed, may be stopped.
+  # Enabled is not enough: a Docker of the machine, or one whose package start failed, may be stopped. docker.service
+  # listens on fd:// of docker.socket, which a purge of docker.io leaves disabled: without it dockerd exits at once.
+  local units=(docker) sockets
+  sockets=$(systemctl list-unit-files docker.socket 2>/dev/null || true)
+  if grep -q '^docker\.socket' <<<"$sockets"; then units=(docker.socket docker); fi
   if ! systemctl is-enabled --quiet docker 2>/dev/null || ! systemctl is-active --quiet docker 2>/dev/null; then
-    as_root systemctl enable --now docker >/dev/null ||
+    as_root systemctl reset-failed docker >/dev/null 2>&1 || true
+    as_root systemctl enable --now "${units[@]}" >/dev/null ||
       die "$E_PREREQ" "Docker did not start, see journalctl -u docker"
   fi
   local user=${SUDO_USER:-$(id -un)}
