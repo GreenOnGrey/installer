@@ -182,6 +182,35 @@ install_docker() {
   fi
 }
 
+SYSCTL_FILE=${SYSCTL_FILE:-/etc/sysctl.d/zz-greenongrey.conf}
+IP_FORWARD_FILE=${IP_FORWARD_FILE:-/proc/sys/net/ipv4/ip_forward}
+SYSCTL_DIRS=${SYSCTL_DIRS:-/etc/sysctl.conf /etc/sysctl.d /run/sysctl.d /usr/lib/sysctl.d}
+
+# ensure_ip_forward — without IP forwarding the containers, the node of minikube among them, reach nothing outside
+# the machine: images do not come and the node stays not ready. Docker turns it on when it starts, and a hardened
+# image (CIS) turns it off again at boot or when an agent applies sysctl anew. The file is named to come last in
+# the order of sysctl.d; a file that still sets 0 is named (FTR.INFRA.INST-0001 R9).
+ensure_ip_forward() {
+  local f
+  # Read from /proc: sysctl is in /usr/sbin, out of the PATH of a regular user of Debian and Ubuntu.
+  if [[ $(cat "$IP_FORWARD_FILE" 2>/dev/null) != 1 ]]; then
+    as_root sysctl -q -w net.ipv4.ip_forward=1 >/dev/null || die "$E_PREREQ" "failed to turn on IP forwarding"
+    log "IP forwarding was off: turned on, containers reach the network"
+  fi
+  if [[ $(cat "$SYSCTL_FILE" 2>/dev/null) != "net.ipv4.ip_forward = 1" ]]; then
+    echo "net.ipv4.ip_forward = 1" | as_root tee "$SYSCTL_FILE" >/dev/null
+  fi
+  # shellcheck disable=SC2086 # the list of places is split on purpose
+  for f in $(grep -rlE '^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=[[:space:]]*0' $SYSCTL_DIRS 2>/dev/null || true); do
+    if [[ $f == */sysctl.conf ]]; then
+      # sysctl --system applies /etc/sysctl.conf after every file of sysctl.d.
+      warn "$f turns IP forwarding off and comes after $SYSCTL_FILE in sysctl --system: set it to 1 there, or the stand loses its network after a reboot"
+    else
+      warn "$f turns IP forwarding off; $SYSCTL_FILE comes after it, but an agent that sets the value itself breaks the network of the stand"
+    fi
+  done
+}
+
 # docker_ok — this process can use Docker without sudo.
 docker_ok() { docker info >/dev/null 2>&1; }
 
@@ -260,6 +289,7 @@ install_prereqs() {
   step prereqs
   install_utils
   install_docker
+  ensure_ip_forward
   install_kubectl
   install_helm
   install_minikube

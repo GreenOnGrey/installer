@@ -30,7 +30,8 @@ bin/nabu-deploy          deploys nabu-core/web (namespaces nabu, nabu-sandboxes;
 bin/landing-deploy       deploys the site of GreenOnGrey (namespace landing, host web.<domain>; no storages;
                          an optional domain of its own with a certificate and a redirect from www.)
 bin/stand-autostart      systemd unit <prefix>-stand: the stand starts after a VM reboot; kubelet-gc mode
-                         turns on kubelet image garbage collection (IMAGE_GC_* options)
+                         turns on kubelet image garbage collection (IMAGE_GC_* options); registry-mirrors mode
+                         writes REGISTRY_MIRRORS to containerd of the node (up and the unit run both)
 charts/hammurapi-core    api, worker, migrate, cleaner, network policies; no agent or runner — code tasks run in Nabu
 charts/hammurapi-web     the SPA
 charts/nabu-core         Nabu: api, worker, agent, relay, egress, migrate, cleaner, RBAC for sandboxes and the

@@ -48,6 +48,7 @@ Priority, lowest first: `config/defaults.env`, the config file, environment vari
 | `IMAGE_GC_HIGH` | `85` | Image disk usage, %, above which kubelet removes unused images |
 | `IMAGE_GC_LOW` | `80` | Usage, %, it removes them down to |
 | `IMAGE_GC_MAX_AGE` | `336h` | An unused image older than this is removed in any case |
+| `REGISTRY_MIRRORS` | empty | Pull-through mirrors of image registries for minikube, space-separated `<registry>=<URL>`, such as `docker.io=https://mirror.example.com` ([minikube.md](minikube.md#registry-mirrors)) |
 | `LOCK_FILE` | `/var/lock/installer.lock` | Blocks a second run on the machine (code `17`) |
 | `HELM_TIMEOUT` | `10m` | Timeout of a release |
 | `CHECK_TIMEOUT` | `5m` | Timeout of the checks |

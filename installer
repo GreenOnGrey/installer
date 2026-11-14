@@ -219,6 +219,11 @@ collect_diagnostics() {
   mkdir -p "$dir"
   kc get events -A --sort-by=.lastTimestamp >"$dir/events.txt" 2>&1 || true
   kc get pods -A -o wide >"$dir/pods.txt" 2>&1 || true
+  kc describe nodes >"$dir/nodes.txt" 2>&1 || true
+  if ! target_external; then
+    # The network of the machine: what lets containers out (IP forwarding, NAT and forwarding rules of Docker).
+    { echo "net.ipv4.ip_forward = $(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)"; as_root iptables -t nat -S POSTROUTING; as_root iptables -S FORWARD; } >"$dir/host-network.txt" 2>&1 || true
+  fi
   for ns in $(stand_namespaces); do
     while read -r pod; do
       [[ -n $pod ]] || continue

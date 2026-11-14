@@ -290,3 +290,35 @@ setup() {
   [ "$status" -eq 11 ]
   [[ $output == *"journalctl -u docker"* ]]
 }
+
+@test "HOST-06: IP forwarding off (a hardened image): turned on and kept in sysctl.d; a file that sets 0 is named" {
+  local etc=$BATS_TEST_TMPDIR/etc
+  mkdir -p "$etc/sysctl.d"
+  echo "net.ipv4.ip_forward = 0" >"$etc/sysctl.d/99-cis.conf"
+  SYSCTL_FILE=$etc/sysctl.d/zz-greenongrey.conf SYSCTL_DIRS="$etc/sysctl.conf $etc/sysctl.d" IP_FORWARD_FILE=$etc/ip_forward
+  echo 0 >"$IP_FORWARD_FILE"
+  echo "net.ipv4.ip_forward=0" >"$etc/sysctl.conf"
+  stub sysctl 'exit 0'
+  as_root() { "$@"; }
+  run ensure_ip_forward
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  called "sysctl -q -w net.ipv4.ip_forward=1"
+  [ "$(cat "$etc/sysctl.d/zz-greenongrey.conf")" = "net.ipv4.ip_forward = 1" ]
+  [[ $output == *"IP forwarding was off"* && $output == *"99-cis.conf turns IP forwarding off; "* ]]
+  [[ $output == *"sysctl.conf turns IP forwarding off and comes after"*"set it to 1 there"* ]]
+  [[ $output != *"zz-greenongrey.conf turns"* ]]
+}
+
+@test "HOST-06: IP forwarding on and kept: nothing changes" {
+  local etc=$BATS_TEST_TMPDIR/etc
+  mkdir -p "$etc/sysctl.d"
+  echo "net.ipv4.ip_forward = 1" >"$etc/sysctl.d/zz-greenongrey.conf"
+  SYSCTL_FILE=$etc/sysctl.d/zz-greenongrey.conf SYSCTL_DIRS=$etc/sysctl.d IP_FORWARD_FILE=$etc/ip_forward
+  echo 1 >"$IP_FORWARD_FILE"
+  stub sysctl 'exit 0'
+  stub tee 'cat >/dev/null'
+  run ensure_ip_forward
+  [ "$status" -eq 0 ]
+  not_called "sysctl"
+  not_called "tee"
+}

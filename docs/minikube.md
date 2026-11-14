@@ -59,6 +59,12 @@ kubectl --context greenongrey -n observability port-forward svc/grafana 3000:80 
 
 minikube turns off image garbage collection in kubelet, so old images would fill the disk. `install` and the unit turn it back on: above `IMAGE_GC_HIGH` % of image disk usage, unused images are removed down to `IMAGE_GC_LOW` %, and an unused image older than `IMAGE_GC_MAX_AGE` is removed in any case.
 
+## Registry mirrors
+
+Images come from Docker Hub, `ghcr.io`, `quay.io` and `registry.k8s.io`. If the machine reaches them only through a pull-through proxy of your network, name it in `REGISTRY_MIRRORS`: for example `REGISTRY_MIRRORS="docker.io=https://mirror.example.com"`, where `mirror.example.com/migrate/migrate` serves `docker.io/migrate/migrate`. Several registries go space-separated. A proxy that serves a registry under a path (a Harbor project) takes the full path of its API: `docker.io=https://harbor.example.com/v2/dockerhub`. The names of images do not change: containerd of the node asks the mirror first and the registry itself after it.
+
+`install` writes the mirrors before it waits for the node, whose network plugin also comes from Docker Hub, and restarts pods that were stuck pulling an image. The unit of the stand writes them again after each reboot. A registry removed from the list gets its default back. A proxy that needs a login is not supported yet.
+
 ## Uninstall
 
 `./installer uninstall` asks for confirmation (`--yes` without a terminal). It then deletes the profile with all its data and removes the units and the port forwarding. Packages (Docker, kubectl, Helm, minikube) stay. External storages and their data stay.

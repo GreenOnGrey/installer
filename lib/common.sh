@@ -330,6 +330,15 @@ validate_config() {
   validate_names
   [[ ${IMAGE_GC_MAX_AGE:-336h} =~ ^[0-9]+[hms]$ ]] ||
     die "$E_USAGE" "IMAGE_GC_MAX_AGE must be a duration like 336h, not '$IMAGE_GC_MAX_AGE'"
+  # The registry becomes a directory of certs.d in the node, and the list goes into a systemd unit: no dots of a path,
+  # no repeats, none of the specifiers and escapes of systemd (% and \).
+  local mirror seen=" "
+  for mirror in ${REGISTRY_MIRRORS:-}; do
+    [[ $mirror =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]+)?=https?://[^/\"%\\]+(/[^\"%\\]*)?$ && ${mirror%%=*} != *..* ]] ||
+      die "$E_USAGE" "REGISTRY_MIRRORS: expected <registry>=<URL>, such as docker.io=https://mirror.example.com, not '$mirror'"
+    [[ $seen != *" ${mirror%%=*} "* ]] || die "$E_USAGE" "REGISTRY_MIRRORS: ${mirror%%=*} is named twice"
+    seen+="${mirror%%=*} "
+  done
   for m in POSTGRES_MODE KAFKA_MODE S3_MODE; do
     case ${!m} in
       internal | external) ;;
