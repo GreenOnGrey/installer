@@ -53,6 +53,24 @@ setup() {
   [[ $output == *"8 GB"* && $output == *"15 GB"* ]]
 }
 
+@test "HOST-05: MK_MEMORY above the memory of the machine: code 10 before anything installs" {
+  meminfo_gb 15
+  MK_MEMORY=17g
+  run check_host
+  [ "$status" -eq 10 ]
+  [[ $output == *"MK_MEMORY=17g is more than the memory of this machine (15 GB)"* ]]
+  not_called apt-get
+  MK_MEMORY=15g
+  run check_host
+  [ "$status" -eq 0 ]
+  # The size applies only when the profile is created.
+  MK_MEMORY=17g
+  mkdir -p "$MINIKUBE_HOME/profiles/greenongrey"
+  echo '{}' >"$MINIKUBE_HOME/profiles/greenongrey/config.json"
+  run check_host
+  [ "$status" -eq 0 ]
+}
+
 @test "HOST-04: not enough CPUs: code 10" {
   host_cpus() { echo 2; }
   run check_host

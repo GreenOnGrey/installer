@@ -145,12 +145,20 @@ esac'
 
 @test "STD-08, STD-09: the budget is exceeded: the missing amount and the needed MK_MEMORY" {
   MK_MEMORY=12g
+  meminfo_gb 32
   # stand 6 GiB + servers 3 GiB = 9 GiB with a budget of 8 GiB of 12; the system part is 0.5 GiB
   run mcp_budget $((6 << 30)) $((3 << 30)) $((12 << 30)) $((25 << 29))
   [[ $output == *"lack 1.0 GiB"* ]]
   # 9 × 3/2 + 0.5 = 14 GiB
   [[ $output == *"MK_MEMORY=14g"* ]]
   [[ $output == *"(now 12g)"* ]]
+}
+
+@test "STD-09: the needed MK_MEMORY is more than the machine: turn servers off instead" {
+  MK_MEMORY=12g
+  meminfo_gb 12
+  run mcp_budget $((6 << 30)) $((3 << 30)) $((12 << 30)) $((25 << 29))
+  [[ $output == *"MK_MEMORY=14g would be needed, more than this machine has; turn servers off"* ]]
 }
 
 @test "STD-11, STD-12, STD-03: keys are created once, and those of disabled servers go after the release" {

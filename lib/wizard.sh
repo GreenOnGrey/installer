@@ -513,14 +513,27 @@ wizard_mcp() {
   fi
 }
 
-# wizard_memory_gib — the memory of the minikube profile for the stand and the chosen servers: the stand
-# takes 12 GiB, and a server needs half as much again as it requests (the budget is two thirds, R21).
+# wizard_memory_gib — the memory the wizard offers for the profile: MK_MEMORY as it is (12g by default), never more
+# than the machine has. The servers do not raise it: with the docker driver the node sees the memory of the machine,
+# and the budget of MCP servers (FTR.NAB.CMN-0006 R3) counts from it — production holds all servers with 12g on
+# 16 GB (FTR.INFRA.INST-0001 tech decision 51).
 wizard_memory_gib() {
-  local want=$((12 + (WIZARD_MCP_MIB * 3 / 2 + 1023) / 1024)) now=${MK_MEMORY%[gGmM]}
-  # minikube reads a number without a unit as MB.
-  [[ $MK_MEMORY == *[gG] ]] || now=$((now / 1024))
-  ((now > want)) && want=$now
-  echo "$want"
+  local now host
+  now=$(mk_memory_mib) host=$(host_memory_mib)
+  [[ -n $now ]] || now=12288
+  [[ -n $host ]] && ((now > host)) && now=$host
+  echo $((now / 1024))
+}
+
+# wizard_mcp_budget — the servers against two thirds of the memory of the machine, as install checks them before
+# the first rollout (R21); a warning, if they do not fit.
+wizard_mcp_budget() {
+  local host budget
+  host=$(host_memory_mib)
+  [[ -n $host ]] || return 0
+  budget=$((host * 2 / 3))
+  ((${WIZARD_MCP_MIB:-0} <= budget)) && return 0
+  say_warn "The servers request more than the budget of this machine ($((budget / 1024)) GiB): turn some off or use a machine with more memory."
 }
 
 wizard_extras() {
@@ -534,11 +547,20 @@ wizard_extras() {
   mem_gb=$(awk '/^MemTotal:/ { printf "%d", $2 / 1048576 }' "$MEMINFO_FILE" 2>/dev/null || echo "?")
   say "This machine: $(host_cpus 2>/dev/null || echo "?") CPUs, $mem_gb GB of memory."
   ask MK_CPUS "CPUs" '^[0-9]+$' "a number"
-  local suggest
-  suggest=$(wizard_memory_gib)
-  [[ ${MK_MEMORY%[gGmM]} == "$suggest" && $MK_MEMORY == *[gG] ]] || say "With these MCP servers MK_MEMORY=${suggest}g is needed."
-  MK_MEMORY=${suggest}g
-  ask MK_MEMORY "Memory" '^[0-9]+[gGmM]$' "a number with g or m, such as 12g"
+  wizard_mcp_budget
+  # The answer of an earlier run stays as it is unless the machine has less.
+  local suggest=$MK_MEMORY
+  if ! mk_memory_fits; then
+    suggest=$(wizard_memory_gib)g
+    say "This machine gives minikube at most $suggest."
+  fi
+  MK_MEMORY=$suggest
+  while true; do
+    ask MK_MEMORY "Memory" '^[0-9]+[gGmM]$' "a number with g or m, such as 12g"
+    mk_memory_fits && break
+    say_warn "  more than this machine has; 12g holds the stand with all MCP servers"
+    MK_MEMORY=$suggest
+  done
   ask MK_DISK "Disk" '^[0-9]+[gG]$' "a number with g, such as 60g"
   if ((WIZARD_CLUSTER)) && cluster_running 2>/dev/null; then
     say "The profile $MK_PROFILE exists: a new size applies only after ./installer uninstall."
