@@ -562,9 +562,21 @@ wizard_extras() {
     MK_MEMORY=$suggest
   done
   ask MK_DISK "Disk" '^[0-9]+[gG]$' "a number with g, such as 60g"
+  wizard_mirrors
   if ((WIZARD_CLUSTER)) && cluster_running 2>/dev/null; then
     say "The profile $MK_PROFILE exists: a new size applies only after ./installer uninstall."
   fi
+}
+
+# wizard_mirrors — a pull-through registry mirror of the network of the user (R32), not an HTTP proxy. A bare URL
+# is the mirror of Docker Hub; the full form <registry>=<URL> … covers other registries too.
+wizard_mirrors() {
+  say "If this machine reaches Docker Hub only through a pull-through registry mirror of your network (not an HTTP proxy), give its address:" \
+    "  <mirror>/migrate/migrate must serve docker.io/migrate/migrate. Other registries: <registry>=<URL>, space-separated."
+  local url='https?://[^[:space:]"%\\@]+' reg='[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]+)?'
+  ask REGISTRY_MIRRORS "Registry mirror, Enter for none" "^(|$url|$reg=$url( $reg=$url)*)\$" \
+    "an address such as https://mirror.example.com, or docker.io=https://mirror.example.com"
+  [[ $REGISTRY_MIRRORS != http* ]] || wizard_set REGISTRY_MIRRORS "docker.io=$REGISTRY_MIRRORS"
 }
 
 # wizard_check — the answers pass the same checks as install (R4); the message, if not.
@@ -681,4 +693,42 @@ cmd_wizard() {
   wizard_confirm $'\n'"Write $file and install?" || die "$E_CANCELLED" "cancelled: nothing was written or changed"
   wizard_write "$file"
   wizard_install "$file"
+}
+
+# wizard_missing_parameters [products] — install and update in a terminal ask for the values they lack, one
+# question each; without a terminal the whole list stays code 2, so CI does not wait for an answer (R5, R6).
+# Secrets stay in the environment of the run; other answers go into the config file as in the wizard.
+wizard_missing_parameters() {
+  interactive && ! wizard_running || return 0
+  VALIDATE_COLLECT=1
+  validate_config "$@"
+  VALIDATE_COLLECT=0
+  ((${#CONFIG_MISSING[@]})) || return 0
+  wizard_fill_missing
+  # Strict again: a skipped or invalid answer is code 2 or the usual validation error.
+  validate_config "$@"
+  if ((${#WIZARD_KEYS[@]})); then wizard_write "$CONFIG_FILE"; fi
+  return 0
+}
+
+# wizard_fill_missing — every value recorded by validate_config, in the order of the list; a secret is read
+# without echo and never enters the config file.
+wizard_fill_missing() {
+  local key
+  wizard_colors
+  say ""
+  say "Missing parameters:"
+  printf '  %s\n' "${CONFIG_MISSING[@]}" >&2
+  say "Enter them now; secrets are not echoed and are kept in the cluster after the install."
+  for key in "${CONFIG_MISSING_KEYS[@]}"; do
+    if [[ $key == HAMMURAPI_GITHUB_APP_PRIVATE_KEY ]]; then
+      # The value is the content of a .pem, not a one-line secret: the path is read, not kept (tech §4).
+      ask_secret_file "$key" "The file of its private key (.pem)"
+    elif [[ " ${SECRET_KEYS[*]} " == *" $key "* ]]; then
+      ask_secret "$key" "$key"
+    else
+      ask "$key" "$key"
+    fi
+  done
+  for key in "${!WIZARD_SECRETS[@]}"; do export "$key=${WIZARD_SECRETS[$key]}"; done
 }

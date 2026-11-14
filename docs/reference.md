@@ -7,14 +7,16 @@ Commands, parameters, exit codes and the JSON result of `./installer`. The defau
 | Command | What it does |
 |---|---|
 | `./installer` | The wizard. It needs a terminal: without one, code `2` and the help. It writes the config file, then runs `install --config` with it ([quickstart.md](quickstart.md)) |
-| `./installer install [--config <file>]` | Installs and deploys without questions. A repeated run brings the install to the configuration and keeps data and passwords. `up` is a hidden synonym |
-| `./installer update [<service>] [--to <version>] [--dry-run] [--yes]` | Brings the install to the versions of this release, or one service to a version of its own ([update.md](update.md)) |
+| `./installer install [--config <file>]` | Installs and deploys. In a terminal it asks for the required values it lacks (see below). A repeated run brings the install to the configuration and keeps data and passwords. `up` is a hidden synonym |
+| `./installer update [<service>] [--to <version>] [--dry-run] [--yes]` | Brings the install to the versions of this release, or one service to a version of its own; asks for missing values in a terminal as `install` does ([update.md](update.md)) |
 | `./installer status [--json]` | Cluster, releases, pods, deployed version, pins, checks, requested memory |
 | `./installer creds [--json]` | Addresses, secret names, usernames and passwords of storages, Grafana and MCP servers |
 | `./installer uninstall [--yes]` | Removes what the installer installed. External storages and their data stay. `down` is a hidden synonym |
 | `./installer help` | The help |
 
 Services of `update`: `nabu-core`, `nabu-web`, `hammurapi-core`, `hammurapi-web`, `mcp-servers`.
+
+`install` and `update` in a terminal ask for exactly the required values the configuration lacks, so a run that failed for a missing secret does not need the whole wizard again. A secret is read without echo, stays in the environment of the run and is kept in the cluster after a successful install; other answers are written into the config file. Without a terminal the run prints every missing value and exits with code `2`.
 
 | Flag | Commands | Meaning |
 |---|---|---|
@@ -48,6 +50,7 @@ Priority, lowest first: `config/defaults.env`, the config file, environment vari
 | `IMAGE_GC_HIGH` | `85` | Image disk usage, %, above which kubelet removes unused images |
 | `IMAGE_GC_LOW` | `80` | Usage, %, it removes them down to |
 | `IMAGE_GC_MAX_AGE` | `336h` | An unused image older than this is removed in any case |
+| `REGISTRY_MIRRORS` | empty | Pull-through mirrors of image registries for minikube, space-separated `<registry>=<URL>`, such as `docker.io=https://mirror.example.com` ([minikube.md](minikube.md#registry-mirrors)) |
 | `LOCK_FILE` | `/var/lock/installer.lock` | Blocks a second run on the machine (code `17`) |
 | `HELM_TIMEOUT` | `10m` | Timeout of a release |
 | `CHECK_TIMEOUT` | `5m` | Timeout of the checks |
@@ -205,4 +208,4 @@ Built-in or external, each on its own ([resources.md](resources.md)).
 | `skipped` | Components left alone: owned by their own CI, or not reached after a failure |
 | `diagnostics` | On failure, the run log; `diagnostics/` sits next to it |
 
-The log of each run is `logs/<time>/run.log` of the installer directory.
+The log of each run is `logs/<time>/run.log` of the installer directory. The `diagnostics/` directory also holds `nodes.txt` (`kubectl describe nodes`) and, on minikube, `host-network.txt` (`ip_forward`, `nat/POSTROUTING`, `FORWARD`).

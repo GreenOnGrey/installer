@@ -30,7 +30,8 @@ bin/nabu-deploy          deploys nabu-core/web (namespaces nabu, nabu-sandboxes;
 bin/landing-deploy       deploys the site of GreenOnGrey (namespace landing, host web.<domain>; no storages;
                          an optional domain of its own with a certificate and a redirect from www.)
 bin/stand-autostart      systemd unit <prefix>-stand: the stand starts after a VM reboot; kubelet-gc mode
-                         turns on kubelet image garbage collection (IMAGE_GC_* options)
+                         turns on kubelet image garbage collection (IMAGE_GC_* options); registry-mirrors mode
+                         writes REGISTRY_MIRRORS to containerd of the node (up and the unit run both)
 charts/hammurapi-core    api, worker, migrate, cleaner, network policies; no agent or runner — code tasks run in Nabu
 charts/hammurapi-web     the SPA
 charts/nabu-core         Nabu: api, worker, agent, relay, egress, migrate, cleaner, RBAC for sandboxes and the
@@ -86,6 +87,11 @@ at the pinned version. Name any job you could not run in your report, with the r
 
 ## Rules
 
+- **A change of behaviour goes with the specification.** When a change adds or alters a requirement, a
+  technical decision or a QA case, update `hammurapi-specs/specs/INFRA/INST/FTR.INFRA.INST-0001` (product,
+  tech, qa) in the same PR: the requirement and its acceptance criteria, the decision table, the test row,
+  the version and the changelog line. A change that only fixes an implementation detail without changing
+  behaviour needs no spec edit.
 - **Shell, YAML and Helm templates are edited by hand.** A formatter once replaced `lib/*.sh` with
   the content of `tests/manifests.sh` (endless recursion → segfault of `up` and of the manifest
   check) and re-indented `values/scrape/hammurapi.yaml`. After bulk edits, diff every file.

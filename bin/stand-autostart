@@ -8,6 +8,7 @@
 #           for the node and pods so the outcome shows in journalctl.
 #   stop  — minikube stop: storages stop cleanly instead of being cut off.
 #   kubelet-gc — image garbage collection in the node's kubelet (up calls it too).
+#   registry-mirrors — the mirrors of REGISTRY_MIRRORS in the node's containerd (up calls it too).
 # If the cluster already runs (up enables the unit), start ends at once; if
 # the profile is gone (down), both modes do nothing.
 set -euo pipefail
@@ -18,6 +19,8 @@ PODS_TIMEOUT=${PODS_TIMEOUT:-15m}
 IMAGE_GC_HIGH=${IMAGE_GC_HIGH:-85}
 IMAGE_GC_LOW=${IMAGE_GC_LOW:-80}
 IMAGE_GC_MAX_AGE=${IMAGE_GC_MAX_AGE:-336h}
+REGISTRY_MIRRORS=${REGISTRY_MIRRORS:-}
+CERTS_D=/etc/containerd/certs.d
 
 log() { echo "stand-autostart: $*" >&2; }
 
@@ -49,6 +52,9 @@ start() {
   fi
   log "starting cluster $MK_PROFILE"
   minikube start -p "$MK_PROFILE" --interactive=false
+  # minikube start rewrites certs.d/docker.io: the mirrors come back before images are pulled. Cached images
+  # do not need them, so a failure does not fail the unit.
+  registry_mirrors || true
   kubectl --context "$MK_PROFILE" wait --for=condition=Ready node --all --timeout=5m >/dev/null
   # Without garbage collection the stand works while the disk lasts, so the unit does not fail.
   kubelet_gc || true
@@ -95,6 +101,57 @@ kubelet_gc() {
   esac
 }
 
+# registry_mirrors — the mirrors of REGISTRY_MIRRORS ("<registry>=<URL> …", FTR.INFRA.INST-0001 R32) as
+# certs.d/<registry>/hosts.toml of the node's containerd, which reads them at every pull, so nothing restarts.
+# A URL with a path is used as it is (override_path: the path of the API of a proxy such as Harbor). Files the
+# installer wrote carry a marker: a registry gone from the list gets its default back (docker.io) or loses its
+# directory; other files are not touched.
+# shellcheck disable=SC2016 # the script runs in the node's shell: its variables are its own
+registry_mirrors() {
+  local script e args=() out changed=0
+  script='d=$1; shift; m="# installer: REGISTRY_MIRRORS"; keep=" ";'
+  script+=' for e in "$@"; do r=${e%%=*}; u=${e#*=}; u=${u%/}; keep="$keep$r ";'
+  script+=' s="https://$r"; [ "$r" = docker.io ] && s="https://registry-1.docker.io"; mkdir -p "$d/$r";'
+  script+=' { echo "$m"; echo "server = \"$s\""; echo; echo "[host.\"$u\"]"; echo "  capabilities = [\"pull\", \"resolve\"]";'
+  script+='   case ${u#*://} in */*) echo "  override_path = true" ;; esac; } >"$d/$r/hosts.toml.new";'
+  script+=' if cmp -s "$d/$r/hosts.toml.new" "$d/$r/hosts.toml"; then rm -f "$d/$r/hosts.toml.new";'
+  script+=' else mv "$d/$r/hosts.toml.new" "$d/$r/hosts.toml"; echo changed; fi; done;'
+  script+=' for f in "$d"/*/hosts.toml; do [ -f "$f" ] || continue; r=${f%/hosts.toml}; r=${r##*/};'
+  script+=' case "$keep" in *" $r "*) continue ;; esac; grep -qF "$m" "$f" || continue;'
+  script+=' if [ "$r" = docker.io ]; then echo "server = \"https://registry-1.docker.io\"" >"$f"; else rm -rf "${f%/hosts.toml}"; fi;'
+  script+=' echo changed; done; echo mirrors-done'
+  for e in $REGISTRY_MIRRORS; do args+=("$(printf %q "$e")"); done
+  out=$(minikube ssh -p "$MK_PROFILE" -- sudo sh -c "$(printf %q "$script")" registry-mirrors "$CERTS_D" "${args[@]}" 2>&1) || true
+  case $out in
+    *mirrors-done*)
+      if [[ $out == *changed* ]]; then log "registry mirrors: ${REGISTRY_MIRRORS:-none}"; changed=1; fi
+      ;;
+    *)
+      log "failed to configure registry mirrors: $out"
+      return 1
+      ;;
+  esac
+  # Only a changed configuration leaves pods that waited for the registry: a rerun does not churn a pod stuck on a
+  # wrong tag or a missing login, which a mirror cannot fix anyway.
+  if [[ -n $REGISTRY_MIRRORS ]] && ((changed)); then restart_pull_waits; fi
+}
+
+# restart_pull_waits — pods of controllers that wait to pull an image start over at once instead of after their
+# back-off (up to 5 minutes): their pulls before the mirrors went to the registry itself. A pod without a
+# controller is left alone, since nothing would bring it back.
+restart_pull_waits() {
+  local ns pod
+  while read -r ns pod; do
+    [[ -n $pod ]] || continue
+    log "restarting $ns/$pod: it was waiting to pull an image"
+    kubectl --context "$MK_PROFILE" -n "$ns" delete pod "$pod" --wait=false >/dev/null 2>&1 || true
+  done < <(kubectl --context "$MK_PROFILE" get pods -A -o json 2>/dev/null | jq -r '.items[]
+    | select(any((.metadata.ownerReferences // [])[]; .kind != "Node"))
+    | select(any((.status.containerStatuses // [])[], (.status.initContainerStatuses // [])[];
+        .state.waiting.reason == "ImagePullBackOff" or .state.waiting.reason == "ErrImagePull"))
+    | "\(.metadata.namespace) \(.metadata.name)"' 2>/dev/null || true)
+}
+
 stop() {
   profile_exists || return 0
   running || { log "cluster $MK_PROFILE is not running"; return 0; }
@@ -106,8 +163,9 @@ case ${1:-} in
   start) start ;;
   stop) stop ;;
   kubelet-gc) kubelet_gc ;;
+  registry-mirrors) registry_mirrors ;;
   *)
-    echo "usage: stand-autostart start | stop | kubelet-gc" >&2
+    echo "usage: stand-autostart start | stop | kubelet-gc | registry-mirrors" >&2
     exit 2
     ;;
 esac

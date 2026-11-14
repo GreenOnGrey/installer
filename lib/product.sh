@@ -65,7 +65,7 @@ require_product_secret() {
   [[ -n $(input_value "$2") ]] && return 0
   read_product_inputs
   [[ -z $PRODUCT_INPUTS || -n $(stored_input "$2") ]] && return 0
-  CONFIG_MISSING+=("$1: neither $2 (environment variable) nor ${2}_FILE is set, and no earlier install kept it")
+  add_missing "$2" "$1: neither $2 (environment variable) nor ${2}_FILE is set, and no earlier install kept it"
 }
 
 # validate_products — the products and their sign-in; missing values go to CONFIG_MISSING. Only install
@@ -101,7 +101,7 @@ validate_products() {
     done
   fi
   [[ ${PUBLIC_ACCESS:-false} == true ]] ||
-    CONFIG_MISSING+=("$what: set PUBLIC_ACCESS=true, as the products need HTTPS and OAuth callbacks")
+    add_missing PUBLIC_ACCESS "$what: set PUBLIC_ACCESS=true, as the products need HTTPS and OAuth callbacks"
   require_param "$what" AUTH_PROVIDER
   require_param "$what" BOOTSTRAP_ADMINS
   case ${AUTH_PROVIDER:-} in

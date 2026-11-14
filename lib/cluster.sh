@@ -56,8 +56,9 @@ cluster_up() {
       die "$E_CLUSTER" "minikube start failed, see $RUN_DIR/minikube-start.log"
     ok "cluster started"
   fi
-  kc wait --for=condition=Ready node --all --timeout=5m >/dev/null ||
-    die "$E_CLUSTER" "the cluster node is not ready"
+  # Before the node is awaited: its network plugin is pulled from Docker Hub too.
+  registry_mirrors
+  kc wait --for=condition=Ready node --all --timeout=5m >/dev/null || die "$E_CLUSTER" "$(node_not_ready)"
   kubelet_gc
   ensure_stand_namespaces
   if [[ ${STAND_AUTOSTART:-true} == true ]]; then
@@ -67,21 +68,76 @@ cluster_up() {
   fi
 }
 
+# autostart_mode <mode> — a mode of bin/stand-autostart with the settings of this run, through the group docker
+# when this session is not in it yet. Through bash: bin/stand-autostart has no executable bit in a release, and
+# install -m 755 sets it in the system (install_autostart).
+autostart_mode() {
+  local cmd
+  printf -v cmd '%q ' env MK_PROFILE="$MK_PROFILE" IMAGE_GC_HIGH="$IMAGE_GC_HIGH" \
+    IMAGE_GC_LOW="$IMAGE_GC_LOW" IMAGE_GC_MAX_AGE="$IMAGE_GC_MAX_AGE" REGISTRY_MIRRORS="${REGISTRY_MIRRORS:-}" \
+    bash "$ROOT/bin/stand-autostart" "$1"
+  if docker_ok; then eval "$cmd"; else sg docker -c "$cmd"; fi
+}
+
 # kubelet_gc — image garbage collection in the kubelet of the node (bin/stand-autostart kubelet-gc):
 # minikube turns it off, and old images pile up on disk (FTR.NAB.CMN-0008).
 # A failure is only a warning: the stand works while the disk lasts.
 kubelet_gc() {
-  local cmd
-  # through bash: bin/stand-autostart has no executable bit in a release, and
-  # install -m 755 sets it in the system (install_autostart)
-  printf -v cmd '%q ' env MK_PROFILE="$MK_PROFILE" IMAGE_GC_HIGH="$IMAGE_GC_HIGH" \
-    IMAGE_GC_LOW="$IMAGE_GC_LOW" IMAGE_GC_MAX_AGE="$IMAGE_GC_MAX_AGE" \
-    bash "$ROOT/bin/stand-autostart" kubelet-gc
-  if { if docker_ok; then eval "$cmd"; else sg docker -c "$cmd"; fi; } 2>"$RUN_DIR/kubelet-gc.log"; then
+  if autostart_mode kubelet-gc 2>"$RUN_DIR/kubelet-gc.log"; then
     ok "image garbage collection: disk ${IMAGE_GC_HIGH}%, unused images older than $IMAGE_GC_MAX_AGE"
   else
     warn "image garbage collection is not configured, see $RUN_DIR/kubelet-gc.log"
   fi
+}
+
+DOCKER_DAEMON_FILE=${DOCKER_DAEMON_FILE:-/etc/docker/daemon.json}
+
+# docker_no_nat — Docker runs without its network plumbing (--iptables=False, --ip-forward=False or
+# --ip-masq=False in the unit or daemon.json). Then the node of minikube gets no NAT and reaches no registry,
+# whatever sysctl says: a hardened image does this, and the installer does not change the Docker of the machine.
+docker_no_nat() {
+  local flags
+  flags=$(systemctl show docker -p ExecStart 2>/dev/null || true)
+  [[ ! -r $DOCKER_DAEMON_FILE ]] || flags+=$'\n'"$(<"$DOCKER_DAEMON_FILE")"
+  grep -Eqi -- '--iptables[= ]+false|--ip-forward[= ]+false|--ip-masq[= ]+false' <<<"$flags" && return 0
+  grep -Eqi '"iptables"[[:space:]]*:[[:space:]]*false|"ip-forward"[[:space:]]*:[[:space:]]*false|"ip-masq"[[:space:]]*:[[:space:]]*false' <<<"$flags"
+}
+
+# node_not_ready — why the node is not ready: the message of its condition Ready and the first failed pull of an
+# image, with what usually stands behind them on a machine of a closed network.
+node_not_ready() {
+  local why pull msg="the cluster node is not ready"
+  why=$(kc get nodes -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].message}' 2>/dev/null || true)
+  [[ -z $why ]] || msg+=": $why"
+  pull=$(kc get events -A --field-selector reason=Failed -o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null |
+    grep -m1 'Failed to pull image' || true)
+  if [[ -n $pull ]]; then
+    msg+="; $pull."
+    # A wrong tag or a missing login is not a network fault: the advice would send the reader the wrong way.
+    if [[ $pull =~ (i/o timeout|connection refused|no such host|TLS handshake timeout|network is unreachable|dial tcp) ]]; then
+      if docker_no_nat; then
+        msg+=" Containers of the machine do not reach the registry: Docker runs with iptables, ip-forward or ip-masq"
+        msg+=" off (--iptables=False/--ip-forward=False/--ip-masq=False), so the node has no NAT; enable the defaults"
+        msg+=" of Docker or add a MASQUERADE rule for the subnet of the node"
+      else
+        msg+=" Containers of the machine do not reach the registry: check IP forwarding and NAT of Docker"
+        msg+=" (sysctl net.ipv4.ip_forward, iptables -t nat -S POSTROUTING), or set REGISTRY_MIRRORS to a mirror of your network"
+      fi
+    fi
+  fi
+  echo "$msg"
+}
+
+# registry_mirrors — the mirrors of REGISTRY_MIRRORS in the node's containerd, and pods of controllers stuck pulling
+# an image start over (bin/stand-autostart registry-mirrors, FTR.INFRA.INST-0001 R32). With mirrors a failure stops
+# the run, since images would not come; without them it is a warning.
+registry_mirrors() {
+  if autostart_mode registry-mirrors 2>"$RUN_DIR/registry-mirrors.log"; then
+    [[ -z ${REGISTRY_MIRRORS:-} ]] || ok "registry mirrors: $REGISTRY_MIRRORS"
+    return 0
+  fi
+  [[ -z ${REGISTRY_MIRRORS:-} ]] || die "$E_CLUSTER" "registry mirrors are not configured, see $RUN_DIR/registry-mirrors.log"
+  warn "the registry mirrors of an earlier run are not removed, see $RUN_DIR/registry-mirrors.log"
 }
 
 AUTOSTART_BIN=${AUTOSTART_BIN:-/usr/local/lib/installer/stand-autostart}
@@ -117,6 +173,7 @@ Environment=MK_PROFILE=$MK_PROFILE
 Environment=IMAGE_GC_HIGH=$IMAGE_GC_HIGH
 Environment=IMAGE_GC_LOW=$IMAGE_GC_LOW
 Environment=IMAGE_GC_MAX_AGE=$IMAGE_GC_MAX_AGE
+Environment="REGISTRY_MIRRORS=${REGISTRY_MIRRORS:-}"
 ${MINIKUBE_HOME:+Environment=MINIKUBE_HOME=$MINIKUBE_HOME}
 ExecStart=$AUTOSTART_BIN start
 ExecStop=$AUTOSTART_BIN stop

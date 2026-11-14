@@ -197,13 +197,21 @@ join_lines() { awk 'NR > 1 { printf "\\n" } { sub(/\r$/, ""); printf "%s", $0 }'
 
 # require_param, require_secret: a missing value is recorded in CONFIG_MISSING, and validate_config
 # names them all at once (FTR.INFRA.INST-0001 R6), so a CI run does not fix them one by one.
-CONFIG_MISSING=()
+# CONFIG_MISSING_KEYS carries the same values by key: in a terminal install asks for exactly those.
+CONFIG_MISSING=() CONFIG_MISSING_KEYS=()
+
+# add_missing <key> <message> — one missing value, once per key.
+add_missing() {
+  local key=$1 message=$2
+  CONFIG_MISSING+=("$message")
+  [[ " ${CONFIG_MISSING_KEYS[*]} " == *" $key "* ]] || CONFIG_MISSING_KEYS+=("$key")
+}
 
 require_param() {
   local mode_name=$1 key=$2
   [[ $mode_name == *=* ]] || mode_name+="=external"
   if [[ -z ${!key:-} ]]; then
-    CONFIG_MISSING+=("$mode_name: parameter $key is not set")
+    add_missing "$key" "$mode_name: parameter $key is not set"
   fi
 }
 
@@ -211,7 +219,7 @@ require_secret() {
   local mode_name=$1 key=$2
   [[ $mode_name == *=* ]] || mode_name+="=external"
   if [[ -z $(secret_value "$key") ]]; then
-    CONFIG_MISSING+=("$mode_name: neither $key (environment variable) nor ${key}_FILE is set, and the cluster keeps none for this resource")
+    add_missing "$key" "$mode_name: neither $key (environment variable) nor ${key}_FILE is set, and the cluster keeps none for this resource"
   fi
 }
 
@@ -303,7 +311,7 @@ validate_target() {
     minikube) ;;
     external)
       [[ -n ${CONFIG_EXPLICIT[KUBE_CONTEXT]+x} && -n ${KUBE_CONTEXT:-} ]] ||
-        CONFIG_MISSING+=("INSTALL_TARGET=external: set KUBE_CONTEXT to a context of kubeconfig")
+        add_missing KUBE_CONTEXT "INSTALL_TARGET=external: set KUBE_CONTEXT to a context of kubeconfig"
       ;;
     *) die "$E_USAGE" "INSTALL_TARGET must be minikube or external" ;;
   esac
@@ -311,9 +319,11 @@ validate_target() {
 
 # validate_config [products] — modes and required parameters of external storages; with products
 # (install) also the products and their sign-in.
+# VALIDATE_COLLECT=1 — record the missing values and return: install asks for them in a terminal and
+# validates strictly afterwards (lib/wizard.sh, wizard_missing_parameters).
 validate_config() {
   local m
-  CONFIG_MISSING=()
+  CONFIG_MISSING=() CONFIG_MISSING_KEYS=()
   case ${STAND_AUTOSTART:-true} in
     true | false) ;;
     *) die "$E_USAGE" "STAND_AUTOSTART must be true or false" ;;
@@ -330,6 +340,19 @@ validate_config() {
   validate_names
   [[ ${IMAGE_GC_MAX_AGE:-336h} =~ ^[0-9]+[hms]$ ]] ||
     die "$E_USAGE" "IMAGE_GC_MAX_AGE must be a duration like 336h, not '$IMAGE_GC_MAX_AGE'"
+  # The registry becomes a directory of certs.d in the node, and the list goes into a systemd unit: no dots of a path,
+  # no repeats, none of the specifiers and escapes of systemd (% and \), and no login: the value is logged and
+  # written into the unit, and a proxy with a login is not supported.
+  local mirror seen=" " shown
+  for mirror in ${REGISTRY_MIRRORS:-}; do
+    [[ $mirror =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]+)?=https?://[^/\"%\\@]+(/[^\"%\\@]*)?$ && ${mirror%%=*} != *..* ]] || {
+      # A login in the URL must not reach the log either: name the address without it.
+      shown=$(printf '%s' "$mirror" | sed -E 's#(://)[^/@]*@#\1#')
+      die "$E_USAGE" "REGISTRY_MIRRORS: expected <registry>=<URL> without a login, such as docker.io=https://mirror.example.com, not '$shown'"
+    }
+    [[ $seen != *" ${mirror%%=*} "* ]] || die "$E_USAGE" "REGISTRY_MIRRORS: ${mirror%%=*} is named twice"
+    seen+="${mirror%%=*} "
+  done
   for m in POSTGRES_MODE KAFKA_MODE S3_MODE; do
     case ${!m} in
       internal | external) ;;
@@ -378,7 +401,7 @@ validate_config() {
   [[ ${NABU_WHISPER_MODEL:-small} =~ ^(tiny|base|small|medium|large-v3|large-v3-turbo|turbo)$ ]] ||
     die "$E_USAGE" "NABU_WHISPER_MODEL must be tiny, base, small, medium, large-v3 or large-v3-turbo"
   if [[ ${1:-} == products ]]; then validate_products; fi
-  die_if_missing
+  [[ ${VALIDATE_COLLECT:-0} == 1 ]] || die_if_missing
 }
 
 validate_ingress_internal() {
@@ -406,7 +429,7 @@ validate_ingress_external() {
   tls_external && keys=(INGRESS_CLASS)
   for key in "${keys[@]}"; do
     if [[ -z ${CONFIG_EXPLICIT[$key]+x} || -z ${!key} ]]; then
-      CONFIG_MISSING+=("INGRESS_MODE=external: set $key to the name of an existing object of the cluster")
+      add_missing "$key" "INGRESS_MODE=external: set $key to the name of an existing object of the cluster"
     elif ! [[ ${!key} =~ ^[a-z0-9][a-z0-9.-]*$ ]]; then
       die "$E_USAGE" "INGRESS_MODE=external: $key must be the name of an object of the cluster, not '${!key}'"
     fi
