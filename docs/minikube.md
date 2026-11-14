@@ -45,7 +45,7 @@ Behind a load balancer that terminates TLS, set `TLS_TERMINATION=external`. Then
 
 Without a domain the hosts are `<host>.<IP with dashes>.sslip.io`. Let's Encrypt limits certificates per registered domain, and all users of sslip.io share one limit, so issuance may fail for days.
 
-Grafana is at `https://grafana.<domain>` with public access, or through an SSH tunnel without it:
+Grafana is at `https://grafana.<domain>` with public access, or through an SSH tunnel without it. The local administrator is `admin` with the password from `./installer creds`. With public access the wizard also offers sign-in through GitHub or any OpenID Connect provider (Keycloak, Google, Entra ID): `GRAFANA_AUTH`, the app settings and the callback `https://grafana.<domain>/login/github` or `https://grafana.<domain>/login/generic_oauth` ([reference.md](reference.md)). The local administrator stays for emergencies.
 
 ```sh
 ssh -L 3000:localhost:3000 <user>@<machine>           # on your computer

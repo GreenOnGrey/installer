@@ -115,9 +115,17 @@ Built-in or external, each on its own ([resources.md](resources.md)).
 | `INGRESS_MODE` | `internal` | `internal`: Traefik and cert-manager (and MetalLB on minikube). `external`: those of the cluster |
 | `INGRESS_CLASS` | `traefik` | The ingress class; with `external`, an existing one |
 | `METALLB_RANGE` | empty | Address pool of MetalLB on minikube; empty: `.200`–`.209` of the minikube subnet |
-| `GRAFANA_GITHUB_CLIENT_ID` | empty | GitHub OAuth app of Grafana sign-in |
+| `GRAFANA_AUTH` | empty | Grafana sign-in: `admin` (local administrator only), `github`, or `oidc` (any OpenID Connect provider, such as Keycloak). Empty derives it from the settings below; it needs `PUBLIC_ACCESS=true` and `OBSERVABILITY=true` |
+| `GRAFANA_GITHUB_CLIENT_ID` | empty | GitHub OAuth app of Grafana sign-in; callback `https://grafana.<domain>/login/github` |
 | `GRAFANA_GITHUB_CLIENT_SECRET` | secret | Its secret |
-| `GRAFANA_GITHUB_ORG` | `GreenOnGrey` | Only its members sign in to Grafana |
+| `GRAFANA_GITHUB_ORG` | `GreenOnGrey` | Only its members sign in to Grafana through GitHub |
+| `GRAFANA_OIDC_ISSUER` | empty | OIDC issuer, `https://…`; the endpoints come from its `.well-known/openid-configuration` |
+| `GRAFANA_OIDC_CLIENT_ID` | empty | OIDC client of Grafana; empty with `GRAFANA_OIDC_REUSE=true` uses the client of the products |
+| `GRAFANA_OIDC_CLIENT_SECRET` | secret | Its secret (not used when the client of the products is reused) |
+| `GRAFANA_OIDC_REUSE` | `true` | Use the OIDC client of the products for Grafana; add `https://grafana.<domain>/login/generic_oauth` to its redirect URIs |
+| `GRAFANA_OIDC_NAME` | `Single sign-on` | The name on the sign-in button |
+| `GRAFANA_OIDC_SCOPES` | `openid profile email groups` | Scopes of the OIDC client, space-separated |
+| `GRAFANA_OIDC_ALLOWED_DOMAINS` | empty | Only users with e-mail addresses in these domains, comma-separated; empty for any |
 
 ### Products
 

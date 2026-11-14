@@ -16,7 +16,7 @@ readonly PRODUCT_SECRET_KEYS=(NABU_GITHUB_CLIENT_SECRET OIDC_CLIENT_SECRET BOOTS
   HAMMURAPI_GITHUB_APP_PRIVATE_KEY HAMMURAPI_GITHUB_CLIENT_SECRET HAMMURAPI_GITLAB_CLIENT_SECRET
   HAMMURAPI_GITLAB_BOT_TOKEN NABU_CLIENT_SECRET)
 readonly SECRET_KEYS=(POSTGRES_PASSWORD KAFKA_PASSWORD S3_ACCESS_KEY S3_SECRET_KEY GRAFANA_GITHUB_CLIENT_SECRET
-  "${PRODUCT_SECRET_KEYS[@]}")
+  GRAFANA_OIDC_CLIENT_SECRET "${PRODUCT_SECRET_KEYS[@]}")
 
 setup_color() {
   if [[ $COLOR == auto ]]; then
@@ -184,6 +184,11 @@ stand_secret() {
       ns=$NS_OBSERVABILITY name=grafana-github-oauth field=GF_AUTH_GITHUB_CLIENT_SECRET
       match=$(jq -cn --arg c "${GRAFANA_GITHUB_CLIENT_ID:-}" '{GF_AUTH_GITHUB_CLIENT_ID: $c}')
       ;;
+    GRAFANA_OIDC_CLIENT_SECRET)
+      ns=$NS_OBSERVABILITY name=grafana-oidc-oauth field=GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET
+      match=$(jq -cn --arg c "$(grafana_oidc_client_id)" --arg i "$(grafana_oidc_issuer)" \
+        '{GF_AUTH_GENERIC_OAUTH_CLIENT_ID: $c, GRAFANA_OIDC_ISSUER: $i}')
+      ;;
     *) return 0 ;;
   esac
   # Called as $(secret_value …): a cache would not outlive the subshell, and the calls are few.
@@ -194,6 +199,35 @@ stand_secret() {
 
 # join_lines — lines joined by a literal \n, carriage returns dropped.
 join_lines() { awk 'NR > 1 { printf "\\n" } { sub(/\r$/, ""); printf "%s", $0 }'; }
+
+# grafana_auth_provider — admin, github or oidc: GRAFANA_AUTH, or what the settings name.
+grafana_auth_provider() {
+  local p=${GRAFANA_AUTH:-}
+  if [[ -n $p ]]; then
+    echo "$p"
+  elif [[ -n ${GRAFANA_OIDC_ISSUER:-} || -n ${GRAFANA_OIDC_CLIENT_ID:-} ]]; then
+    echo oidc
+  elif [[ -n ${GRAFANA_GITHUB_CLIENT_ID:-} ]]; then
+    echo github
+  else
+    echo admin
+  fi
+}
+# grafana_oidc_issuer, grafana_oidc_client_id, grafana_oidc_client_secret — the OIDC client of Grafana: its own, or
+# the client of the products (GRAFANA_OIDC_REUSE=true, the default), which then needs the Grafana callback added.
+grafana_oidc_issuer() {
+  if [[ -n ${GRAFANA_OIDC_ISSUER:-} ]]; then echo "$GRAFANA_OIDC_ISSUER"; else echo "${OIDC_ISSUER:-}"; fi
+}
+grafana_oidc_client_id() {
+  if [[ ${GRAFANA_OIDC_REUSE:-true} == true ]]; then echo "${OIDC_CLIENT_ID:-}"; else echo "${GRAFANA_OIDC_CLIENT_ID:-}"; fi
+}
+grafana_oidc_client_secret() {
+  if [[ ${GRAFANA_OIDC_REUSE:-true} == true ]]; then
+    product_secret OIDC_CLIENT_SECRET
+  else
+    secret_value GRAFANA_OIDC_CLIENT_SECRET
+  fi
+}
 
 # require_param, require_secret: a missing value is recorded in CONFIG_MISSING, and validate_config
 # names them all at once (FTR.INFRA.INST-0001 R6), so a CI run does not fix them one by one.
@@ -392,6 +426,7 @@ validate_config() {
   fi
   [[ $MK_MEMORY =~ ^[0-9]+[gGmM]$ ]] || die "$E_USAGE" "MK_MEMORY: expected a number with g or m, such as 12g"
   validate_public_config
+  validate_grafana_auth
   validate_mcp_config
   # FTR.NAB.CHAT-0001 R19: speech recognition of Nabu
   case ${NABU_WHISPER:-false} in
@@ -402,6 +437,49 @@ validate_config() {
     die "$E_USAGE" "NABU_WHISPER_MODEL must be tiny, base, small, medium, large-v3 or large-v3-turbo"
   if [[ ${1:-} == products ]]; then validate_products; fi
   [[ ${VALIDATE_COLLECT:-0} == 1 ]] || die_if_missing
+}
+
+# validate_grafana_auth — the sign-in of Grafana (R34): nothing for the local administrator, the GitHub app, or
+# an OIDC client of its own or of the products. It needs public access: the callback is https://grafana.<domain>.
+validate_grafana_auth() {
+  local provider
+  provider=$(grafana_auth_provider)
+  case $provider in
+    admin) return 0 ;;
+    github | oidc) ;;
+    *) die "$E_USAGE" "GRAFANA_AUTH must be admin, github or oidc, not '$provider'" ;;
+  esac
+  # A provider derived from an old configuration (only the app is set) is not an error when there is no
+  # public access or no Grafana at all: it simply does not apply.
+  if [[ -z ${GRAFANA_AUTH:-} ]] && { ! observability_enabled || [[ ${PUBLIC_ACCESS:-false} != true ]]; }; then
+    return 0
+  fi
+  [[ -n ${GRAFANA_AUTH:-} || -z ${GRAFANA_GITHUB_CLIENT_ID:-} || (-z ${GRAFANA_OIDC_ISSUER:-} && -z ${GRAFANA_OIDC_CLIENT_ID:-}) ]] ||
+    die "$E_USAGE" "both GitHub and OIDC are configured for Grafana: set GRAFANA_AUTH to github or oidc"
+  observability_enabled || die "$E_USAGE" "Grafana sign-in needs OBSERVABILITY=true"
+  [[ ${PUBLIC_ACCESS:-false} == true ]] ||
+    die "$E_USAGE" "Grafana sign-in needs PUBLIC_ACCESS=true: the callback is https://grafana.<domain>"
+  if [[ $provider == github ]]; then
+    require_param PUBLIC_ACCESS=true GRAFANA_GITHUB_CLIENT_ID
+    require_secret PUBLIC_ACCESS=true GRAFANA_GITHUB_CLIENT_SECRET
+    require_param PUBLIC_ACCESS=true GRAFANA_GITHUB_ORG
+    return 0
+  fi
+  [[ -n $(grafana_oidc_issuer) ]] ||
+    add_missing GRAFANA_OIDC_ISSUER "GRAFANA_AUTH=oidc: neither GRAFANA_OIDC_ISSUER nor OIDC_ISSUER is set"
+  if [[ ${GRAFANA_OIDC_REUSE:-true} == true ]]; then
+    [[ ${AUTH_PROVIDER:-} == oidc ]] ||
+      die "$E_USAGE" "GRAFANA_OIDC_REUSE=true needs AUTH_PROVIDER=oidc: the products have no OIDC client to reuse"
+    [[ -n ${OIDC_CLIENT_ID:-} ]] ||
+      add_missing OIDC_CLIENT_ID "GRAFANA_AUTH=oidc reuses the OIDC client of the products: OIDC_CLIENT_ID is not set"
+    [[ -n $(grafana_oidc_client_secret) ]] ||
+      add_missing OIDC_CLIENT_SECRET "GRAFANA_AUTH=oidc reuses the OIDC client of the products: neither OIDC_CLIENT_SECRET nor its _FILE is set, and no earlier install kept it"
+  else
+    require_param PUBLIC_ACCESS=true GRAFANA_OIDC_CLIENT_ID
+    require_secret PUBLIC_ACCESS=true GRAFANA_OIDC_CLIENT_SECRET
+  fi
+  [[ ${GRAFANA_OIDC_SCOPES:-openid profile email groups} =~ ^[A-Za-z0-9_.:/-]+( [A-Za-z0-9_.:/-]+)*$ ]] ||
+    die "$E_USAGE" "GRAFANA_OIDC_SCOPES: scopes separated by spaces, such as openid profile email groups"
 }
 
 validate_ingress_internal() {
@@ -464,10 +542,6 @@ validate_public_config() {
   fi
   if [[ -n ${PUBLIC_IP:-} && ! $PUBLIC_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     die "$E_USAGE" "PUBLIC_IP: an IPv4 address is required"
-  fi
-  if [[ -n ${GRAFANA_GITHUB_CLIENT_ID:-} ]] && observability_enabled; then
-    require_secret PUBLIC_ACCESS=true GRAFANA_GITHUB_CLIENT_SECRET
-    require_param PUBLIC_ACCESS=true GRAFANA_GITHUB_ORG
   fi
 }
 
