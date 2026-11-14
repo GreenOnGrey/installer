@@ -118,6 +118,56 @@ setup() {
   [[ $output == *KAFKA_SECURITY_PROTOCOL* && $output != *unbound* ]]
 }
 
+@test "CLI-15: a terminal install asks for the missing values only; the secret stays out of the file" {
+  load_script
+  interactive() { return 0; }
+  wizard_running() { return 1; }
+  CONFIG_FILE=$BATS_TEST_TMPDIR/installer.env
+  # The real validation needs a whole stand; here it is the two keys this test is about.
+  validate_config() {
+    CONFIG_MISSING=() CONFIG_MISSING_KEYS=()
+    [[ -n ${OIDC_CLIENT_SECRET:-} ]] || add_missing OIDC_CLIENT_SECRET "PRODUCTS=nabu: OIDC_CLIENT_SECRET is not set"
+    [[ -n ${PUBLIC_BASE_DOMAIN:-} ]] || add_missing PUBLIC_BASE_DOMAIN "parameter PUBLIC_BASE_DOMAIN is not set"
+    [[ ${VALIDATE_COLLECT:-0} == 1 ]] || die_if_missing
+  }
+  printf 's3cr3t\nexample.com\n' >"$BATS_TEST_TMPDIR/answers"
+  wizard_missing_parameters products <"$BATS_TEST_TMPDIR/answers" >/dev/null 2>&1
+  [ "$OIDC_CLIENT_SECRET" = s3cr3t ]
+  [ "$PUBLIC_BASE_DOMAIN" = example.com ]
+  grep -qx 'PUBLIC_BASE_DOMAIN=example.com' "$CONFIG_FILE"
+  not_grep -q 'OIDC_CLIENT_SECRET' "$CONFIG_FILE"
+}
+
+@test "CLI-15: without a terminal nothing is asked, the usual code 2 stays" {
+  load_script
+  interactive() { return 1; }
+  validate_config() { CONFIG_MISSING=("parameter X is not set") CONFIG_MISSING_KEYS=(X); die_if_missing; }
+  run wizard_missing_parameters products
+  [ "$status" -eq 0 ]
+  [[ $output != *"Missing parameters"* ]]
+}
+
+@test "CLI-15: the GitHub App key is asked as a file, not as a one-line secret" {
+  load_script
+  printf -- '-----BEGIN KEY-----\nabc\n-----END KEY-----\n' >"$BATS_TEST_TMPDIR/app.pem"
+  CONFIG_MISSING=("PRODUCTS=hammurapi: HAMMURAPI_GITHUB_APP_PRIVATE_KEY is not set")
+  CONFIG_MISSING_KEYS=(HAMMURAPI_GITHUB_APP_PRIVATE_KEY)
+  printf '%s\n' "$BATS_TEST_TMPDIR/app.pem" >"$BATS_TEST_TMPDIR/answers"
+  wizard_fill_missing <"$BATS_TEST_TMPDIR/answers" >/dev/null 2>&1
+  [[ ${WIZARD_SECRETS[HAMMURAPI_GITHUB_APP_PRIVATE_KEY]} == *"BEGIN KEY"* ]]
+  [[ $HAMMURAPI_GITHUB_APP_PRIVATE_KEY == *"BEGIN KEY"* && $HAMMURAPI_GITHUB_APP_PRIVATE_KEY != *".pem"* ]]
+}
+
+@test "CLI-15: the wizard itself does not ask again" {
+  load_script
+  interactive() { return 0; }
+  wizard_running() { return 0; }
+  validate_config() { CONFIG_MISSING=("parameter X is not set") CONFIG_MISSING_KEYS=(X); die_if_missing; }
+  run wizard_missing_parameters products
+  [ "$status" -eq 0 ]
+  [[ $output != *"Missing parameters"* ]]
+}
+
 @test "CLI-10: the result without jq still ends stdout with JSON" {
   load_script
   COMMAND=install

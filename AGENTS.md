@@ -87,6 +87,11 @@ at the pinned version. Name any job you could not run in your report, with the r
 
 ## Rules
 
+- **A change of behaviour goes with the specification.** When a change adds or alters a requirement, a
+  technical decision or a QA case, update `hammurapi-specs/specs/INFRA/INST/FTR.INFRA.INST-0001` (product,
+  tech, qa) in the same PR: the requirement and its acceptance criteria, the decision table, the test row,
+  the version and the changelog line. A change that only fixes an implementation detail without changing
+  behaviour needs no spec edit.
 - **Shell, YAML and Helm templates are edited by hand.** A formatter once replaced `lib/*.sh` with
   the content of `tests/manifests.sh` (endless recursion → segfault of `up` and of the manifest
   check) and re-indented `values/scrape/hammurapi.yaml`. After bulk edits, diff every file.

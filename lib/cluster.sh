@@ -90,6 +90,19 @@ kubelet_gc() {
   fi
 }
 
+DOCKER_DAEMON_FILE=${DOCKER_DAEMON_FILE:-/etc/docker/daemon.json}
+
+# docker_no_nat — Docker runs without its network plumbing (--iptables=False, --ip-forward=False or
+# --ip-masq=False in the unit or daemon.json). Then the node of minikube gets no NAT and reaches no registry,
+# whatever sysctl says: a hardened image does this, and the installer does not change the Docker of the machine.
+docker_no_nat() {
+  local flags
+  flags=$(systemctl show docker -p ExecStart 2>/dev/null || true)
+  [[ ! -r $DOCKER_DAEMON_FILE ]] || flags+=$'\n'"$(<"$DOCKER_DAEMON_FILE")"
+  grep -Eqi -- '--iptables[= ]+false|--ip-forward[= ]+false|--ip-masq[= ]+false' <<<"$flags" && return 0
+  grep -Eqi '"iptables"[[:space:]]*:[[:space:]]*false|"ip-forward"[[:space:]]*:[[:space:]]*false|"ip-masq"[[:space:]]*:[[:space:]]*false' <<<"$flags"
+}
+
 # node_not_ready — why the node is not ready: the message of its condition Ready and the first failed pull of an
 # image, with what usually stands behind them on a machine of a closed network.
 node_not_ready() {
@@ -99,8 +112,18 @@ node_not_ready() {
   pull=$(kc get events -A --field-selector reason=Failed -o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null |
     grep -m1 'Failed to pull image' || true)
   if [[ -n $pull ]]; then
-    msg+="; $pull. Containers of the machine do not reach the registry: check IP forwarding and NAT of Docker"
-    msg+=" (sysctl net.ipv4.ip_forward, iptables -t nat -S POSTROUTING), or set REGISTRY_MIRRORS to a mirror of your network"
+    msg+="; $pull."
+    # A wrong tag or a missing login is not a network fault: the advice would send the reader the wrong way.
+    if [[ $pull =~ (i/o timeout|connection refused|no such host|TLS handshake timeout|network is unreachable|dial tcp) ]]; then
+      if docker_no_nat; then
+        msg+=" Containers of the machine do not reach the registry: Docker runs with iptables, ip-forward or ip-masq"
+        msg+=" off (--iptables=False/--ip-forward=False/--ip-masq=False), so the node has no NAT; enable the defaults"
+        msg+=" of Docker or add a MASQUERADE rule for the subnet of the node"
+      else
+        msg+=" Containers of the machine do not reach the registry: check IP forwarding and NAT of Docker"
+        msg+=" (sysctl net.ipv4.ip_forward, iptables -t nat -S POSTROUTING), or set REGISTRY_MIRRORS to a mirror of your network"
+      fi
+    fi
   fi
   echo "$msg"
 }

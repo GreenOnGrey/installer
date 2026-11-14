@@ -63,7 +63,7 @@ minikube turns off image garbage collection in kubelet, so old images would fill
 
 Images come from Docker Hub, `ghcr.io`, `quay.io` and `registry.k8s.io`. If the machine reaches them only through a pull-through proxy of your network, name it in `REGISTRY_MIRRORS`: for example `REGISTRY_MIRRORS="docker.io=https://mirror.example.com"`, where `mirror.example.com/migrate/migrate` serves `docker.io/migrate/migrate`. Several registries go space-separated. A proxy that serves a registry under a path (a Harbor project) takes the full path of its API: `docker.io=https://harbor.example.com/v2/dockerhub`. The names of images do not change: containerd of the node asks the mirror first and the registry itself after it.
 
-`install` writes the mirrors before it waits for the node, whose network plugin also comes from Docker Hub, and restarts pods that were stuck pulling an image. The unit of the stand writes them again after each reboot. A registry removed from the list gets its default back. A proxy that needs a login is not supported yet.
+`install` writes the mirrors before it waits for the node, whose network plugin also comes from Docker Hub, and restarts pods that were stuck pulling an image. The unit of the stand writes them again after each reboot. A registry removed from the list gets its default back. A proxy that needs a login is not supported: a URL with `user:pass` is rejected with code `2`, since the value goes into the log and into the unit of the stand.
 
 ## Uninstall
 

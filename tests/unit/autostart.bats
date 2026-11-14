@@ -263,14 +263,16 @@ mirrors_node() {
   kubelet_gc() { :; }
   ensure_stand_namespaces() { :; }
   install_autostart() { :; }
-  stub minikube 'case "$*" in ssh*) echo mirrors-done ;; esac'
-  # kindnet of a DaemonSet waits to pull; a debug pod without a controller waits too; etcd runs.
+  stub minikube 'case "$*" in ssh*) echo "changed mirrors-done" ;; esac'
+  # kindnet of a DaemonSet waits to pull; a debug pod without a controller waits too; a static pod of the
+  # control plane waits as well and must stay (the kubelet owns it, nobody would bring it back).
   stub kubectl 'case "$*" in
     *"get pods -A -o json"*) cat <<JSON
 {"items":[
  {"metadata":{"namespace":"kube-system","name":"kindnet-x","ownerReferences":[{"kind":"DaemonSet"}]},"status":{"containerStatuses":[{"state":{"waiting":{"reason":"ImagePullBackOff"}}}]}},
  {"metadata":{"namespace":"default","name":"debug"},"status":{"containerStatuses":[{"state":{"waiting":{"reason":"ErrImagePull"}}}]}},
- {"metadata":{"namespace":"kube-system","name":"etcd","ownerReferences":[{"kind":"Node"}]},"status":{"containerStatuses":[{"state":{"running":{}}}]}}]}
+ {"metadata":{"namespace":"kube-system","name":"etcd","ownerReferences":[{"kind":"Node"}]},"status":{"containerStatuses":[{"state":{"running":{}}}]}},
+ {"metadata":{"namespace":"kube-system","name":"apiserver","ownerReferences":[{"kind":"Node"}]},"status":{"containerStatuses":[{"state":{"waiting":{"reason":"ImagePullBackOff"}}}]}}]}
 JSON
     ;;
   esac'
@@ -278,6 +280,7 @@ JSON
   [ "$status" -eq 0 ] || { echo "$output"; false; }
   called "kubectl --context hammurapi -n kube-system delete pod kindnet-x"
   not_called "delete pod etcd"
+  not_called "delete pod apiserver"
   not_called "delete pod debug"
   [ "$(grep -n 'registry-mirrors' "$CALLS" | head -1 | cut -d: -f1)" -lt "$(grep -n 'wait --for=condition=Ready node' "$CALLS" | cut -d: -f1)" ]
 }
@@ -295,13 +298,25 @@ JSON
   REGISTRY_MIRRORS="docker.io=https://mirror.example.com ghcr.io=http://10.0.0.5:5000/v2/ghcr" run validate_config
   [ "$status" -eq 0 ] || { echo "$output"; false; }
   local bad
-  for bad in "..=https://m.example.com" "docker.io=https://m.example.com/v2/a%2Fb" "docker.io=https://m.example.com\\x"; do
+  for bad in "..=https://m.example.com" "docker.io=https://m.example.com/v2/a%2Fb" "docker.io=https://m.example.com\\x" \
+    "docker.io=https://user:pass@m.example.com"; do
     REGISTRY_MIRRORS=$bad run validate_config
     [ "$status" -eq 2 ] || { echo "$bad: $status"; false; }
   done
   REGISTRY_MIRRORS="docker.io=https://a.example.com docker.io=https://b.example.com" run validate_config
   [ "$status" -eq 2 ]
   [[ $output == *"docker.io is named twice"* ]]
+  # The login is stripped from the message: it does not reach the log either.
+  REGISTRY_MIRRORS="docker.io=https://user:pass@m.example.com" run validate_config
+  [ "$status" -eq 2 ]
+  [[ $output != *"user:pass"* && $output == *"docker.io=https://m.example.com"* ]]
+}
+
+@test "MIR-06: an unchanged configuration does not restart a pod that waits to pull" {
+  stub minikube 'case "$*" in ssh*) echo mirrors-done ;; esac'
+  REGISTRY_MIRRORS="docker.io=https://mirror.example.com" run bash "$AUTOSTART" registry-mirrors
+  [ "$status" -eq 0 ]
+  not_called "kubectl"
 }
 
 @test "HOST-07: a node that is not ready names its condition and the failed pull, with what to check" {
@@ -314,4 +329,31 @@ JSON
   run node_not_ready
   [[ $output == *"not ready: container runtime network not ready"* ]]
   [[ $output == *"kindnetd"*"i/o timeout"* && $output == *"net.ipv4.ip_forward"* && $output == *"REGISTRY_MIRRORS"* ]]
+}
+
+@test "HOST-08: Docker without iptables names the flags, not the sysctl advice" {
+  load_script
+  MK_PROFILE=hammurapi
+  DOCKER_DAEMON_FILE=$BATS_TEST_TMPDIR/daemon.json
+  stub systemctl 'echo "ExecStart={ path=/usr/bin/dockerd ; argv[]=/usr/bin/dockerd --iptables=False --ip-masq=False ; }"'
+  stub kubectl 'case "$*" in
+    *"get nodes"*) echo "container runtime network not ready: cni plugin not initialized" ;;
+    *"get events"*) echo "Failed to pull image \"docker.io/kindest/kindnetd:v1\": dial tcp 1.2.3.4:443: i/o timeout" ;;
+  esac'
+  run node_not_ready
+  [[ $output == *"--iptables=False"* && $output == *"no NAT"* ]]
+  [[ $output != *"net.ipv4.ip_forward"* && $output != *"REGISTRY_MIRRORS"* ]]
+}
+
+@test "HOST-09: a pull that failed for a wrong tag gets no network advice" {
+  load_script
+  MK_PROFILE=hammurapi
+  DOCKER_DAEMON_FILE=$BATS_TEST_TMPDIR/daemon.json
+  stub kubectl 'case "$*" in
+    *"get nodes"*) echo "container runtime network not ready: cni plugin not initialized" ;;
+    *"get events"*) echo "Failed to pull image \"ghcr.io/greenongrey/nabu-core:v0\": manifest unknown" ;;
+  esac'
+  run node_not_ready
+  [[ $output == *"manifest unknown"* ]]
+  [[ $output != *"net.ipv4.ip_forward"* && $output != *"no NAT"* ]]
 }

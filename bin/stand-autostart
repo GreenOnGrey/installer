@@ -108,7 +108,7 @@ kubelet_gc() {
 # directory; other files are not touched.
 # shellcheck disable=SC2016 # the script runs in the node's shell: its variables are its own
 registry_mirrors() {
-  local script e args=() out
+  local script e args=() out changed=0
   script='d=$1; shift; m="# installer: REGISTRY_MIRRORS"; keep=" ";'
   script+=' for e in "$@"; do r=${e%%=*}; u=${e#*=}; u=${u%/}; keep="$keep$r ";'
   script+=' s="https://$r"; [ "$r" = docker.io ] && s="https://registry-1.docker.io"; mkdir -p "$d/$r";'
@@ -124,14 +124,16 @@ registry_mirrors() {
   out=$(minikube ssh -p "$MK_PROFILE" -- sudo sh -c "$(printf %q "$script")" registry-mirrors "$CERTS_D" "${args[@]}" 2>&1) || true
   case $out in
     *mirrors-done*)
-      [[ $out != *changed* ]] || log "registry mirrors: ${REGISTRY_MIRRORS:-none}"
+      if [[ $out == *changed* ]]; then log "registry mirrors: ${REGISTRY_MIRRORS:-none}"; changed=1; fi
       ;;
     *)
       log "failed to configure registry mirrors: $out"
       return 1
       ;;
   esac
-  [[ -z $REGISTRY_MIRRORS ]] || restart_pull_waits
+  # Only a changed configuration leaves pods that waited for the registry: a rerun does not churn a pod stuck on a
+  # wrong tag or a missing login, which a mirror cannot fix anyway.
+  if [[ -n $REGISTRY_MIRRORS ]] && ((changed)); then restart_pull_waits; fi
 }
 
 # restart_pull_waits — pods of controllers that wait to pull an image start over at once instead of after their
@@ -144,7 +146,7 @@ restart_pull_waits() {
     log "restarting $ns/$pod: it was waiting to pull an image"
     kubectl --context "$MK_PROFILE" -n "$ns" delete pod "$pod" --wait=false >/dev/null 2>&1 || true
   done < <(kubectl --context "$MK_PROFILE" get pods -A -o json 2>/dev/null | jq -r '.items[]
-    | select((.metadata.ownerReferences // []) | length > 0)
+    | select(any((.metadata.ownerReferences // [])[]; .kind != "Node"))
     | select(any((.status.containerStatuses // [])[], (.status.initContainerStatuses // [])[];
         .state.waiting.reason == "ImagePullBackOff" or .state.waiting.reason == "ErrImagePull"))
     | "\(.metadata.namespace) \(.metadata.name)"' 2>/dev/null || true)
