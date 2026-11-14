@@ -22,6 +22,23 @@ probe_id() { openssl rand -hex 6; }
 # do not delete each other's probes. Abandoned probes end on their own
 # (activeDeadlineSeconds, ttlSecondsAfterFinished).
 PROBE_RUN=${PROBE_RUN:-$(probe_id)}
+
+# preload_probe_images — pull the images of the checks once, with time to spare: on a slow network the checks of
+# the first install otherwise race the first pull of an image and time out (R33, tech §6). Cached images are a
+# no-op. A failure is a warning: the checks run and name the image that did not come.
+preload_probe_images() {
+  local img out failed=0
+  for img in "$PROBE_BUSYBOX_IMAGE" "$PROBE_CURL_IMAGE" "$PROBE_KCAT_IMAGE" "$PROBE_S3_IMAGE" "$POSTGRES_IMAGE"; do
+    log "checks: image $img"
+    if ! out=$(mk ssh -p "$MK_PROFILE" -- sudo timeout 600 crictl pull "$img" 2>&1); then
+      warn "checks: image $img is not pulled: $(tail -c 300 <<<"$out" | tr '\n' ' ')"
+      failed=1
+    fi
+  done
+  if ((failed == 0)); then ok "checks: images of the probes are ready"; fi
+  return 0
+}
+
 CHECKS_PROBE="checks-probe-$PROBE_RUN"
 LOG_PROBE="log-probe-$PROBE_RUN"
 
@@ -193,7 +210,8 @@ metadata:
   labels: { app.kubernetes.io/name: $name, app.kubernetes.io/managed-by: installer }
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 180
+  # Room for the first pull of the images of the probe on a slow network, not only for the commands.
+  activeDeadlineSeconds: 600
   ttlSecondsAfterFinished: 600
   template:
     metadata:
@@ -250,10 +268,23 @@ EOF
   fi
 }
 
+# pod_not_running_reason <ns> <pod> [container] — the waiting reason of the container, else the phase, else
+# unknown: "ImagePullBackOff" tells what a bare timeout hides.
+pod_not_running_reason() {
+  local ns=$1 pod=$2 c=${3:-} phase waiting
+  phase=$(kc -n "$ns" get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+  if [[ -n $c ]]; then
+    waiting=$(kc -n "$ns" get pod "$pod" -o "jsonpath={.status.containerStatuses[?(@.name=='$c')].state.waiting.reason}" 2>/dev/null || true)
+  else
+    waiting=$(kc -n "$ns" get pod "$pod" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || true)
+  fi
+  echo "${waiting:-${phase:-unknown}}"
+}
+
 # run_probe_job <name> <timeout, s> <manifest from stdin> — prints container
 # messages; code 0 if all containers succeeded.
 run_probe_job() {
-  local name=$1-$PROBE_RUN timeout=$2 deadline status rc=0 c msg
+  local name=$1-$PROBE_RUN timeout=$2 deadline status rc=0 c msg reason
   kc create -f - >/dev/null || return 1
   deadline=$((SECONDS + timeout))
   while ((SECONDS < deadline)); do
@@ -274,7 +305,15 @@ run_probe_job() {
       if [[ $code == 0 ]]; then
         [[ -n $msg ]] && echo "ok|$msg"
       else
-        [[ -z $code ]] && msg="$c: did not finish in $timeout s"
+        if [[ -z $code ]]; then
+          # Why it is not running: a waiting reason (ImagePullBackOff, ContainerCreating) tells much more
+          # than "did not finish", which hid a slow pull of the image behind a timeout.
+          reason=$(pod_not_running_reason "$NS_STORAGES" "$pod" "$c")
+          case $reason in
+            Pending | Running | Succeeded | Failed | Unknown | "") msg="$c: did not finish in $timeout s${reason:+ ($reason)}" ;;
+            *) msg="$c: $reason" ;;
+          esac
+        fi
         echo "fail|${msg:-$c: code $code}"
         rc=1
       fi
@@ -340,7 +379,12 @@ check_logs() {
   id=$(probe_id)
   kc -n "$NS_STORAGES" delete pod "$LOG_PROBE" --ignore-not-found --wait=true >/dev/null 2>&1 || true
   log_probe_manifest "$id" | kc create -f - >/dev/null
-  kc -n "$NS_STORAGES" wait --for=condition=Ready "pod/$LOG_PROBE" --timeout=120s >/dev/null 2>&1 || true
+  if ! kc -n "$NS_STORAGES" wait --for=condition=Ready "pod/$LOG_PROBE" --timeout=300s >/dev/null 2>&1; then
+    # Without the pod there is no log line to find: name why it did not start, not "logs do not reach".
+    record logs fail "the probe pod $LOG_PROBE did not start: $(pod_not_running_reason "$NS_STORAGES" "$LOG_PROBE")"
+    kc -n "$NS_STORAGES" delete pod "$LOG_PROBE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    return
+  fi
   # Time for Vector to find the new file and flush to VictoriaLogs.
   deadline=$((SECONDS + 120))
   while ((SECONDS < deadline)); do
@@ -361,7 +405,7 @@ check_logs() {
 }
 
 check_grafana() {
-  local health uid failed=""
+  local health uid failed="" body detail
   health=$(probe_curl "$GRAFANA_URL/api/health" 2>/dev/null | jq -r .database 2>/dev/null || true)
   if [[ $health != ok ]]; then
     record grafana fail "Grafana does not answer on /api/health"
@@ -369,10 +413,13 @@ check_grafana() {
   fi
   for uid in victoriametrics victorialogs; do
     # The shell of the probe pod fills in credentials from its environment.
-    if ! kc -n "$NS_OBSERVABILITY" exec "$CHECKS_PROBE" -c curl -- sh -c \
-      "curl -sS -m 15 -u \"\$GF_USER:\$GF_PASS\" $GRAFANA_URL/api/datasources/uid/$uid/health" 2>/dev/null |
-      jq -e '.status == "OK"' >/dev/null 2>&1; then
-      failed+="$uid "
+    body=$(kc -n "$NS_OBSERVABILITY" exec "$CHECKS_PROBE" -c curl -- sh -c \
+      "curl -sS -m 15 -u \"\$GF_USER:\$GF_PASS\" $GRAFANA_URL/api/datasources/uid/$uid/health" 2>/dev/null || true)
+    if ! jq -e '.status == "OK"' >/dev/null 2>&1 <<<"$body"; then
+      # "Plugin not found" and "no such host" need different fixes: keep the answer of Grafana.
+      detail=$(jq -r '.message // .error // empty' <<<"$body" 2>/dev/null | head -c 160)
+      [[ -n $detail ]] || detail=$(head -c 160 <<<"$body" | tr '\n' ' ')
+      failed+="$uid${detail:+ ($detail)} "
     fi
   done
   if [[ -n $failed ]]; then
@@ -384,7 +431,7 @@ check_grafana() {
 
 check_storages() {
   local out rc=0 line msgs=() errs=()
-  out=$(probe_job_manifest storage-probe full pg kafka s3 | run_probe_job storage-probe 150) || rc=$?
+  out=$(probe_job_manifest storage-probe full pg kafka s3 | run_probe_job storage-probe 300) || rc=$?
   while IFS= read -r line; do
     [[ -z $line ]] && continue
     case $line in
@@ -411,7 +458,11 @@ cluster_allocatable_memory() {
 
 # collect_resources — total memory requests and containers without requests or limits.
 check_resources() {
-  local pods missing ns
+  local pods missing ns pressure limit
+  # The node may be Ready and still unable to run a pod: with no memory left, runc cannot fork, and probes,
+  # hooks and liveness exec fail with "resource temporarily unavailable". Name the pressure itself.
+  pressure=$(kc get nodes -o json 2>/dev/null |
+    jq -r '[.items[].status.conditions[]? | select((.type == "MemoryPressure" or .type == "PIDPressure" or .type == "DiskPressure") and .status == "True") | .type] | unique | join(", ")' 2>/dev/null || true)
   pods=$(for ns in $(stand_namespaces); do kc get pods -n "$ns" -o json; done
     if mcp_enabled; then kc get pods -n "$NS_MCP" -l 'app.kubernetes.io/part-of=mcp-servers' -o json; fi)
   missing=$(jq -rs '[.[].items[] | select(.status.phase == "Running" or .status.phase == "Pending")
@@ -427,12 +478,20 @@ check_resources() {
   done < <(jq -rs '.[].items[] | select(.status.phase == "Running" or .status.phase == "Pending")
       | .spec.containers[] | .resources.requests.memory // empty' <<<"$pods")
   MEM_ALLOCATABLE=$(cluster_allocatable_memory)
+  # On minikube the node runs in a container of MK_MEMORY: the memory it reports is the memory of the machine,
+  # but the container cannot use more than the profile. The budget follows the smaller of the two.
+  if ! target_external; then
+    limit=$(mk_memory_limit)
+    ((limit > 0 && limit < MEM_ALLOCATABLE)) && MEM_ALLOCATABLE=$limit
+  fi
   local pct=0
   ((MEM_ALLOCATABLE > 0)) && pct=$((MEM_REQUESTED * 100 / MEM_ALLOCATABLE))
   local summary
   summary="requested $(gib "$MEM_REQUESTED") of $(gib "$MEM_ALLOCATABLE") GiB ($pct%)"
   if [[ -n $missing ]]; then
     record resources fail "no requests or limits: $missing"
+  elif [[ -n $pressure ]]; then
+    record resources fail "node pressure: $pressure: the node cannot run new pods; for memory turn the heaviest MCP server off (docling) or add memory, for disk free space ($summary)"
   elif ((MEM_REQUESTED * 3 > MEM_ALLOCATABLE * 2)); then
     record resources fail "$summary, more than two thirds of the memory of nodes"
   else

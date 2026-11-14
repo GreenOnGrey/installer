@@ -295,7 +295,7 @@ EOF
   INSTALL_TARGET=minikube NABU_MODE=external WIZARD_MCP_MIB=3000
   printf '%s\n' "" "" "" "" >"$BATS_TEST_TMPDIR/answers"
   run wizard_extras <"$BATS_TEST_TMPDIR/answers"
-  [[ $output == *"more than the budget of this machine (2 GiB)"* ]]
+  [[ $output == *"more than the budget of the profile (2 GiB)"* ]]
 }
 
 @test "R4: a question refuses an invalid answer and asks again" {

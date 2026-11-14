@@ -281,11 +281,12 @@ sync_core_config() {
   ok "configuration and secrets"
 }
 
-# ensure_certificate — nabu. and nabu-api. in the shared Traefik certificate.
+# ensure_certificate — nabu. and nabu-api. in the shared Traefik certificate. With an external controller, or
+# with TLS terminated on a load balancer in front (the chart then has ingress.tls=false), there is no such
+# certificate: the stand installs no cert-manager.
 ensure_certificate() {
   step certificate
-  # An external controller reads the secret of each Ingress, issued by the annotation of the chart.
-  if ingress_external; then return 0; fi
+  if ingress_external || tls_external; then return 0; fi
   local names want missing=()
   names=$(kc -n "$NS_INGRESS" get certificate "$CERT_NAME" -o json 2>/dev/null | jq -r '.spec.dnsNames[]?') ||
     fail "$E_STAND" "certificate $NS_INGRESS/$CERT_NAME does not exist"

@@ -17,7 +17,9 @@ Servers are installed by the release `mcp-servers` in the namespace `mcp` and ar
 
 ## Memory
 
-Before the deploy, `install` checks the memory budget (two thirds of the node memory, like the `resources` check). If the servers do not fit, it exits with code 2 before anything changes and says which `MK_MEMORY` is needed; on an existing cluster, how much memory is missing. The minikube profile with new memory is created anew (`uninstall`, then `install`). On minikube with the docker driver the node reports the memory of the machine, so the servers do not need a larger `MK_MEMORY`: 12g holds the stand with all servers on a 16 GB machine.
+Before the deploy, `install` checks the memory budget (two thirds of the node memory, like the `resources` check). If the servers do not fit, it exits with code 2 before anything changes and says which `MK_MEMORY` is needed; on an existing cluster, how much memory is missing. The minikube profile with new memory is created anew (`uninstall`, then `install`).
+
+On minikube the node is a container of `MK_MEMORY`: it reports the memory of the machine, but it cannot use more than the profile, so the budget follows the smaller of the two. Requests are small, the limits are overcommitted, and the actual usage can reach them: `docling` is the heaviest server (limit about 5 GiB). 12g holds the stand with all servers on a 16 GB machine; on a 15 GB machine the stand with `docling` can exhaust the host — turn it off or add memory. When the node is under pressure the `resources` check fails and names `MemoryPressure`/`PIDPressure`/`DiskPressure`, because a node without memory cannot start the probes, hooks and liveness execs.
 
 ## Parameters
 

@@ -19,6 +19,13 @@ mk_memory_mib() {
   n=${v%[gGmM]}
   if [[ $v == *[gG] ]]; then echo $((n * 1024)); else echo "$n"; fi
 }
+# mk_memory_limit — the bytes the node can use: MK_MEMORY. Empty if unknown; 0 for a value that is not a size.
+mk_memory_limit() {
+  local m
+  m=$(mk_memory_mib)
+  [[ -n $m ]] || return 0
+  echo $((m * 1024 * 1024))
+}
 # mk_memory_fits [value] — the size is no more than the machine has; true when either is unknown (validate_config
 # and minikube judge those).
 mk_memory_fits() {

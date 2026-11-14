@@ -237,8 +237,9 @@ mcp_rendered_memory() {
     awk '{ s += $1 } END { print s + 0 }'
 }
 
-# mcp_budget <requested outside mcp> <servers> <allocatable> <capacity> — ok, or a
-# message with the missing amount and the needed MK_MEMORY (R3, STD-09).
+# mcp_budget <requested outside mcp> <servers> <allocatable> <capacity> [<system>] — ok, or a
+# message with the missing amount and the needed MK_MEMORY (R3, STD-09). The system part is what the
+# node's OS takes; on minikube it comes from the host allocatable, not from the clamped profile.
 mcp_budget() {
   local others=$1 servers=$2 alloc=$3 capacity=$4
   local need=$((others + servers)) limit=$((alloc * 2 / 3))
@@ -250,7 +251,7 @@ mcp_budget() {
     printf 'MCP servers lack %s GiB of memory: add nodes to the cluster or turn servers off\n' "$(gib $((need - limit)))"
     return
   fi
-  local system=$((capacity - alloc))
+  local system=${5:-$((capacity - alloc))}
   # node memory where need is two thirds of allocatable, plus the system part
   local want_gib=$(((need * 3 / 2 + system + 1073741823) / 1073741824))
   # A profile larger than the machine is refused (check_host): then servers have to go, not MK_MEMORY up.
@@ -276,9 +277,20 @@ mcp_preflight() {
     jq -rs '.[].items[] | select(.status.phase == "Running" or .status.phase == "Pending")
       | .spec.containers[] | .resources.requests.memory // empty')
   servers=$(mcp_rendered_memory) || die "$E_DEPLOY" "failed to count the memory of MCP servers"
-  alloc=$(cluster_allocatable_memory)
+  local host_alloc system
+  host_alloc=$(cluster_allocatable_memory)
+  alloc=$host_alloc
   capacity=$(to_bytes "$(kc get nodes -o jsonpath='{.items[0].status.capacity.memory}')")
-  verdict=$(mcp_budget "$others" "$servers" "$alloc" "$capacity")
+  # What the node's OS takes: the host capacity minus the host allocatable, not the clamped profile.
+  system=$((capacity - host_alloc))
+  # On minikube the node is a container of MK_MEMORY: it reports the memory of the machine, but cannot use more
+  # than the profile. The budget follows the smaller of the two (R3).
+  if ! target_external; then
+    local profile_bytes
+    profile_bytes=$(mk_memory_limit)
+    ((profile_bytes > 0 && profile_bytes < alloc)) && alloc=$profile_bytes
+  fi
+  verdict=$(mcp_budget "$others" "$servers" "$alloc" "$capacity" "$system")
   [[ $verdict == ok ]] || die "$E_USAGE" "$verdict"
   log "memory: stand $(gib "$others") + MCP servers $(gib "$servers") of the $(gib $((alloc * 2 / 3))) GiB budget"
 }
@@ -539,8 +551,13 @@ check_mcp() {
     return
   fi
   kc -n "$NS_MCP" delete pod "mcp-probe-$PROBE_RUN" --ignore-not-found --wait=true >/dev/null 2>&1 || true
-  if ! mcp_probe_manifest | kc create -f - >/dev/null || ! kc -n "$NS_MCP" wait --for=condition=Ready "pod/mcp-probe-$PROBE_RUN" --timeout=120s >/dev/null; then
-    record mcp fail "the probe pod mcp-probe did not start"
+  if ! mcp_probe_manifest | kc create -f - >/dev/null; then
+    record mcp fail "the probe pod mcp-probe was not created"
+    return
+  fi
+  if ! kc -n "$NS_MCP" wait --for=condition=Ready "pod/mcp-probe-$PROBE_RUN" --timeout=300s >/dev/null 2>&1; then
+    kc -n "$NS_MCP" describe pod "mcp-probe-$PROBE_RUN" >"$RUN_DIR/mcp-probe.txt" 2>&1 || true
+    record mcp fail "the probe pod mcp-probe did not start: $(pod_not_running_reason "$NS_MCP" "mcp-probe-$PROBE_RUN") (see mcp-probe.txt)"
     return
   fi
   local srv

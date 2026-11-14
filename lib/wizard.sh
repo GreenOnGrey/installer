@@ -505,6 +505,9 @@ wizard_mcp() {
     [[ ${!o} == true ]] && WIZARD_MCP_MIB=$((WIZARD_MCP_MIB + mibs[i]))
   done
   ((WIZARD_MCP_MIB == 0)) || say "The servers request $(awk -v m="$WIZARD_MCP_MIB" 'BEGIN { printf "%.1f", m / 1024 }') GiB of memory."
+  if [[ ${MCP_DOCLING:-false} == true ]]; then
+    say_warn "  docling is the heaviest server (limit about 5 GiB): with the stand it can exhaust a 15 GB machine; 16 GB with a 12g profile are the practical minimum."
+  fi
   if [[ ${MCP_YANDEX_MAIL:-false} == true ]]; then
     say "Yandex Mail: after the install, add the server to the catalog of Nabu (./installer creds shows its address)," \
       "  then create an app at https://oauth.yandex.ru/client/new (web services) with the permissions mail:imap_ro" \
@@ -525,15 +528,16 @@ wizard_memory_gib() {
   echo $((now / 1024))
 }
 
-# wizard_mcp_budget — the servers against two thirds of the memory of the machine, as install checks them before
-# the first rollout (R21); a warning, if they do not fit.
+# wizard_mcp_budget — the servers against two thirds of the memory of the minikube profile, as install checks
+# them before the first rollout (R21): the node is a container of MK_MEMORY and cannot use more than it. A
+# warning, if they do not fit.
 wizard_mcp_budget() {
-  local host budget
-  host=$(host_memory_mib)
-  [[ -n $host ]] || return 0
-  budget=$((host * 2 / 3))
+  local profile budget
+  profile=$(wizard_memory_gib)
+  [[ -n $profile ]] || return 0
+  budget=$((profile * 1024 * 2 / 3))
   ((${WIZARD_MCP_MIB:-0} <= budget)) && return 0
-  say_warn "The servers request more than the budget of this machine ($((budget / 1024)) GiB): turn some off or use a machine with more memory."
+  say_warn "The servers request more than the budget of the profile ($((budget / 1024)) GiB): turn some off or give the profile more memory."
 }
 
 wizard_extras() {
