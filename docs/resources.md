@@ -66,7 +66,9 @@ At the end of `install` and in `status`:
 - the pods of `storages` and `observability` are ready;
 - Grafana and its data sources answer, every scrape job is up, and a test log line reaches VictoriaLogs;
 - the storages work with their `*-conn` secrets: `select 1` in Postgres, a message in Kafka, an object in S3;
-- every container has requests and limits, and memory requests are at most two thirds of the node memory;
+- every container has requests and limits, and memory requests are at most two thirds of the node memory; on minikube that is `MK_MEMORY`, the node container, not the memory of the machine the node reports;
+- the node reports no `MemoryPressure`, `PIDPressure` or `DiskPressure`;
+- the images of the probes are pulled before the checks, and a probe that does not start names the waiting reason (`ImagePullBackOff`, `ContainerCreating`);
 - public access, the products and the MCP servers answer.
 
 A failure ends with code `15` and names the check. A check that depends on a service outside the install only warns: when the search engines refuse SearXNG, `mcp-search-query` shows `!`, and the run goes on.

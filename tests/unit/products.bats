@@ -30,6 +30,13 @@ nabu_github() {
   [[ $output == *PUBLIC_ACCESS* && $output == *AUTH_PROVIDER* && $output == *BOOTSTRAP_ADMINS* ]]
 }
 
+@test "RES-12 (R17): the product deploy skips the shared certificate when a load balancer terminates TLS" {
+  # TLS_TERMINATION=external with Traefik of the stand: cert-manager is not installed, the chart has
+  # ingress.tls=false, and ensure_certificate must not look for ingress/greenongrey-public.
+  run grep -F 'if ingress_external || tls_external; then return 0; fi' "$ROOT/bin/nabu-deploy"
+  [ "$status" -eq 0 ]
+}
+
 @test "R13: GitHub sign-in needs the client and its secret; a secret kept by an earlier install counts" {
   nabu_github
   unset NABU_GITHUB_CLIENT_SECRET

@@ -197,6 +197,26 @@ esac'
   not_called "apply -f -"
 }
 
+@test "STD-09 (R3): the budget follows MK_MEMORY, not the memory the node reports" {
+  MCP_DOCLING=true MK_MEMORY=12g
+  meminfo_gb 16
+  mcp_rendered_memory() { echo $((7 << 30)); }
+  stub kubectl '
+case "$*" in
+  *"range .items[*]"*) echo 16Gi ;;
+  *"get nodes -o jsonpath={.items[0].status.capacity.memory}"*) echo 16Gi ;;
+  *"get pods -n storages"*) echo "{\"items\":[{\"status\":{\"phase\":\"Running\"},\"spec\":{\"containers\":[{\"resources\":{\"requests\":{\"memory\":\"2Gi\"}}}]}}]}" ;;
+  *"get pods -n observability"*) echo "{\"items\":[]}" ;;
+  *) exit 0 ;;
+esac'
+  # 2 GiB of the stand + 7 GiB of servers = 9 GiB: more than two thirds of the 12g profile, less than two
+  # thirds of the 16 GiB the node reports. The profile that fits is 9 × 3/2 = 14g, not more than the machine.
+  run deploy_all
+  [ "$status" -eq 2 ]
+  [[ $output == *"MK_MEMORY=14g"* ]]
+  not_called "helm --kube-context greenongrey upgrade"
+}
+
 @test "STD-13: keys reach neither argv nor the log" {
   MCP_SEARCH=true
   ensure_mcp_secrets 2>"$BATS_TEST_TMPDIR/log"

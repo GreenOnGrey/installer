@@ -60,6 +60,7 @@ cluster_up() {
   registry_mirrors
   kc wait --for=condition=Ready node --all --timeout=5m >/dev/null || die "$E_CLUSTER" "$(node_not_ready)"
   kubelet_gc
+  preload_probe_images
   ensure_stand_namespaces
   if [[ ${STAND_AUTOSTART:-true} == true ]]; then
     install_autostart
