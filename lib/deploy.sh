@@ -153,7 +153,7 @@ remove_observability() {
   for rel in dashboards grafana vector vmagent node-exporter kube-state-metrics victoria-logs victoria-metrics; do
     uninstall_if_present "$rel" "$NS_OBSERVABILITY"
   done
-  kc -n "$NS_OBSERVABILITY" delete secret grafana-admin grafana-github-oauth "$GRAFANA_TLS_SECRET" --ignore-not-found >/dev/null 2>&1 ||
+  kc -n "$NS_OBSERVABILITY" delete secret grafana-admin grafana-github-oauth grafana-oidc-oauth "$GRAFANA_TLS_SECRET" --ignore-not-found >/dev/null 2>&1 ||
     warn "failed to delete the secrets of Grafana in $NS_OBSERVABILITY"
 }
 
@@ -196,6 +196,7 @@ deploy_all() {
   ensure_public_secrets
   check_external
   public_prepare
+  grafana_oidc_prepare
   step deploy
   deploy_storages
   deploy_observability

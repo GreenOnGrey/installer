@@ -330,6 +330,8 @@ install_steps() {
     public_prepare
     acquire_lock
     install_prereqs
+    # After the utilities: the discovery needs curl and jq.
+    grafana_oidc_prepare
     cluster_up
   fi
   migrate_names

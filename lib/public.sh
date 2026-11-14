@@ -109,9 +109,30 @@ check_dns() {
   die "$E_DNS" "$msg; point the hosts (or *.$PUBLIC_DOMAIN) to $PUBLIC_IP_RESOLVED, or set PUBLIC_DNS_CHECK=false; no certificate was requested"
 }
 
-# grafana_public_values <file> — Ingress, root_url and GitHub sign-in (R20).
+# grafana_oidc_prepare — the endpoints of the issuer, once per run: Grafana generic OAuth needs them explicit,
+# and the discovery fetch is the only network call of the sign-in before the deploy.
+grafana_oidc_prepare() {
+  [[ $(grafana_auth_provider) == oidc ]] || return 0
+  observability_enabled && public_enabled || return 0
+  [[ -z ${GRAFANA_OIDC_AUTH_URL:-} ]] || return 0
+  local issuer doc
+  issuer=$(grafana_oidc_issuer)
+  [[ -n $issuer ]] || die "$E_USAGE" "GRAFANA_OIDC_ISSUER is empty"
+  doc=$(retry 3 5 curl -fsS --max-time 15 "${issuer%/}/.well-known/openid-configuration") ||
+    die "$E_PREFLIGHT" "the OIDC issuer $issuer does not answer .well-known/openid-configuration; check GRAFANA_OIDC_ISSUER"
+  GRAFANA_OIDC_AUTH_URL=$(jq -er '.authorization_endpoint' <<<"$doc") ||
+    die "$E_PREFLIGHT" "the OIDC discovery of $issuer has no authorization_endpoint"
+  GRAFANA_OIDC_TOKEN_URL=$(jq -er '.token_endpoint' <<<"$doc") ||
+    die "$E_PREFLIGHT" "the OIDC discovery of $issuer has no token_endpoint"
+  GRAFANA_OIDC_API_URL=$(jq -er '.userinfo_endpoint' <<<"$doc") ||
+    die "$E_PREFLIGHT" "the OIDC discovery of $issuer has no userinfo_endpoint"
+}
+
+# grafana_public_values <file> — Ingress, root_url and the sign-in of Grafana (R20, R34): the local administrator,
+# a GitHub app, or any OIDC provider (Keycloak).
 grafana_public_values() {
-  local f=$1
+  local f=$1 provider
+  provider=$(grafana_auth_provider)
   {
     echo "ingress:"
     echo "  enabled: true"
@@ -127,32 +148,63 @@ grafana_public_values() {
     fi
     echo "grafana.ini:"
     echo "  server: { root_url: \"https://grafana.$PUBLIC_DOMAIN\" }"
-    if [[ -n ${GRAFANA_GITHUB_CLIENT_ID:-} ]]; then
-      echo "  auth.github:"
-      echo "    enabled: true"
-      echo "    allow_sign_up: true"
-      echo "    scopes: user:email,read:org"
-      echo "    allowed_organizations: $GRAFANA_GITHUB_ORG"
-      echo "    role_attribute_path: \"'Editor'\""
-      echo "  auth: { disable_login_form: false }"
-      # GF_AUTH_GITHUB_CLIENT_ID and GF_AUTH_GITHUB_CLIENT_SECRET come from a secret.
-      echo "envFromSecret: grafana-github-oauth"
-      # Grafana reads the variables only at start, and a changed secret does not restart
-      # the pod: a hash of the values in a pod annotation does.
-      echo "podAnnotations:"
-      echo "  checksum/github-oauth: $(printf '%s\n%s' "$GRAFANA_GITHUB_CLIENT_ID" "$(secret_value GRAFANA_GITHUB_CLIENT_SECRET)" | sha256sum | cut -c1-64)"
-    fi
+    case $provider in
+      github)
+        echo "  auth.github:"
+        echo "    enabled: true"
+        echo "    allow_sign_up: true"
+        echo "    scopes: user:email,read:org"
+        echo "    allowed_organizations: $GRAFANA_GITHUB_ORG"
+        echo "    role_attribute_path: \"'Editor'\""
+        echo "  auth: { disable_login_form: false }"
+        # GF_AUTH_GITHUB_CLIENT_ID and GF_AUTH_GITHUB_CLIENT_SECRET come from a secret.
+        echo "envFromSecret: grafana-github-oauth"
+        # Grafana reads the variables only at start, and a changed secret does not restart
+        # the pod: a hash of the values in a pod annotation does.
+        echo "podAnnotations:"
+        echo "  checksum/github-oauth: $(printf '%s\n%s' "$GRAFANA_GITHUB_CLIENT_ID" "$(secret_value GRAFANA_GITHUB_CLIENT_SECRET)" | sha256sum | cut -c1-64)"
+        ;;
+      oidc)
+        grafana_oidc_prepare
+        echo "  auth.generic_oauth:"
+        echo "    enabled: true"
+        echo "    name: \"${GRAFANA_OIDC_NAME:-Single sign-on}\""
+        echo "    allow_sign_up: true"
+        echo "    scopes: ${GRAFANA_OIDC_SCOPES:-openid profile email groups}"
+        echo "    auth_url: \"$GRAFANA_OIDC_AUTH_URL\""
+        echo "    token_url: \"$GRAFANA_OIDC_TOKEN_URL\""
+        echo "    api_url: \"$GRAFANA_OIDC_API_URL\""
+        echo "    role_attribute_path: \"'Editor'\""
+        [[ -z ${GRAFANA_OIDC_ALLOWED_DOMAINS:-} ]] || echo "    allowed_domains: ${GRAFANA_OIDC_ALLOWED_DOMAINS}"
+        echo "  auth: { disable_login_form: false }"
+        # GF_AUTH_GENERIC_OAUTH_CLIENT_ID and its secret come from a secret.
+        echo "envFromSecret: grafana-oidc-oauth"
+        echo "podAnnotations:"
+        echo "  checksum/oidc-oauth: $(printf '%s\n%s\n%s\n%s\n%s' "$(grafana_oidc_client_id)" "$(grafana_oidc_client_secret)" \
+          "$(grafana_oidc_issuer)" "$GRAFANA_OIDC_AUTH_URL" "$GRAFANA_OIDC_API_URL" | sha256sum | cut -c1-64)"
+        ;;
+    esac
   } >"$f"
 }
 
-# ensure_public_secrets — the GitHub OAuth app for Grafana (the secret comes from
-# GRAFANA_GITHUB_CLIENT_SECRET or the *_FILE file; refreshed on every up).
+# ensure_public_secrets — the OAuth app of Grafana (the secret comes from the environment or the *_FILE file;
+# refreshed on every up). A separate OIDC client has its own secret; the reused one is the product secret.
 ensure_public_secrets() {
   public_enabled && observability_enabled || return 0
-  [[ -n ${GRAFANA_GITHUB_CLIENT_ID:-} ]] || return 0
-  put_secret "$NS_OBSERVABILITY" grafana-github-oauth Opaque \
-    GF_AUTH_GITHUB_CLIENT_ID "$GRAFANA_GITHUB_CLIENT_ID" \
-    GF_AUTH_GITHUB_CLIENT_SECRET "$(secret_value GRAFANA_GITHUB_CLIENT_SECRET)"
+  case $(grafana_auth_provider) in
+    github)
+      [[ -n ${GRAFANA_GITHUB_CLIENT_ID:-} ]] || return 0
+      put_secret "$NS_OBSERVABILITY" grafana-github-oauth Opaque \
+        GF_AUTH_GITHUB_CLIENT_ID "$GRAFANA_GITHUB_CLIENT_ID" \
+        GF_AUTH_GITHUB_CLIENT_SECRET "$(secret_value GRAFANA_GITHUB_CLIENT_SECRET)"
+      ;;
+    oidc)
+      put_secret "$NS_OBSERVABILITY" grafana-oidc-oauth Opaque \
+        GF_AUTH_GENERIC_OAUTH_CLIENT_ID "$(grafana_oidc_client_id)" \
+        GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET "$(grafana_oidc_client_secret)" \
+        GRAFANA_OIDC_ISSUER "$(grafana_oidc_issuer)"
+      ;;
+  esac
 }
 
 # metallb_pool — the MetalLB pool start-end saved in the minikube profile.

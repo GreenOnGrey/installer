@@ -158,7 +158,7 @@ mk_profile() {
   [ "$(public_domain 34.12.5.6)" = hammurapi.duckdns.org ]
 }
 
-@test "R20: Grafana values: Ingress, root_url and sign-in of organization members with the role Editor" {
+@test "GRA-01 (R20, R34): Grafana values: Ingress, root_url and sign-in of organization members with the role Editor" {
   load_script
   PUBLIC_DOMAIN=34-12-5-6.sslip.io GRAFANA_GITHUB_CLIENT_ID=Iv1.x GRAFANA_GITHUB_ORG=GreenOnGrey
   grafana_public_values "$BATS_TEST_TMPDIR/g.yaml"
@@ -168,6 +168,54 @@ mk_profile() {
   grep -q "role_attribute_path: \"'Editor'\"" "$BATS_TEST_TMPDIR/g.yaml"
   grep -q 'disable_login_form: false' "$BATS_TEST_TMPDIR/g.yaml"
   grep -q 'envFromSecret: grafana-github-oauth' "$BATS_TEST_TMPDIR/g.yaml"
+}
+
+@test "GRA-02 (R34): Grafana sign-in through any OIDC: generic_oauth, its endpoints, name and secret" {
+  load_script
+  PUBLIC_DOMAIN=34-12-5-6.sslip.io GRAFANA_AUTH=oidc GRAFANA_OIDC_REUSE=false \
+    GRAFANA_OIDC_ISSUER=https://sso.example/realms/main GRAFANA_OIDC_CLIENT_ID=grafana \
+    GRAFANA_OIDC_CLIENT_SECRET=s1 GRAFANA_OIDC_NAME=Keycloak \
+    GRAFANA_OIDC_AUTH_URL=https://sso.example/realms/main/protocol/openid-connect/auth \
+    GRAFANA_OIDC_TOKEN_URL=https://sso.example/realms/main/protocol/openid-connect/token \
+    GRAFANA_OIDC_API_URL=https://sso.example/realms/main/protocol/openid-connect/userinfo
+  grafana_public_values "$BATS_TEST_TMPDIR/g.yaml"
+  grep -q 'auth.generic_oauth:' "$BATS_TEST_TMPDIR/g.yaml"
+  grep -q 'name: "Keycloak"' "$BATS_TEST_TMPDIR/g.yaml"
+  grep -q 'auth_url: "https://sso.example/realms/main/protocol/openid-connect/auth"' "$BATS_TEST_TMPDIR/g.yaml"
+  grep -q 'scopes: openid profile email groups' "$BATS_TEST_TMPDIR/g.yaml"
+  grep -q 'envFromSecret: grafana-oidc-oauth' "$BATS_TEST_TMPDIR/g.yaml"
+  grep -q "role_attribute_path: \"'Editor'\"" "$BATS_TEST_TMPDIR/g.yaml"
+  grep -q 'disable_login_form: false' "$BATS_TEST_TMPDIR/g.yaml"
+}
+
+@test "GRA-03 (R34): a reused OIDC client takes the client and secret of the products" {
+  load_script
+  AUTH_PROVIDER=oidc OIDC_CLIENT_ID=products OIDC_CLIENT_SECRET=product-secret GRAFANA_OIDC_REUSE=true
+  export OIDC_CLIENT_SECRET
+  [ "$(grafana_oidc_client_id)" = products ]
+  [ "$(grafana_oidc_client_secret)" = product-secret ]
+}
+
+@test "GRA-04 (R34): OIDC without an issuer or a client, without public access, or with both providers: code 2" {
+  load_script
+  PUBLIC_ACCESS=true ACME_EMAIL=ops@example.org GRAFANA_AUTH=oidc GRAFANA_OIDC_REUSE=false
+  unset GRAFANA_OIDC_ISSUER GRAFANA_OIDC_CLIENT_ID GRAFANA_OIDC_CLIENT_SECRET
+  run validate_config
+  [ "$status" -eq 2 ]
+  [[ $output == *"GRAFANA_OIDC_ISSUER"* && $output == *"GRAFANA_OIDC_CLIENT_ID"* ]]
+  PUBLIC_ACCESS=false GRAFANA_AUTH=oidc GRAFANA_OIDC_REUSE=false
+  GRAFANA_OIDC_ISSUER=https://sso.example GRAFANA_OIDC_CLIENT_ID=g GRAFANA_OIDC_CLIENT_SECRET=s
+  run validate_config
+  [ "$status" -eq 2 ]
+  [[ $output == *"PUBLIC_ACCESS=true"* ]]
+  PUBLIC_ACCESS=true GRAFANA_AUTH=bogus
+  run validate_config
+  [ "$status" -eq 2 ]
+  [[ $output == *"GRAFANA_AUTH must be admin, github or oidc"* ]]
+  PUBLIC_ACCESS=true GRAFANA_AUTH=oidc GRAFANA_OIDC_REUSE=true AUTH_PROVIDER=github
+  run validate_config
+  [ "$status" -eq 2 ]
+  [[ $output == *"AUTH_PROVIDER=oidc"* ]]
 }
 
 @test "R20: a change of the client ID or secret of the OAuth app restarts Grafana" {

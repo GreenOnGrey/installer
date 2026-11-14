@@ -265,7 +265,7 @@ last_json() { printf '%s\n' "$output" | tail -n 1; }
   stub helm 'exit 1'
   run deploy_observability
   [ "$status" -eq 0 ]
-  called "delete secret grafana-admin grafana-github-oauth grafana-tls --ignore-not-found"
+  called "delete secret grafana-admin grafana-github-oauth grafana-oidc-oauth grafana-tls --ignore-not-found"
 }
 
 @test "RES-06 (U): hammurapi-deploy passes the ingress recorded by up to the chart" {

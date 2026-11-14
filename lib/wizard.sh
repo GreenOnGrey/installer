@@ -464,6 +464,60 @@ wizard_storages() {
   fi
   wizard_section "Observability"
   ask_yes_no OBSERVABILITY "Install metrics, logs and Grafana"
+  wizard_grafana
+}
+
+# wizard_grafana — the sign-in of Grafana (R34): the local administrator, a GitHub app, or any OIDC provider.
+# It needs public access: the provider redirects the browser to https://grafana.<domain>.
+wizard_grafana() {
+  local domain=${PUBLIC_BASE_DOMAIN:-<domain>}
+  if [[ ${OBSERVABILITY:-true} != true ]]; then wizard_set GRAFANA_AUTH admin; return 0; fi
+  if [[ ${PUBLIC_ACCESS:-false} != true ]]; then
+    say "Grafana sign-in needs public access: only the local administrator is used."
+    wizard_set GRAFANA_AUTH admin
+    return 0
+  fi
+  # Enter keeps the provider of the configuration, also when an older file names only the app.
+  [[ -n ${GRAFANA_AUTH:-} ]] || GRAFANA_AUTH=$(grafana_auth_provider)
+  ask_choice GRAFANA_AUTH "Grafana sign-in:" \
+    "admin=local administrator only" \
+    "github=GitHub: members of the organization" \
+    "oidc=OpenID Connect (Keycloak, Google, Entra ID…)"
+  case $GRAFANA_AUTH in
+    github)
+      ask GRAFANA_GITHUB_ORG "Only members of this GitHub organization" '^[A-Za-z0-9-]*$' "the login of an organization"
+      wizard_todo "GitHub" \
+        "Create an OAuth App of the organization: https://github.com/organizations/${GRAFANA_GITHUB_ORG:-GreenOnGrey}/settings/applications/new" \
+        "- Application name: Grafana; Homepage URL: https://grafana.$domain" \
+        "- Authorization callback URL: https://grafana.$domain/login/github" \
+        "- Register, copy the Client ID and generate a Client secret."
+      ask GRAFANA_GITHUB_CLIENT_ID "Its client ID" '.' "a value is required"
+      ask_secret GRAFANA_GITHUB_CLIENT_SECRET "Its client secret"
+      ;;
+    oidc)
+      ask GRAFANA_OIDC_ISSUER "The OIDC issuer, https://…" '^https://[^ ]+$' "an https:// address" "${OIDC_ISSUER:-}"
+      ask GRAFANA_OIDC_NAME "The name on the sign-in button" '.' "a value is required" "Single sign-on"
+      ask GRAFANA_OIDC_SCOPES "Scopes" '^[A-Za-z0-9_.:/-]+( [A-Za-z0-9_.:/-]+)*$' \
+        "scopes separated by spaces" "openid profile email groups"
+      ask GRAFANA_OIDC_ALLOWED_DOMAINS "Only e-mail domains, comma-separated, Enter for any" \
+        '^$|^([a-z0-9-]+\.)+[a-z]{2,}(,([a-z0-9-]+\.)+[a-z]{2,})*$' "example.com,corp.example"
+      if [[ ${AUTH_PROVIDER:-} == oidc && -n ${OIDC_CLIENT_ID:-} ]]; then
+        ask_yes_no GRAFANA_OIDC_REUSE "Reuse the OIDC client of the products (add https://grafana.$domain/login/generic_oauth to it)?"
+      else
+        wizard_set GRAFANA_OIDC_REUSE false
+      fi
+      if [[ ${GRAFANA_OIDC_REUSE:-true} == true ]]; then
+        wizard_todo "the identity provider" \
+          "Add the redirect URI to the OIDC client of the products: https://grafana.$domain/login/generic_oauth"
+      else
+        wizard_todo "the identity provider" \
+          "Create an OIDC client: name Grafana, redirect URI https://grafana.$domain/login/generic_oauth, scopes openid profile email groups" \
+          "Copy its client ID and secret."
+        ask GRAFANA_OIDC_CLIENT_ID "Its client ID" '.' "a value is required"
+        ask_secret GRAFANA_OIDC_CLIENT_SECRET "Its client secret"
+      fi
+      ;;
+  esac
 }
 
 # mcp_catalog — "name<TAB>MiB<TAB>what it does" of the servers the wizard offers.
