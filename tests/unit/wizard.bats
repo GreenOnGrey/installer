@@ -184,10 +184,25 @@ EOF
   [[ $output == *"https://api.stand.example.com/auth/callback"* ]]
 }
 
-@test "MCP-04 (U): MK_MEMORY without a unit is MB, as minikube reads it" {
+@test "MCP-04 (U): MK_MEMORY without a unit is MB, as minikube reads it; never more than the machine" {
   MK_MEMORY=16384
-  WIZARD_MCP_MIB=0
   [ "$(wizard_memory_gib)" = 16 ]
+  meminfo_gb 15
+  MK_MEMORY=17g
+  [ "$(wizard_memory_gib)" = 15 ]
+  # meminfo that cannot be read: no limit, no failure.
+  MEMINFO_FILE=$BATS_TEST_TMPDIR/none
+  [ "$(wizard_memory_gib)" = 17 ]
+  run wizard_mcp_budget
+  [ "$status" -eq 0 ]
+}
+
+@test "MCP-04 (U): an answer that fits stays as it is, without a note about the machine" {
+  INSTALL_TARGET=minikube NABU_MODE=external MK_MEMORY=12500m
+  printf '%s\n' "" "" "" >"$BATS_TEST_TMPDIR/answers"
+  run wizard_extras <"$BATS_TEST_TMPDIR/answers"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [[ $output != *"gives minikube at most"* && $output == *"Memory [12500m]"* ]]
 }
 
 @test "R11: Hammurapi with an external Nabu: its client, the GitHub App and the key file" {
@@ -251,14 +266,35 @@ EOF
   grep -q 'https://nabu-api.stand.example.com/auth/callback' "$BATS_TEST_TMPDIR/out"
 }
 
-@test "MCP-04 (U): docling: the memory of the server, and the MK_MEMORY it needs" {
+@test "MCP-04 (U): docling: the memory of the server; the profile stays 12g, the servers fit the machine" {
   answers 1 1 1 stand.example.com ops@example.com 1 gh-client gh-secret "" alice 1 1 1 "" 2 "" "" "" "" yes
   wizard
   [ "$status" -eq 0 ] || { cat "$BATS_TEST_TMPDIR/out"; false; }
-  [[ $output == *"docling, 1.5 GiB"* && $output == *"MK_MEMORY=15g is needed"* ]]
+  [[ $output == *"docling, 1.5 GiB"* ]]
+  [[ $output != *"budget of this machine"* ]]
   grep -qx 'MCP_DOCLING=true' "$FILE"
   grep -qx 'MCP_SEARCH=false' "$FILE"
-  grep -qx 'MK_MEMORY=15g' "$FILE"
+  grep -qx 'MK_MEMORY=12g' "$FILE"
+}
+
+@test "MCP-04 (U): a machine of 16 GB: 17g of an earlier answer becomes 16g, and more than the machine is asked again" {
+  meminfo_gb 16
+  INSTALL_TARGET=minikube NABU_MODE=external MK_MEMORY=17g WIZARD_MCP_MIB=$((2867))
+  printf '%s\n' "" 20g "" "" >"$BATS_TEST_TMPDIR/answers"
+  run wizard_extras <"$BATS_TEST_TMPDIR/answers"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [[ $output == *"This machine gives minikube at most 16g"* && $output == *"more than this machine has"* ]]
+  [[ $output != *"budget of this machine"* ]]
+  wizard_extras <"$BATS_TEST_TMPDIR/answers" 2>/dev/null
+  [ "$MK_MEMORY" = 16g ]
+}
+
+@test "MCP-04 (U): servers above two thirds of the machine: a warning to turn some off" {
+  meminfo_gb 4
+  INSTALL_TARGET=minikube NABU_MODE=external WIZARD_MCP_MIB=3000
+  printf '%s\n' "" "" "" >"$BATS_TEST_TMPDIR/answers"
+  run wizard_extras <"$BATS_TEST_TMPDIR/answers"
+  [[ $output == *"more than the budget of this machine (2 GiB)"* ]]
 }
 
 @test "R4: a question refuses an invalid answer and asks again" {

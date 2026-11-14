@@ -9,6 +9,24 @@ host_arch() { uname -m; }
 host_cpus() { nproc; }
 # host_free_disk_gb <path> — free space, GB.
 host_free_disk_gb() { df -P -BG "$1" | awk 'NR==2 {gsub("G","",$4); print $4}'; }
+# host_memory_mib — the memory of the machine, MiB: the most a minikube profile can get (RSRC_OVER_ALLOC_MEM above
+# it); empty if meminfo cannot be read.
+host_memory_mib() { awk '/^MemTotal:/ { printf "%d", $2 / 1024 }' "$MEMINFO_FILE" 2>/dev/null || true; }
+# mk_memory_mib [value] — MK_MEMORY in MiB; minikube reads a number without a unit as MB. Empty if not a size.
+mk_memory_mib() {
+  local v=${1:-$MK_MEMORY} n
+  [[ $v =~ ^[0-9]+[gGmM]?$ ]] || return 0
+  n=${v%[gGmM]}
+  if [[ $v == *[gG] ]]; then echo $((n * 1024)); else echo "$n"; fi
+}
+# mk_memory_fits [value] — the size is no more than the machine has; true when either is unknown (validate_config
+# and minikube judge those).
+mk_memory_fits() {
+  local want host
+  want=$(mk_memory_mib "${1:-$MK_MEMORY}") host=$(host_memory_mib)
+  [[ -z $want || -z $host ]] || ((want <= host))
+}
+
 host_has_sudo() { [[ $(id -u) == 0 ]] || sudo -n true 2>/dev/null; }
 
 # os_field <name> — a field of os-release.
@@ -111,7 +129,7 @@ check_docker_snap() {
 
 check_host() {
   step host
-  local id version arch cpus mem_kb mem_gb disk
+  local id version arch cpus mem_gb disk
   [[ -r $OS_RELEASE_FILE ]] || die "$E_HOST" "$OS_RELEASE_FILE not found: $SUPPORTED_OS are supported"
   id=$(os_field ID)
   version=$(os_field VERSION_ID)
@@ -128,12 +146,14 @@ check_host() {
   host_has_sudo || die "$E_HOST" "passwordless sudo is required (check: sudo -n true)"
   cpus=$(host_cpus)
   ((cpus >= HOST_MIN_CPUS)) || die "$E_HOST" "not enough CPUs: $cpus, at least $HOST_MIN_CPUS required"
-  mem_kb=$(awk '/^MemTotal:/ {print $2}' "$MEMINFO_FILE")
-  mem_gb=$((mem_kb / 1024 / 1024))
+  mem_gb=$(($(host_memory_mib) / 1024))
   ((mem_gb >= HOST_MIN_MEMORY_GB)) || die "$E_HOST" "not enough memory: ${mem_gb} GB, at least ${HOST_MIN_MEMORY_GB} GB required"
-  # Free disk is only needed before the cluster exists: on a repeated `up` the
-  # stand itself already takes that space.
+  # Free disk and the size of the profile matter only before the cluster exists: on a repeated `up` the stand
+  # already takes that space, and MK_MEMORY applies only when the profile is created.
   if ! profile_exists; then
+    # minikube refuses a profile larger than the machine, but only after Docker and the tools are installed.
+    mk_memory_fits ||
+      die "$E_HOST" "MK_MEMORY=$MK_MEMORY is more than the memory of this machine (${mem_gb} GB): lower it; 12g holds the stand with all MCP servers"
     disk=$(host_free_disk_gb "${DOCKER_ROOT:-/var/lib}")
     ((disk >= HOST_MIN_DISK_GB)) || die "$E_HOST" "not enough disk space: ${disk} GB, at least ${HOST_MIN_DISK_GB} GB required"
   fi

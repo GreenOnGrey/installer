@@ -253,6 +253,12 @@ mcp_budget() {
   local system=$((capacity - alloc))
   # node memory where need is two thirds of allocatable, plus the system part
   local want_gib=$(((need * 3 / 2 + system + 1073741823) / 1073741824))
+  # A profile larger than the machine is refused (check_host): then servers have to go, not MK_MEMORY up.
+  if ! mk_memory_fits "${want_gib}g"; then
+    printf 'MCP servers lack %s GiB of memory: MK_MEMORY=%sg would be needed, more than this machine has; turn servers off\n' \
+      "$(gib $((need - limit)))" "$want_gib"
+    return
+  fi
   printf 'MCP servers lack %s GiB of memory: MK_MEMORY=%sg is needed (now %s). The minikube profile has to be recreated: ./installer down, then up\n' \
     "$(gib $((need - limit)))" "$want_gib" "$MK_MEMORY"
 }

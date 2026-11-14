@@ -33,7 +33,7 @@ Versions are in [`config/versions.env`](../config/versions.env). The object stor
 
 `MK_CPUS`, `MK_MEMORY` and `MK_DISK` apply when the profile is created. To change them later, run `uninstall` and `install` again, which deletes the data of built-in storages: back up first.
 
-Components may request at most two thirds of the memory of the node. MCP servers add to this ([mcp.md](mcp.md#memory)). If they do not fit, `install` names the `MK_MEMORY` they need and exits with code `2` before anything changes. The wizard suggests that size itself.
+Components may request at most two thirds of the memory of the node. MCP servers add to this ([mcp.md](mcp.md#memory)). With the docker driver the node reports the memory of the machine, not `MK_MEMORY`, so the budget follows the machine: 12g holds the stand with all MCP servers on a 16 GB machine. If the servers do not fit, `install` exits with code `2` before anything changes. `MK_MEMORY` above the memory of the machine is code `10` before anything installs; the wizard offers no more than the machine has.
 
 ## Public access
 
