@@ -72,6 +72,30 @@ setup() {
   [[ ${CHECK_RESULTS[*]} == *"docling"* ]]
 }
 
+@test "CHK-06: a machine out of memory fails the check and names the process that holds the memory" {
+  printf 'MemTotal: 16632200 kB\nMemFree: 300000 kB\nMemAvailable: 220000 kB\n' >"$BATS_TEST_TMPDIR/meminfo"
+  MEMINFO_FILE=$BATS_TEST_TMPDIR/meminfo
+  ps() { echo "12078304 193718 java"; }
+  check_host_memory
+  [[ ${CHECK_RESULTS[*]} == *"memory|fail|the machine is short of memory: 0.2 GiB available of 15.9 GiB"* ]]
+  [[ ${CHECK_RESULTS[*]} == *"java (pid 193718) holds 11.5 GiB"* ]]
+}
+
+@test "CHK-06: a machine with less than a tenth left warns, with plenty it passes, an existing cluster is not checked" {
+  ps() { echo "900000 42 java"; }
+  printf 'MemTotal: 16632200 kB\nMemAvailable: 1200000 kB\n' >"$BATS_TEST_TMPDIR/meminfo"
+  MEMINFO_FILE=$BATS_TEST_TMPDIR/meminfo
+  check_host_memory
+  [[ ${CHECK_RESULTS[*]} == *"memory|warn|"*"java (pid 42)"* ]]
+  printf 'MemTotal: 16632200 kB\nMemAvailable: 12000000 kB\n' >"$BATS_TEST_TMPDIR/meminfo"
+  CHECK_RESULTS=()
+  check_host_memory
+  [[ ${CHECK_RESULTS[*]} == *"memory|ok|11.4 GiB available of 15.9 GiB"* ]]
+  CHECK_RESULTS=()
+  INSTALL_TARGET=external check_host_memory
+  [[ -z ${CHECK_RESULTS[*]} ]]
+}
+
 @test "CHK-04: the images of the probes are pulled once after the node is ready" {
   PROBE_BUSYBOX_IMAGE=busybox:1 PROBE_CURL_IMAGE=curl:1 PROBE_KCAT_IMAGE=kcat:1 \
     PROBE_S3_IMAGE=aws:1 POSTGRES_IMAGE=postgres:1

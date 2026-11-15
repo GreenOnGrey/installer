@@ -35,6 +35,8 @@ Versions are in [`config/versions.env`](../config/versions.env). The object stor
 
 Components may request at most two thirds of the memory of the node. MCP servers add to this ([mcp.md](mcp.md#memory)). With the docker driver the node reports the memory of the machine, not `MK_MEMORY`, but it is a container of `MK_MEMORY` and cannot use more: the budget follows the smaller of the two. 12g holds the stand with all MCP servers on a 16 GB machine; on a 15 GB machine the heaviest server, `docling`, can exhaust the host. If the servers do not fit, `install` exits with code `2` before anything changes. `MK_MEMORY` above the memory of the machine is code `10` before anything installs; the wizard offers no more than the machine has.
 
+The stand shares the machine with everything else on it. When less than a tenth of its memory is available, the check `memory` warns, and below a twentieth it fails and names the process that holds the memory: with no memory left, pods die of failed liveness probes and the storage probe answers "unreachable" while every pod, service and endpoint is right.
+
 ## Public access
 
 With `PUBLIC_ACCESS=true` (the products need it), MetalLB gives Traefik an address inside the profile. The unit `<prefix>-ingress-forward` forwards ports 80 and 443 of the machine to that address. On RHEL with firewalld the forwarding uses `forward-port`. cert-manager requests one Let's Encrypt certificate for all public hosts.
