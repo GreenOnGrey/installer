@@ -501,6 +501,39 @@ check_resources() {
 
 gib() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1073741824 }'; }
 
+# host_memory_holder — the process of the machine that holds the most memory: "java (pid 3187) holds 11.5 GiB".
+host_memory_holder() {
+  local rss pid comm
+  read -r rss pid comm < <(ps -eo rss=,pid=,comm= --sort=-rss 2>/dev/null | awk 'NF >= 3 { print; exit }')
+  [[ -n ${rss:-} ]] || return 0
+  printf '%s (pid %s) holds %s GiB' "$comm" "$pid" "$(gib $((rss * 1024)))"
+}
+
+# check_host_memory — the memory of the machine, not of the cluster (R33). The stand runs in containers of this
+# machine: when another process holds the memory, pods die of failed liveness probes and the storage probe answers
+# "unreachable" while every pod, service and endpoint is right. Name the holder, not the pod. On an existing
+# cluster the machine is not the stand, and nothing is checked.
+check_host_memory() {
+  target_external && return 0
+  local total avail pct
+  read -r total avail < <(awk '/^MemTotal:/ { t = $2 } /^MemAvailable:/ { a = $2 } /^MemFree:/ { f = $2 }
+    END { printf "%d %d\n", t + 0, (a + 0 > 0 ? a : f + 0) }' "$MEMINFO_FILE" 2>/dev/null)
+  [[ ${total:-} =~ ^[0-9]+$ ]] || return 0
+  ((total > 0)) || return 0
+  avail=${avail:-0}
+  pct=$((avail * 100 / total))
+  local free_gib total_gib
+  free_gib=$(gib $((avail * 1024)))
+  total_gib=$(gib $((total * 1024)))
+  if ((pct < 5)); then
+    record memory fail "the machine is short of memory: $free_gib GiB available of $total_gib GiB; $(host_memory_holder); the stand runs on this machine: free the memory or stop that process"
+  elif ((pct < 10)); then
+    record memory warn "the machine is short of memory: $free_gib GiB available of $total_gib GiB; $(host_memory_holder)"
+  else
+    record memory ok "$free_gib GiB available of $total_gib GiB"
+  fi
+}
+
 cleanup_probes() {
   kc -n "$NS_OBSERVABILITY" delete pod "$CHECKS_PROBE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   kc -n "$NS_STORAGES" delete pod "$LOG_PROBE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
@@ -511,6 +544,8 @@ cleanup_probes() {
 run_checks() {
   step checks
   CHECK_RESULTS=()
+  # First: when the machine itself is out of memory, every other check reports its own symptom.
+  check_host_memory
   check_pods
   if ! observability_enabled; then
     debug "observability is off: no checks of Grafana, metrics and logs"
