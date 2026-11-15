@@ -372,8 +372,12 @@ configure_gitlab() {
 helm_login() {
   local token
   token=$(payload .ghcrPullToken)
-  [[ -n $token ]] || token=$(kc -n "$NS" get secret ghcr-pull -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null |
-    base64 -d | jq -r --arg r "$REGISTRY" '.auths[$r].password // empty')
+  if [[ -z $token ]]; then
+    # Without a token of this run the secret of an earlier one, when it is there: the images and charts are
+    # public (FTR.INFRA.INST-0001 arch §1), so no secret means an anonymous rollout, not a failure.
+    token=$(kc -n "$NS" get secret ghcr-pull -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null |
+      base64 -d | jq -r --arg r "$REGISTRY" '.auths[$r].password // empty') || token=""
+  fi
   # Registry credentials stay in tmpfs during the rollout.
   HELM_REG=$(mktemp -p /dev/shm hammurapi-helm-XXXXXX.json 2>/dev/null || mktemp)
   export HELM_REGISTRY_CONFIG=$HELM_REG
