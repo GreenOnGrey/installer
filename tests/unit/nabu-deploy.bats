@@ -62,3 +62,42 @@ deploy() { printf '%s' "$PAYLOAD" | bash "$DEPLOY" "$@"; }
   [ "$status" -eq 0 ] || { echo "$output"; false; }
   called "registry login ghcr.io"
 }
+
+# A stand whose model sits in the company network (FTR.INFRA.INST-0001 R11): the agent pods and the collector
+# reach the internet on 443 only, so their private networks come from the payload.
+core_payload() {
+  PAYLOAD=$(jq -cn --argjson egress "$1" '{image: "ghcr.io/greenongrey/nabu-core", modelEgress: $egress,
+    config: {AUTH_PROVIDER: "github", BOOTSTRAP_ADMINS: "admin@example.com", GITHUB_CLIENT_ID: "Iv1.x"},
+    secrets: {SECRETS_KEY: "key-0123456789abcdef", GITHUB_CLIENT_SECRET: "client-secret"}}')
+  export PAYLOAD
+  # kubectl of a stand with storages: the secrets of the copies, the database through psql in the primary pod.
+  stub kubectl '
+case "$*" in
+  *"get pods -l cnpg.io/instanceRole=primary"*) echo "nabu-pg-1" ;;
+  *"exec -i nabu-pg-1"*) cat >/dev/null ;;
+  *"get secret kafka-conn -o json"*) echo "{\"data\":{\"bootstrap_servers\":\"a2Fma2E6OTA5Mg==\"}}" ;;
+  *"get secret s3-conn -o json"*) echo "{\"data\":{\"endpoint\":\"aHR0cDovL3MzLnN0b3JhZ2VzLnN2Yzo5MDAw\",\"region\":\"dXMtZWFzdC0x\"}}" ;;
+  *"get secret ghcr-pull"*) exit 1 ;;
+  *"create namespace"*) echo "kind: Namespace" ;;
+  *"label --local -f -"*) cat >/dev/null; echo "kind: Namespace" ;;
+  *"label --local"*) cat >/dev/null; echo "kind: Namespace" ;;
+  *"apply -f -"*) cat >/dev/null ;;
+  *"create configmap nabu-key-fingerprint"*) echo "kind: ConfigMap" ;;
+  *) exit 0 ;;
+esac'
+}
+
+@test "R11: the deploy opens the networks of the models to the agent pods and the collector" {
+  core_payload '["10.20.30.0/24"]'
+  run deploy nabu-core v0.3.12 0.3.10
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  grep -qF -- 'agents.egressAllow=["10.20.30.0/24"]' "$CALLS"
+  grep -qF -- 'memory.pool.egressAllow=["10.20.30.0/24"]' "$CALLS"
+}
+
+@test "R11: a model on the internet needs no network of its own" {
+  core_payload '[]'
+  run deploy nabu-core v0.3.12 0.3.10
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  not_called 'egressAllow'
+}
