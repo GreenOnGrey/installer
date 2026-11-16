@@ -464,7 +464,8 @@ check_resources() {
   pressure=$(kc get nodes -o json 2>/dev/null |
     jq -r '[.items[].status.conditions[]? | select((.type == "MemoryPressure" or .type == "PIDPressure" or .type == "DiskPressure") and .status == "True") | .type] | unique | join(", ")' 2>/dev/null || true)
   pods=$(for ns in $(stand_namespaces); do kc get pods -n "$ns" -o json; done
-    if mcp_enabled; then kc get pods -n "$NS_MCP" -l 'app.kubernetes.io/part-of=mcp-servers' -o json; fi)
+    # Servers enabled before their first rollout: the namespace is not there yet, and kubectl's error is noise.
+    if mcp_enabled; then kc get pods -n "$NS_MCP" -l 'app.kubernetes.io/part-of=mcp-servers' -o json 2>/dev/null; fi)
   missing=$(jq -rs '[.[].items[] | select(.status.phase == "Running" or .status.phase == "Pending")
       | .metadata.namespace as $ns | .metadata.name as $p
       | (.spec.containers + (.spec.initContainers // []))[]
