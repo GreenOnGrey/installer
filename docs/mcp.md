@@ -11,9 +11,11 @@ Servers are installed by the release `mcp-servers` in the namespace `mcp` and ar
 | `MCP_YANDEX_MAIL=true` | Read-only Yandex Mail: our own server `imap-mcp` | ~0.06 / 0.25 GiB | ~0.1 GB |
 | `MCP_DOCGEN=true` | Creating, editing and converting documents (`FTR.NAB.CHAT-0003`): our own server `docgen-mcp` and `doc-convert` (Gotenberg, which is LibreOffice and Chromium without network, and the `legacy` sidecar); it also turns on the DOCX/XLSX/PPTX preview in Nabu | ~0.9 / 4 GiB | ~2.5 GB |
 
-## Turning a server off
+## Turning a server on and off
 
 `install` stores the MCP settings in the ConfigMap `installer/installer-config`, so a later `install` without them keeps the servers. Removing an option from the file does not turn a server off. Set `MCP_<NAME>=false` explicitly, and the next `install` removes the server.
+
+A server enabled on a running stand is deployed by `update mcp-servers` alone, without the rest of the install. The checks of the stand that `update` runs first treat servers that are enabled but not rolled out yet as a warning, not a failure, so the first enable needs no `install`.
 
 ## Memory
 

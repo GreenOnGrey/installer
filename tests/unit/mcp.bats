@@ -125,6 +125,32 @@ esac'
   [[ ${CHECK_RESULTS[*]} == *"mcp|fail|"* ]]
 }
 
+@test "R21 (MCP-07): servers enabled but not rolled out yet: a warning, so update does not stop before it deploys them" {
+  MCP_SEARCH=true
+  # The chart is there, the release is not: kubectl finds no deployments of mcp-servers.
+  mcp_try_load() { return 0; }
+  CHECK_RESULTS=()
+  check_mcp
+  [ "${CHECK_RESULTS[*]}" = "mcp|warn|enabled, not rolled out yet: install or update mcp-servers deploys them" ]
+  not_called "wait --for=condition=Ready pod"
+  not_called "create -f -"
+}
+
+@test "R21 (MCP-07): a release that is rolled out is still checked: pods that are not ready are a failure" {
+  MCP_SEARCH=true
+  mcp_try_load() { return 0; }
+  stub kubectl '
+case "$*" in
+  *"get deploy -l app.kubernetes.io/part-of=mcp-servers -o name"*) echo "deployment.apps/search" ;;
+  *"wait --for=condition=Ready pod"*) echo "error: timed out waiting for the condition" >&2; exit 1 ;;
+  *) exit 0 ;;
+esac'
+  CHECK_RESULTS=()
+  check_mcp
+  [[ ${CHECK_RESULTS[*]} == *"mcp|fail|not all pods of mcp are ready: error: timed out waiting for the condition"* ]]
+  called "wait --for=condition=Ready pod"
+}
+
 @test "STD-05: an option value other than true/false: code 2" {
   MCP_DOCLING=yes
   run validate_mcp_config
