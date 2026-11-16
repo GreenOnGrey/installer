@@ -545,11 +545,12 @@ check_mcp() {
     record mcp fail "$MCP_FETCH_ERROR"
     return
   fi
-  local out
+  local out deploys
   # Servers enabled but not rolled out yet: the first enable on a running stand, or a stand whose release was
   # removed. Nothing to wait for, and nothing is wrong — `install` and `update mcp-servers` deploy them after the
   # checks. `update` runs the checks before it changes anything (R24), so a pending rollout must not stop it.
-  if ! kc -n "$NS_MCP" get deploy -l 'app.kubernetes.io/part-of=mcp-servers' -o name 2>/dev/null | grep -q .; then
+  if ! deploys=$(kc -n "$NS_MCP" get deploy -l 'app.kubernetes.io/part-of=mcp-servers' -o name 2>/dev/null) ||
+    [[ -z $deploys ]]; then
     record mcp warn "enabled, not rolled out yet: install or update mcp-servers deploys them"
     return
   fi
