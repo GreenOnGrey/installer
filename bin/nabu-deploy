@@ -351,7 +351,7 @@ diagnostics() {
 helm_deploy() {
   step helm
   helm_login
-  local image args
+  local image args egress
   image=$(payload .image)
   args=(upgrade --install "$COMPONENT" "$CHART_REPO/$COMPONENT" --version "$CHART_VERSION"
     -n "$NS" --set-string "image.tag=$TAG" --set-string "publicBaseDomain=$BASE_DOMAIN"
@@ -372,6 +372,13 @@ helm_deploy() {
       args+=(--set "sandboxes.customImages.allowedPrefixes={${NABU_SANDBOX_IMAGE_PREFIXES}}")
     [[ -n ${NABU_SANDBOX_PULL_SECRETS:-} ]] &&
       args+=(--set "sandboxes.customImages.pullSecrets={${NABU_SANDBOX_PULL_SECRETS}}")
+    # FTR.NAB.CMN-0001 R29: the networks of the models of the company network. The agent pods and the collector
+    # of the communications memory reach the internet on 443, and the private ranges are closed to them: a model
+    # at a private address answers only when its network is here.
+    egress=$(payload .modelEgress | jq -c 'if type == "array" then . else [] end' 2>/dev/null || true)
+    if [[ -n $egress && $egress != "[]" ]]; then
+      args+=(--set-json "agents.egressAllow=$egress" --set-json "memory.pool.egressAllow=$egress")
+    fi
   fi
   local ingress=()
   mapfile -t ingress < <(ingress_helm_args)

@@ -84,6 +84,30 @@ nabu_github() {
   echo "$output" | jq -e '.secrets.SECRETS_KEY | test("^[0-9a-f]{64}$")'
 }
 
+@test "R11: the networks of the models of the company network go into the payload as a list" {
+  nabu_github
+  run nabu_payload nabu-core
+  echo "$output" | jq -e '.modelEgress == []'
+  NABU_MODEL_EGRESS="10.20.30.0/24,10.20.31.5/32"
+  run nabu_payload nabu-core
+  echo "$output" | jq -e '.modelEgress == ["10.20.30.0/24", "10.20.31.5/32"]'
+}
+
+@test "R11: NABU_MODEL_EGRESS takes CIDRs separated by commas and nothing else" {
+  nabu_github
+  ACME_EMAIL=ops@example.org
+  NABU_MODEL_EGRESS="10.20.30.0/24,10.20.31.5/32"
+  run validate_config products
+  [ "$status" -eq 0 ]
+  NABU_MODEL_EGRESS="10.20.30.0"
+  run validate_config products
+  [ "$status" -eq 2 ]
+  [[ $output == *NABU_MODEL_EGRESS* ]]
+  NABU_MODEL_EGRESS="model.example"
+  run validate_config products
+  [ "$status" -eq 2 ]
+}
+
 @test "CLI-11 (U): the secrets of the products reach neither arguments nor the log" {
   nabu_github
   export BOOTSTRAP_LLM_API_KEY=sk-llm-SECRET

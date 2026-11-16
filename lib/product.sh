@@ -240,6 +240,13 @@ nabu_bootstrap_clients() {
     '[{name: "hammurapi", secretSha256: $h, url: $url, agents: []}]'
 }
 
+# nabu_model_egress — the networks of the models of the company network as a JSON array: the agent pods and the
+# collector of the communications memory reach the internet on 443 only, so a model at a private address needs
+# its network in the payload (FTR.NAB.CMN-0001 R29, FTR.INFRA.INST-0001 R11).
+nabu_model_egress() {
+  tr ',' '\n' <<<"${NABU_MODEL_EGRESS:-}" | sed '/^$/d' | jq -Rnc '[inputs]'
+}
+
 # nabu_payload <component> — the stdin of bin/nabu-deploy. Secrets reach jq through the environment.
 nabu_payload() {
   local repo=${NABU_IMAGE_REPO:-ghcr.io/greenongrey}
@@ -256,9 +263,10 @@ nabu_payload() {
     --arg github_id "${NABU_GITHUB_CLIENT_ID:-}" --arg org "${GITHUB_ALLOWED_ORG:-}" \
     --arg issuer "${OIDC_ISSUER:-}" --arg oidc_id "${OIDC_CLIENT_ID:-}" --arg oidc_name "${OIDC_PROVIDER_NAME:-}" \
     --arg admins "$BOOTSTRAP_ADMINS" --arg lang "${DEFAULT_LANGUAGE:-en}" --arg tz "${DEFAULT_TIMEZONE:-UTC}" \
-    --arg pi "$NABU_PI_VERSION" '
+    --arg pi "$NABU_PI_VERSION" --argjson egress "$(nabu_model_egress)" '
     def nonempty: with_entries(select(.value != null and .value != ""));
     {image: $image,
+     modelEgress: $egress,
      config: ({AUTH_PROVIDER: $provider, BOOTSTRAP_ADMINS: $admins, DEFAULT_LANGUAGE: $lang, DEFAULT_TIMEZONE: $tz,
        PI_VERSION: $pi}
        + (if $provider == "github" then {GITHUB_CLIENT_ID: $github_id, GITHUB_ALLOWED_ORG: $org}

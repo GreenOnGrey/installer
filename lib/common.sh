@@ -435,6 +435,10 @@ validate_config() {
   esac
   [[ ${NABU_WHISPER_MODEL:-small} =~ ^(tiny|base|small|medium|large-v3|large-v3-turbo|turbo)$ ]] ||
     die "$E_USAGE" "NABU_WHISPER_MODEL must be tiny, base, small, medium, large-v3 or large-v3-turbo"
+  # FTR.INFRA.INST-0001 R11: the networks of the models of the company network, comma-separated CIDRs.
+  local cidr='([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}'
+  [[ -z ${NABU_MODEL_EGRESS:-} || ${NABU_MODEL_EGRESS} =~ ^$cidr(,$cidr)*$ ]] ||
+    die "$E_USAGE" "NABU_MODEL_EGRESS: CIDRs separated by commas, such as 10.20.30.0/24, not '$NABU_MODEL_EGRESS'"
   if [[ ${1:-} == products ]]; then validate_products; fi
   [[ ${VALIDATE_COLLECT:-0} == 1 ]] || die_if_missing
 }
