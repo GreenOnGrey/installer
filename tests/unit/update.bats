@@ -212,3 +212,19 @@ installed() {
   run pinned_versions
   [ "$status" -eq 12 ]
 }
+
+@test "R21: update mcp-servers stores the settings in the cluster, as install does" {
+  CM_DIR=$BATS_TEST_TMPDIR/cm
+  mkdir -p "$CM_DIR"
+  stub kubectl '
+case "$*" in
+  *"apply -f -"*) m=$(cat); n=$(jq -r .metadata.name <<<"$m"); echo "$m" >"'"$CM_DIR"'/$n.json" ;;
+  *) exit 0 ;;
+esac'
+  MCP_SEARCH=true
+  mcp_preflight() { :; }
+  deploy_mcp() { :; }
+  run_checks() { :; }
+  update_one mcp-servers
+  jq -e '.data == {MCP_SEARCH: "true"}' "$CM_DIR/installer-config.json"
+}
