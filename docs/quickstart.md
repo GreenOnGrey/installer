@@ -38,7 +38,7 @@ The wizard asks:
 6. Postgres, Kafka and S3: built in or external ([resources.md](resources.md));
 7. metrics, logs and Grafana;
 8. MCP servers for agents, with the memory each one needs ([mcp.md](mcp.md));
-9. the model key of the first connection of Nabu, optional, and the size of minikube.
+9. the key of the first connection of Nabu and the address of the model in the company network (both optional: the model is added in the admin area, and the network of the model can be named later with `NABU_MODEL_EGRESS`), and the size of minikube.
 
 Enter keeps the value in brackets. Passwords and keys are typed hidden.
 

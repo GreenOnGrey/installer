@@ -106,6 +106,33 @@ nabu_github() {
   NABU_MODEL_EGRESS="model.example"
   run validate_config products
   [ "$status" -eq 2 ]
+  NABU_MODEL_EGRESS=
+  NABU_MODEL_ADDRESS="bad host"
+  run validate_config products
+  [ "$status" -eq 2 ]
+  [[ $output == *NABU_MODEL_ADDRESS* ]]
+}
+
+@test "R11: the address of the model of the company network becomes one /32 per address of the payload" {
+  nabu_github
+  NABU_MODEL_ADDRESS=litellm.example.corp NABU_MODEL_EGRESS=
+  getent() { printf '10.20.30.5 STREAM litellm.example.corp\n10.20.30.6 STREAM litellm.example.corp\n'; }
+  resolve_model_address
+  [ "$NABU_MODEL_EGRESS" = "10.20.30.5/32,10.20.30.6/32" ]
+  run nabu_payload nabu-core
+  echo "$output" | jq -e '.modelEgress == ["10.20.30.5/32", "10.20.30.6/32"]'
+}
+
+@test "R11: a name of the model that does not resolve stops the run; an explicit list wins over the address" {
+  NABU_MODEL_ADDRESS=nowhere.example NABU_MODEL_EGRESS=
+  getent() { return 2; }
+  run resolve_model_address
+  [ "$status" -eq 2 ]
+  [[ $output == *"NABU_MODEL_ADDRESS=nowhere.example does not resolve"* ]]
+  NABU_MODEL_ADDRESS=litellm.example.corp NABU_MODEL_EGRESS="10.20.31.0/24"
+  run resolve_model_address
+  [ "$status" -eq 0 ]
+  [[ $output == *"NABU_MODEL_EGRESS is set"* ]]
 }
 
 @test "CLI-11 (U): the secrets of the products reach neither arguments nor the log" {

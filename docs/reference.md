@@ -163,7 +163,8 @@ Built-in or external, each on its own ([resources.md](resources.md)).
 | `NABU_SANDBOX_CUSTOM_IMAGES` | `false` | Administrators may create sandbox profiles from custom images |
 | `NABU_SANDBOX_IMAGE_PREFIXES` | empty | Allowed prefixes of those images, comma-separated, each ending with `/` |
 | `NABU_SANDBOX_PULL_SECRETS` | empty | Registry secrets of the sandbox namespace |
-| `NABU_MODEL_EGRESS` | empty | Networks of models in the company network, comma-separated CIDRs. Agent pods and the collector of the communications memory reach the internet on 443 only: a model at a private address needs its network here |
+| `NABU_MODEL_ADDRESS` | empty | Host or IPv4 address of the model in the company network; `install` resolves it into one `/32` per address. Agent pods and the collector of the communications memory reach the internet on 443 only |
+| `NABU_MODEL_EGRESS` | empty | The networks of that model as comma-separated CIDRs, when a wider network is needed; wins over `NABU_MODEL_ADDRESS` |
 
 ### MCP servers
 
