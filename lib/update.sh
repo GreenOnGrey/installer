@@ -229,6 +229,9 @@ update_one() {
       # The memory budget first, as in deploy_all (FTR.NAB.CMN-0006 R3).
       mcp_preflight
       deploy_mcp
+      # The settings of the servers live in the cluster, as after install (R21): a later install or update that
+      # does not name them in the file keeps the servers instead of removing them.
+      write_config
       ;;
     *-web)
       [[ -n $(installed_version "${1%-web}-core") ]] || die 21 "roll out ${1%-web}-core first"
