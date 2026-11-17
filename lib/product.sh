@@ -161,6 +161,8 @@ validate_products() {
 # products_preflight — before anything changes (R11): an external Nabu takes the client of Hammurapi, and an
 # internal one is not of its own CI, as only a Nabu of the installer creates that client.
 products_preflight() {
+  # R11: the address of the model of the company network becomes the networks of the payload before any change.
+  resolve_model_address
   has_product hammurapi || return 0
   step preflight
   if ! nabu_external; then
@@ -245,6 +247,26 @@ nabu_bootstrap_clients() {
 # its network in the payload (FTR.NAB.CMN-0001 R29, FTR.INFRA.INST-0001 R11).
 nabu_model_egress() {
   tr ',' '\n' <<<"${NABU_MODEL_EGRESS:-}" | sed '/^$/d' | jq -Rnc '[inputs]'
+}
+
+# resolve_model_address — NABU_MODEL_ADDRESS (the host or the address of the model of the company network) becomes
+# the /32 networks of NABU_MODEL_EGRESS, unless those are named: one entry per address the name resolves to. A name
+# that resolves to nothing stops the run — without its network every turn of the agents would end in a connect
+# timeout, and the administrator would look for the reason in the model connection (R11). The wizard collects
+# missing values without looking anything up.
+resolve_model_address() {
+  [[ ${VALIDATE_COLLECT:-0} != 1 ]] || return 0
+  if [[ -n ${NABU_MODEL_EGRESS:-} && -n ${NABU_MODEL_ADDRESS:-} ]]; then
+    warn "NABU_MODEL_EGRESS is set: the networks of the model come from it, NABU_MODEL_ADDRESS is not used"
+    return 0
+  fi
+  [[ -z ${NABU_MODEL_EGRESS:-} && -n ${NABU_MODEL_ADDRESS:-} ]] || return 0
+  local ips
+  ips=$(getent ahostsv4 "$NABU_MODEL_ADDRESS" 2>/dev/null | awk '{ print $1 }' | sort -u | paste -sd, -)
+  [[ -n $ips ]] || die "$E_USAGE" "NABU_MODEL_ADDRESS=$NABU_MODEL_ADDRESS does not resolve to an IPv4 address"
+  NABU_MODEL_EGRESS=$(tr ',' '\n' <<<"$ips" | sed 's/$/\/32/' | paste -sd, -)
+  export NABU_MODEL_EGRESS
+  log "model address $NABU_MODEL_ADDRESS: networks $NABU_MODEL_EGRESS"
 }
 
 # nabu_payload <component> — the stdin of bin/nabu-deploy. Secrets reach jq through the environment.

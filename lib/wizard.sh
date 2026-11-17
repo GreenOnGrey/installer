@@ -598,6 +598,12 @@ wizard_extras() {
   if [[ $NABU_MODE == internal ]]; then
     wizard_section "Models"
     ask_secret BOOTSTRAP_LLM_API_KEY "The key of the first model connection of Nabu, Enter to add one later in the admin area" optional
+    # R11: the model of the company network. The agent pods and the collector of the communications memory reach the
+    # internet on 443 only, and the company networks are closed to them: the address of the model opens its network.
+    say "A model inside the company network (behind a load balancer with a private address) needs its network open to" \
+      "the agents: give the address of the model — the installer opens the /32 of every address it resolves to."
+    ask NABU_MODEL_ADDRESS "The address of the model in the company network, Enter if the model is on the internet" \
+      '^([A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?)?$' "a host or an IPv4 address, such as litellm.example.corp or 10.20.30.5"
   fi
   [[ $INSTALL_TARGET == minikube ]] || return 0
   wizard_section "Size of minikube"
