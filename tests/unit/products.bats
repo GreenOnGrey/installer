@@ -400,16 +400,40 @@ hammurapi_github() {
   [[ ${CONFIG_MISSING[*]} == *NABU_CLIENT_SECRET* ]]
 }
 
-@test "FTR.NAB.CMN-0001 R17a: api of Nabu restarts when its service clients changed, and only then" {
+@test "FTR.NAB.CMN-0001 R17a: the hash of the client is the same whether the secret comes from the cluster or is new" {
   hammurapi_github
-  secret_key() { [[ $3 == BOOTSTRAP_CLIENTS ]] && printf new; }
-  RESULT_UPDATED=(nabu-core)
-  restart_nabu_api old
-  called "rollout restart deployment/api"
-  : >"$CALLS"
-  secret_key() { printf same; }
-  restart_nabu_api same
-  not_called "rollout restart"
+  # The very same secret: stored_input ends its value with a line end, and a hash over that line end never matches
+  # the secret Hammurapi sends ($(…) strips it).
+  stored_input() { printf 'nabu_secret_0123456789\n'; }
+  from_cluster=$(nabu_bootstrap_clients | jq -r '.[0].secretSha256')
+  GENERATED_INPUTS[NABU_BOOTSTRAP_CLIENT_SECRET]=nabu_secret_0123456789
+  from_generated=$(nabu_bootstrap_clients | jq -r '.[0].secretSha256')
+  [ "$from_cluster" = "$from_generated" ]
+  [ "$from_cluster" = "$(printf 'nabu_secret_0123456789' | sha256sum | awk '{print $1}')" ]
+}
+
+@test "FTR.NAB.CMN-0001 R17a: the secrets of the two sides of the client must carry the same hash" {
+  hammurapi_github
+  CLIENT_SECRET=nabu_secret_0123456789
+  STORED='[{"name":"hammurapi","secretSha256":"'"$(printf '%s' "$CLIENT_SECRET" | sha256sum | awk '{print $1}')"'"}]'
+  secret_key() { case $3 in NABU_CLIENT_SECRET) printf '%s' "$CLIENT_SECRET" ;; *) printf '%s' "$STORED" ;; esac; }
+  run check_nabu_client_secret
+  [ "$status" -eq 0 ]
+  # Hammurapi holds a secret other than the one Nabu keeps the hash of: the install names both secrets.
+  CLIENT_SECRET=nabu_secret_9876543210
+  run check_nabu_client_secret
+  [ "$status" -eq 13 ]
+  [[ $output == *"BOOTSTRAP_CLIENTS"* && $output == *"NABU_CLIENT_SECRET"* ]]
+}
+
+@test "R11: an inputs secret that cannot be read is not an empty one: the client secret is not generated again" {
+  hammurapi_github
+  kc() { [[ "$*" == *"get secret product-inputs"* ]] && return 1; return 0; }
+  PRODUCT_INPUTS="" PRODUCT_INPUTS_READ=0
+  run ensure_nabu_client
+  [ "$status" -eq 12 ]
+  [[ -z ${GENERATED_INPUTS[NABU_BOOTSTRAP_CLIENT_SECRET]:-} ]]
+  [[ $output == *"product-inputs"* ]]
 }
 
 @test "R11: Hammurapi next to a Nabu of its own CI: code 2 that asks for an external client" {

@@ -131,6 +131,10 @@ validate_mcp_config() {
   fi
   [[ $MCP_SEARCH_ENGINES =~ ^[a-z0-9_]+(,[a-z0-9_]+)*$ ]] ||
     die "$E_USAGE" "MCP_SEARCH_ENGINES: comma-separated SearXNG engine names, such as duckduckgo,bing"
+  # R21: the networks of the company the servers reach besides the internet (a site of the company network).
+  local cidr='([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}'
+  [[ -z ${MCP_EGRESS_ALLOW:-} || ${MCP_EGRESS_ALLOW} =~ ^$cidr(,$cidr)*$ ]] ||
+    die "$E_USAGE" "MCP_EGRESS_ALLOW: CIDRs separated by commas, such as 10.20.30.0/24, not '$MCP_EGRESS_ALLOW'"
 }
 
 # mcp_helm_args — enabling servers and configuration parameters. Images and their versions
@@ -147,6 +151,11 @@ mcp_helm_args() {
     --set "docling.serve.maxFileMB=$MCP_DOCLING_MAX_MB" \
     --set-json "search.engines=$engines" \
     --set-string "s3.namespace=$NS_STORAGES"
+  # FTR.INFRA.INST-0001 R21: the networks of the company besides the internet — the private ranges are closed to
+  # the servers, so the web search opens a site of the company network only when its network is here.
+  if [[ -n ${MCP_EGRESS_ALLOW:-} ]]; then
+    printf '%s\n' --set-json "egressAllow=$(tr ',' '\n' <<<"$MCP_EGRESS_ALLOW" | sed '/^$/d' | jq -Rnc '[inputs]')"
+  fi
 }
 
 gen_key() { openssl rand -hex 32; }

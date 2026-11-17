@@ -597,3 +597,29 @@ hm() { helm --kube-context "$(kube_context)" "$@"; }
 
 # apply_stdin — kubectl apply from stdin (the manifest stays out of the arguments).
 apply_stdin() { kc apply -f - >/dev/null; }
+
+# env_fingerprint — the digest of the configuration and the secrets a pod reads at its start.
+env_fingerprint() { jq -Sc '{config: (.config // {}), secrets: (.secrets // {})}' | sha256sum | awk '{print $1}'; }
+
+# restart_stale_env <ns> <name> <fingerprint> <deployment…> — restarts the deployments whose environment differs from
+# the one of their last start. A rollout at the same tag does not restart pods when only a secret or a ConfigMap
+# changed, and a pod that started before its secret keeps the old values forever (a client of another secret answers
+# invalid_client, and no install changes anything). The fingerprint of the last restart is kept in a ConfigMap of the
+# namespace: absent — the pods are restarted once, which also fixes a stand whose pod is older than its secret.
+restart_stale_env() {
+  local ns=$1 name=$2 fp=$3 saved d
+  shift 3
+  saved=$(kc -n "$ns" get configmap "$name" -o jsonpath='{.data.sha256}' 2>/dev/null || true)
+  [[ $fp != "$saved" ]] || return 0
+  for d in "$@"; do
+    log "$d reads another configuration now: restarting it"
+    kc -n "$ns" rollout restart "deployment/$d" >/dev/null || return 1
+  done
+  for d in "$@"; do
+    kc -n "$ns" rollout status "deployment/$d" --timeout="${HELM_TIMEOUT:-10m}" >/dev/null || return 1
+  done
+  jq -n --arg ns "$ns" --arg n "$name" --arg s "$fp" \
+    '{apiVersion: "v1", kind: "ConfigMap",
+      metadata: {name: $n, namespace: $ns, labels: {"app.kubernetes.io/managed-by": "installer"}},
+      data: {sha256: $s}}' | apply_stdin
+}

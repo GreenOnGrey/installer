@@ -151,6 +151,31 @@ esac'
   called "wait --for=condition=Ready pod"
 }
 
+@test "R21 (MCP-09): the networks of the company reach the chart, and nothing when there are none" {
+  MCP_SEARCH=true
+  MCP_EGRESS_ALLOW=""
+  run mcp_helm_args
+  [ "$status" -eq 0 ]
+  [[ $output != *egressAllow* ]]
+  MCP_EGRESS_ALLOW="10.20.30.0/24,10.20.31.5/32"
+  run mcp_helm_args
+  [ "$status" -eq 0 ]
+  [[ $output == *'egressAllow=["10.20.30.0/24","10.20.31.5/32"]'* ]]
+}
+
+@test "R21 (MCP-09): MCP_EGRESS_ALLOW takes CIDRs separated by commas and nothing else" {
+  MCP_EGRESS_ALLOW="10.20.30.0/24,10.20.31.5/32"
+  run validate_mcp_config
+  [ "$status" -eq 0 ]
+  MCP_EGRESS_ALLOW="10.20.30.0"
+  run validate_mcp_config
+  [ "$status" -eq 2 ]
+  [[ $output == *MCP_EGRESS_ALLOW* ]]
+  MCP_EGRESS_ALLOW="site.example"
+  run validate_mcp_config
+  [ "$status" -eq 2 ]
+}
+
 @test "STD-05: an option value other than true/false: code 2" {
   MCP_DOCLING=yes
   run validate_mcp_config
