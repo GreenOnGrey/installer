@@ -562,6 +562,14 @@ wizard_mcp() {
   if [[ ${MCP_DOCLING:-false} == true ]]; then
     say_warn "  docling is the heaviest server (limit about 5 GiB): with the stand it can exhaust a 15 GB machine; 16 GB with a 12g profile are the practical minimum."
   fi
+  # R21: the web search opens a site of the company network only when its network is open to the servers.
+  if [[ ${MCP_SEARCH:-false} == true ]]; then
+    say "The servers reach the internet only: the private ranges of the company network are closed to them." \
+      "If the search must open a site of that network, give its networks — the installer opens them to the servers."
+    ask MCP_EGRESS_ALLOW "Networks of the company for the search, Enter for none" \
+      '^(([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}(,([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2})*)?$' \
+      "CIDRs separated by commas, such as 10.20.30.0/24"
+  fi
   if [[ ${MCP_YANDEX_MAIL:-false} == true ]]; then
     say "Yandex Mail: after the install, add the server to the catalog of Nabu (./installer creds shows its address)," \
       "  then create an app at https://oauth.yandex.ru/client/new (web services) with the permissions mail:imap_ro" \

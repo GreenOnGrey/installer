@@ -168,3 +168,34 @@ put_cm() { jq -n --argjson d "$3" '{data: $d}' >"$CM_DIR/$1_$2.json"; }
   [ "$status" -eq 0 ]
   [[ $output == *"old label"* ]]
 }
+
+@test "R17a: pods restart when their environment differs from the one of their last start, and only then" {
+  FP_FILE=$BATS_TEST_TMPDIR/fp
+  export FP_FILE
+  stub kubectl '
+case "$*" in
+  *"get configmap nabu-env"*) [[ -f $FP_FILE ]] && cat "$FP_FILE" ;;
+  *"rollout restart "* | *"rollout status "*) exit 0 ;;
+  *"apply -f -"*) m=$(cat); jq -r .data.sha256 <<<"$m" >"$FP_FILE" ;;
+  *) exit 0 ;;
+esac'
+  # No fingerprint yet: the pods may have started before this release, so they restart once.
+  run restart_stale_env nabu nabu-env abc api
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  called "rollout restart deployment/api"
+  [ "$(cat "$FP_FILE")" = abc ]
+  : >"$CALLS"
+  run restart_stale_env nabu nabu-env abc api
+  [ "$status" -eq 0 ]
+  not_called "rollout restart"
+  : >"$CALLS"
+  run restart_stale_env nabu nabu-env def api
+  [ "$status" -eq 0 ]
+  called "rollout restart deployment/api"
+  [ "$(cat "$FP_FILE")" = def ]
+}
+
+@test "R17a: the core rollouts restart their api by the fingerprint of the configuration" {
+  grep -qF 'restart_stale_env "$NS" nabu-env' "$ROOT/bin/nabu-deploy"
+  grep -qF 'restart_stale_env "$NS" hammurapi-env' "$ROOT/bin/hammurapi-deploy"
+}

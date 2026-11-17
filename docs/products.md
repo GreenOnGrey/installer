@@ -87,7 +87,12 @@ The wizard shows each of these steps with the links of your GitLab and the addre
 
 ### Hammurapi and Nabu
 
-- **Nabu of the same install**: Nabu creates the service client of Hammurapi itself. After the install, allow its service agents in **Nabu → Admin → Clients**.
+- **Nabu of the same install**: Nabu creates the service client of Hammurapi itself, and the installer generates
+  its secret once and keeps it: both sides always receive the same value, and the `api` of Nabu and the `api` and
+  `worker` of Hammurapi restart when the fingerprint of their configuration and secrets changes, so a pod never
+  keeps the environment of an older secret. If the two sides ever diverge, `install` stops with the names of both
+  secrets instead of leaving `nabu_auth_failed` in the chat. After the install, allow the service agents of
+  Hammurapi in **Nabu → Admin → Clients**.
 - **Another Nabu** (`NABU_MODE=external`): register a client for Hammurapi in that Nabu (**Admin → Clients**). Set `NABU_URL`, the `https://` address of its API, `NABU_CLIENT_ID` and the secret `NABU_CLIENT_SECRET`. Before anything changes, `install` checks that this Nabu issues a token to the client (code `14` otherwise).
 
 ## Secrets of the products

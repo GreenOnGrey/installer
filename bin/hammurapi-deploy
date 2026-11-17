@@ -474,6 +474,10 @@ main() {
   ghcr_pull
   helm_deploy
   if [[ $COMPONENT == hammurapi-core ]]; then
+    # api and worker read NABU_CLIENT_SECRET and the configuration at their start: a secret changed without a new tag
+    # must restart them, or Hammurapi signs in to Nabu with the hash of another secret (FTR.NAB.CMN-0001 R17a).
+    restart_stale_env "$NS" hammurapi-env "$(printf '%s' "$PAYLOAD" | env_fingerprint)" api worker ||
+      fail "$E_READY" "api and worker of Hammurapi did not restart with the configuration of this rollout"
     configure_git
   fi
   wait_ready

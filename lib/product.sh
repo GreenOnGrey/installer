@@ -206,21 +206,27 @@ save_product_inputs() {
 
 # ensure_nabu_client — the secret of the client of Hammurapi in the Nabu of this install: generated once
 # and kept with the inputs before Nabu creates the client from its hash (FTR.NAB.CMN-0001 R17a).
+# An inputs secret that cannot be read is not an empty one: a second secret generated here would leave the two
+# sides of the client with different hashes, and every call of Hammurapi to Nabu would end in invalid_client.
 ensure_nabu_client() {
   has_product hammurapi && ! nabu_external || return 0
+  read_product_inputs
+  [[ -n $PRODUCT_INPUTS ]] ||
+    die "$E_CLUSTER" "failed to read $NS_STATE/$PRODUCT_INPUTS_SECRET: the secret of the client of Hammurapi in Nabu is unknown, and a new one would not match the hash Nabu keeps; nothing was changed"
   [[ -z $(stored_input NABU_BOOTSTRAP_CLIENT_SECRET) ]] || return 0
   GENERATED_INPUTS[NABU_BOOTSTRAP_CLIENT_SECRET]="nabu_$(openssl rand -hex 32)"
 }
 
 # hammurapi_nabu_secret — the secret of the client of Hammurapi: given for an external Nabu, generated for
-# the Nabu of this install.
+# the Nabu of this install. Without a trailing line end: the hash of the client list is taken from this value,
+# and Hammurapi receives it through $(…), which strips line ends anyway.
 hammurapi_nabu_secret() {
   if nabu_external; then
     product_secret NABU_CLIENT_SECRET
   elif [[ -n ${GENERATED_INPUTS[NABU_BOOTSTRAP_CLIENT_SECRET]:-} ]]; then
     printf '%s' "${GENERATED_INPUTS[NABU_BOOTSTRAP_CLIENT_SECRET]}"
   else
-    stored_input NABU_BOOTSTRAP_CLIENT_SECRET
+    printf '%s' "$(stored_input NABU_BOOTSTRAP_CLIENT_SECRET)"
   fi
 }
 
@@ -237,9 +243,24 @@ kept_key() {
 nabu_bootstrap_clients() {
   has_product hammurapi || return 0
   local hash
-  hash=$(hammurapi_nabu_secret | sha256sum | awk '{print $1}')
+  # The hash of the value without line ends: the very same string is what Hammurapi sends (FTR.NAB.CMN-0001 R17a).
+  hash=$(printf '%s' "$(hammurapi_nabu_secret)" | sha256sum | awk '{print $1}')
   jq -cn --arg h "$hash" --arg url "https://${HAMMURAPI_WEB_HOST:-hammurapi}.$PUBLIC_DOMAIN" \
     '[{name: "hammurapi", secretSha256: $h, url: $url, agents: []}]'
+}
+
+# check_nabu_client_secret — the hash of the secret Hammurapi holds must be the one Nabu keeps for its client
+# (FTR.NAB.CMN-0001 R17a). A divergence costs no install: it shows up as nabu_auth_failed in the chat and in the
+# Nabu section of Hammurapi, so it is named here, right after the rollout.
+check_nabu_client_secret() {
+  has_product nabu && has_product hammurapi && ! nabu_external || return 0
+  local secret stored hash
+  secret=$(secret_key "$(hammurapi_ns)" hammurapi-secrets NABU_CLIENT_SECRET 2>/dev/null || true)
+  stored=$(secret_key "$(nabu_ns)" nabu-secrets BOOTSTRAP_CLIENTS 2>/dev/null || true)
+  [[ -n $secret && -n $stored ]] || return 0
+  hash=$(printf '%s' "$secret" | sha256sum | awk '{print $1}')
+  [[ $hash == "$(jq -r '.[] | select(.name == "hammurapi") | .secretSha256' <<<"$stored" 2>/dev/null)" ]] && return 0
+  die "$E_DEPLOY" "the client hammurapi of Nabu keeps the hash of another secret: $(hammurapi_ns)/hammurapi-secrets NABU_CLIENT_SECRET does not match $(nabu_ns)/nabu-secrets BOOTSTRAP_CLIENTS, so Hammurapi cannot sign in to Nabu"
 }
 
 # nabu_model_egress — the networks of the models of the company network as a JSON array: the agent pods and the
@@ -393,19 +414,6 @@ deploy_component() {
   RESULT_UPDATED+=("$component")
 }
 
-# restart_nabu_api <BOOTSTRAP_CLIENTS before the rollout> — api reads BOOTSTRAP_CLIENTS at its start, and a
-# rollout at the same tag does not restart it when only the secret changed.
-restart_nabu_api() {
-  [[ " ${RESULT_UPDATED[*]} " == *" nabu-core "* ]] || return 0
-  local after
-  after=$(secret_key "$(nabu_ns)" nabu-secrets BOOTSTRAP_CLIENTS 2>/dev/null || true)
-  [[ $after != "$1" ]] || return 0
-  log "the service clients of Nabu changed: restarting its api"
-  kc -n "$(nabu_ns)" rollout restart deployment/api >/dev/null &&
-    kc -n "$(nabu_ns)" rollout status deployment/api --timeout="$HELM_TIMEOUT" >/dev/null ||
-    die "$E_DEPLOY" "the api of Nabu did not restart with the client of Hammurapi"
-}
-
 # deploy_pair <script> <ns> <product> <core tag> <web tag> <chart> — web follows its core: a core of the
 # CI of its product keeps its web too.
 deploy_pair() {
@@ -426,11 +434,9 @@ deploy_products() {
   die_if_missing
   ensure_nabu_client
   save_product_inputs
+  # api of Nabu restarts by the fingerprint of its environment inside bin/nabu-deploy (R17a).
   if has_product nabu; then
-    local clients_before
-    clients_before=$(secret_key "$(nabu_ns)" nabu-secrets BOOTSTRAP_CLIENTS 2>/dev/null || true)
     deploy_pair nabu-deploy "$(nabu_ns)" nabu "$NABU_CORE_VERSION" "$NABU_WEB_VERSION" "$NABU_CHART_VERSION"
-    restart_nabu_api "$clients_before"
   fi
   if has_product hammurapi; then
     # A stopped minikube hid the release from products_preflight.
@@ -439,12 +445,13 @@ deploy_products() {
     fi
     deploy_pair hammurapi-deploy "$(hammurapi_ns)" hammurapi "$HAMMURAPI_CORE_VERSION" "$HAMMURAPI_WEB_VERSION" "$HAMMURAPI_CHART_VERSION"
   fi
+  check_nabu_client_secret
   ok "products: $(product_list | paste -sd, -)"
 }
 
 # deploy_products_of <component> — one component at its version (update <service>).
 deploy_products_of() {
-  local component=$1 script ns chart before="" var=${SERVICE_VERSION_VAR[$1]}
+  local component=$1 script ns chart var=${SERVICE_VERSION_VAR[$1]}
   PRODUCT_INPUTS_READ=0
   CONFIG_MISSING=()
   validate_products
@@ -455,10 +462,9 @@ deploy_products_of() {
     nabu-*) script=nabu-deploy ns=$(nabu_ns) chart=$NABU_CHART_VERSION ;;
     hammurapi-*) script=hammurapi-deploy ns=$(hammurapi_ns) chart=$HAMMURAPI_CHART_VERSION ;;
   esac
-  [[ $component == nabu-core ]] && before=$(secret_key "$ns" nabu-secrets BOOTSTRAP_CLIENTS 2>/dev/null || true)
   deploy_component "$script" "$ns" "$component" "${!var}" "$chart" ||
     die "$E_USAGE" "$component belongs to the CI of its product: update it there"
-  if [[ $component == nabu-core ]]; then restart_nabu_api "$before"; fi
+  check_nabu_client_secret
 }
 
 # products_summary — addresses of the products, and what is still to be done by hand.

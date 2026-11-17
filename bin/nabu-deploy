@@ -434,6 +434,11 @@ main() {
     ensure_certificate
   fi
   helm_deploy
+  if [[ $COMPONENT == nabu-core ]]; then
+    # api reads its environment at the start: a secret changed without a new tag must restart it (R17a).
+    restart_stale_env "$NS" nabu-env "$(printf '%s' "$PAYLOAD" | env_fingerprint)" api ||
+      fail "$E_READY" "the api of Nabu did not restart with the configuration of this rollout"
+  fi
   wait_ready
 }
 
