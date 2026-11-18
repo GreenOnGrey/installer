@@ -55,8 +55,11 @@ agents:
 # itself in Settings; this is the collection capacity.
 memory:
   collectConcurrency: 40  # concurrent collector runs (MEMORY_COLLECT_CONCURRENCY)
-  batchThreads: 20        # threads in the batch of one run
-  runTimeout: 10m         # longest run time
+  # Threads in the batch of one run and its longest time. A batch of 20 threads of a chat source made turns of the
+  # model of 3–6 minutes each: the run of 10 minutes did not fit, the batch failed with the class of a model that
+  # was down, and three such ticks paused the collection (measured on the stand 2026-11-18).
+  batchThreads: 8
+  runTimeout: 20m
   backfillDays: 30        # depth of the first collection
   backfillPoolShare: 0.3  # share of concurrent runs for the first collection
   gmailOverlap: 24h       # overlap of the Gmail search before the cursor
