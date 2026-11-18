@@ -179,6 +179,21 @@ Built-in or external, each on its own ([resources.md](resources.md)).
 | `MCP_DOCLING_MAX_MB` | `25` | Largest document of `docling-serve`, MB |
 | `MCP_SEARCH_ENGINES` | `duckduckgo,bing,wikipedia,github,stackoverflow,arxiv` | SearXNG engines |
 | `MCP_EGRESS_ALLOW` | empty | Networks of the company the MCP servers reach besides the internet, comma-separated CIDRs. The private ranges are closed to them, and the search refuses a private URL itself: the list opens the networks in the network policy and turns that refusal off |
+| `MCP_JIRA` | `false` | Read-only Jira, personal access of each user |
+| `MCP_JIRA_URL` | empty | The address of Jira, required when `MCP_JIRA=true` |
+| `MCP_JIRA_AUTH_MODE` | `cloud` | `cloud` — users sign in through OAuth 2.0 (3LO); `dc` — Server/Data Center, a personal access token |
+| `MCP_JIRA_CLOUD_ID` | empty | The cloud id of the Atlassian site, required for `cloud` |
+| `MCP_CONFLUENCE` | `false` | Read-only Confluence, personal access of each user |
+| `MCP_CONFLUENCE_URL` | empty | The address of Confluence, required when `MCP_CONFLUENCE=true` |
+| `MCP_CONFLUENCE_AUTH_MODE` | `cloud` | `cloud` or `dc`, as for Jira |
+| `MCP_CONFLUENCE_CLOUD_ID` | empty | The cloud id of the Atlassian site, required for `cloud` |
+| `MCP_GITLAB` | `false` | Read-only GitLab, a personal access token with `read_api` |
+| `MCP_GITLAB_URL` | empty | The address of the GitLab instance, required when `MCP_GITLAB=true` |
+| `MCP_CLICKHOUSE` | `false` | Read-only `SELECT` queries, the login and password of each user |
+| `MCP_CLICKHOUSE_HOST` | empty | The host of the ClickHouse HTTP interface, required when `MCP_CLICKHOUSE=true` |
+| `MCP_CLICKHOUSE_PORT` | `8443` | The HTTP port of ClickHouse: `8443` for HTTPS, `8123` for HTTP |
+| `MCP_CLICKHOUSE_SCHEME` | `https` | The scheme of that interface: `https` or `http` |
+| `MCP_CA_SECRET` | empty | Secret of the namespace `mcp` with `ca.crt` of the company CA, mounted into the personal servers |
 
 ## Exit codes
 

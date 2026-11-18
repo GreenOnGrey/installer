@@ -45,6 +45,7 @@ esac'
 
 @test "MCP-02 (U), FTR.INFRA.INST-0001 R20: a server from its description and option needs no installer code" {
   local chart=$BATS_TEST_TMPDIR/chart cfg=$BATS_TEST_TMPDIR/local.env
+  : >"$cfg"
   mkdir -p "$chart/files/servers"
   jq -n '{name: "new-one", valuesKey: "newOne", service: "new-one:9000", deployments: ["new-one"],
     secrets: ["mcp-new-one-key"], keySecret: "mcp-new-one-key", wantTools: ["t"], oauth: null, catalogHint: null}' \
@@ -410,4 +411,68 @@ esac'
 
 @test "the stand does not depend on yq: the machine has none (prereqs installs jq)" {
   not_grep -nE '(^|[^#]*[|;&(] *|^ *)yq\b' "$ROOT"/lib/*.sh "$ROOT/installer"
+}
+
+@test "FTR.INFRA.MCPS-0001 R4: an enabled personal server needs the address of its system" {
+  MCP_JIRA=true
+  run validate_mcp_config
+  [ "$status" -eq 2 ]
+  [[ $output == *MCP_JIRA_URL* ]]
+  MCP_JIRA_URL=https://jira.company.ru
+  run validate_mcp_config
+  [ "$status" -eq 2 ]
+  [[ $output == *MCP_JIRA_CLOUD_ID* ]]
+  # Data Center signs users in by a personal token: no cloud id is needed
+  MCP_JIRA_AUTH_MODE=dc
+  run validate_mcp_config
+  [ "$status" -eq 0 ]
+}
+
+@test "FTR.INFRA.MCPS-0001 R4: GitLab and ClickHouse settings are checked" {
+  MCP_GITLAB=true MCP_GITLAB_URL=gitlab.company.ru
+  run validate_mcp_config
+  [ "$status" -eq 2 ]
+  [[ $output == *MCP_GITLAB_URL* ]]
+  MCP_GITLAB_URL=https://gitlab.company.ru
+  run validate_mcp_config
+  [ "$status" -eq 0 ]
+  MCP_CLICKHOUSE=true MCP_CLICKHOUSE_HOST=ch.company.ru MCP_CLICKHOUSE_SCHEME=ftp
+  run validate_mcp_config
+  [ "$status" -eq 2 ]
+  [[ $output == *MCP_CLICKHOUSE_SCHEME* ]]
+  MCP_CLICKHOUSE_SCHEME=https
+  MCP_CLICKHOUSE_PORT=70000
+  run validate_mcp_config
+  [ "$status" -eq 2 ]
+  [[ $output == *MCP_CLICKHOUSE_PORT* ]]
+  MCP_CLICKHOUSE_PORT=8443
+  run validate_mcp_config
+  [ "$status" -eq 0 ]
+}
+
+@test "FTR.INFRA.MCPS-0001 R10: the values of a personal server reach the chart" {
+  MCP_JIRA=true MCP_JIRA_URL=https://jira.company.ru MCP_JIRA_AUTH_MODE=cloud MCP_JIRA_CLOUD_ID=site-1
+  MCP_GITLAB=true MCP_GITLAB_URL=https://gitlab.company.ru
+  MCP_CLICKHOUSE=true MCP_CLICKHOUSE_HOST=ch.company.ru MCP_CLICKHOUSE_PORT=8443 MCP_CLICKHOUSE_SCHEME=https
+  MCP_CA_SECRET=company-ca
+  MCP_CHART_DIR=$ROOT/tests/fixtures/mcp/chart
+  run mcp_helm_args
+  [ "$status" -eq 0 ]
+  [[ $output == *"jira.url=https://jira.company.ru"* && $output == *"jira.authMode=cloud"* && $output == *"jira.cloudId=site-1"* ]]
+  [[ $output == *"jira.caSecret=company-ca"* ]]
+  [[ $output == *"gitlab.url=https://gitlab.company.ru"* ]]
+  [[ $output == *"clickhouse.host=ch.company.ru"* && $output == *"clickhouse.secure=true"* ]]
+  [[ $output == *"clickhouse.caSecret=company-ca"* ]]
+}
+
+@test "FTR.INFRA.MCPS-0001 R10: creds print the personal token of a description" {
+  MCP_GITLAB=true MCP_GITLAB_URL=https://gitlab.company.ru
+  load_config "$ROOT" /dev/null
+  MCP_CHART_DIR=$ROOT/tests/fixtures/mcp/chart
+  run mcp_creds_json
+  [ "$status" -eq 0 ]
+  jq -e '.gitlab.mode == "personal" and .gitlab.token.header == "Private-Token"
+    and .gitlab.token.prefix == "" and (.gitlab.token.hint | test("read_api"))' <<<"$output"
+  run mcp_creds_text
+  [[ $output == *'Token: a personal access token of GitLab with the read_api scope (header Private-Token, prefix "")'* ]]
 }

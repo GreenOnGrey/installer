@@ -576,6 +576,43 @@ wizard_mcp() {
       "  and login:email, and the redirect URI https://${NABU_API_HOST:-nabu-api}.${PUBLIC_BASE_DOMAIN:-<domain>}/api/v1/oauth/callback/<ID of the entry>;" \
       "  its ID and secret go to the catalog entry."
   fi
+  wizard_personal_mcp
+}
+
+# wizard_personal_mcp — the personal servers of the company systems (FTR.INFRA.MCPS-0001 R4): the address of a
+# system is a setting of the stand, the token is the business of each user in Nabu.
+wizard_personal_mcp() {
+  local http_re=$MCP_URL_RE
+  local srv
+  if [[ ${MCP_JIRA:-false} == true || ${MCP_CONFLUENCE:-false} == true || ${MCP_GITLAB:-false} == true \
+    || ${MCP_CLICKHOUSE:-false} == true ]]; then
+    say "Jira, Confluence, GitLab and ClickHouse are already in the company network: give their addresses." \
+      "The users connect them in Nabu with their own account, so no token is asked here."
+  fi
+  for srv in jira confluence; do
+    local opt="MCP_${srv^^}" url mode cloud_id
+    [[ ${!opt:-false} == true ]] || continue
+    url="MCP_${srv^^}_URL" mode="MCP_${srv^^}_AUTH_MODE" cloud_id="MCP_${srv^^}_CLOUD_ID"
+    ask "$url" "The address of ${srv}" "$http_re" "an http(s):// address"
+    ask "$mode" "How users sign in to ${srv}: cloud (OAuth 2.0) or dc (personal access token)" '^(cloud|dc)$' "cloud or dc"
+    if [[ ${!mode} == cloud ]]; then
+      ask "$cloud_id" "The cloud id of the Atlassian site (from https://<site>.atlassian.net/_edge/tenant_info)" \
+        '.' "a value is required"
+    fi
+  done
+  if [[ ${MCP_GITLAB:-false} == true ]]; then
+    ask MCP_GITLAB_URL "The address of GitLab" "$http_re" "an http(s):// address"
+  fi
+  if [[ ${MCP_CLICKHOUSE:-false} == true ]]; then
+    ask MCP_CLICKHOUSE_HOST "The host of ClickHouse" '^[A-Za-z0-9._-]+$' "a host name or an address"
+    ask MCP_CLICKHOUSE_PORT "The HTTP port of ClickHouse (8443 for HTTPS, 8123 for HTTP)" '^[0-9]+$' "a port"
+    ask MCP_CLICKHOUSE_SCHEME "The scheme of that interface: https or http" '^(https|http)$' "https or http"
+  fi
+  if [[ ${MCP_JIRA:-false} == true || ${MCP_CONFLUENCE:-false} == true || ${MCP_GITLAB:-false} == true \
+    || ${MCP_CLICKHOUSE:-false} == true ]]; then
+    ask MCP_CA_SECRET "Secret of the namespace mcp with ca.crt of the company CA, Enter for a public certificate" \
+      '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$' "the name of a Secret"
+  fi
 }
 
 # wizard_memory_gib — the memory the wizard offers for the profile: MK_MEMORY as it is (12g by default), never more

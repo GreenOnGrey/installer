@@ -10,6 +10,10 @@ Servers are installed by the release `mcp-servers` in the namespace `mcp` and ar
 | `MCP_SEARCH=true` | Web search: SearXNG and `mcp-searxng` | ~0.4 / 0.8 GiB | ~0.3 GB |
 | `MCP_YANDEX_MAIL=true` | Read-only Yandex Mail: our own server `imap-mcp` | ~0.06 / 0.25 GiB | ~0.1 GB |
 | `MCP_DOCGEN=true` | Creating, editing and converting documents (`FTR.NAB.CHAT-0003`): our own server `docgen-mcp` and `doc-convert` (Gotenberg, which is LibreOffice and Chromium without network, and the `legacy` sidecar); it also turns on the DOCX/XLSX/PPTX preview in Nabu | ~0.9 / 4 GiB | ~2.5 GB |
+| `MCP_JIRA=true` | Read-only Jira (`FTR.INFRA.MCPS-0001`): issues, projects, sprints and comments, each user with their own access | ~0.5 / 1 GiB | ~0.4 GB |
+| `MCP_CONFLUENCE=true` | Read-only Confluence: pages, spaces, attachments and comments, each user with their own access | ~0.5 / 1 GiB | ~0.4 GB |
+| `MCP_GITLAB=true` | Read-only GitLab: projects, merge requests, issues, pipelines and files, a personal access token of each user | ~0.25 / 0.5 GiB | ~0.3 GB |
+| `MCP_CLICKHOUSE=true` | Read-only ClickHouse: `SELECT` through the HTTP interface with the login and password of each user | ~0.25 / 0.5 GiB | ~0.3 GB |
 
 ## Turning a server on and off
 
@@ -26,6 +30,43 @@ The servers reach the internet only, and the web search refuses a URL whose addr
 Before the deploy, `install` checks the memory budget (two thirds of the node memory, like the `resources` check). If the servers do not fit, it exits with code 2 before anything changes and says which `MK_MEMORY` is needed; on an existing cluster, how much memory is missing. The minikube profile with new memory is created anew (`uninstall`, then `install`).
 
 On minikube the node is a container of `MK_MEMORY`: it reports the memory of the machine, but it cannot use more than the profile, so the budget follows the smaller of the two. Requests are small, the limits are overcommitted, and the actual usage can reach them: `docling` is the heaviest server (limit about 5 GiB). 12g holds the stand with all servers on a 16 GB machine; on a 15 GB machine the stand with `docling` can exhaust the host — turn it off or add memory. When the node is under pressure the `resources` check fails and names `MemoryPressure`/`PIDPressure`/`DiskPressure`, because a node without memory cannot start the probes, hooks and liveness execs.
+
+## Personal servers of the company systems
+
+Jira, Confluence, GitLab and ClickHouse already exist in the company network: the stand installs only a
+server that speaks to them (`FTR.INFRA.MCPS-0001`). The server holds no account of its own: the token of the
+user comes from the proxy of Nabu in every request, so the agent sees exactly what the person sees, and the
+server keeps nothing. A server is read-only: write tools are absent from its list, and a call by name is
+refused.
+
+Each server needs the address of its system in the config file, because a user cannot choose it: otherwise a
+token could be sent to a stranger's host. One system of one product per stand.
+
+| Option | The address | Access of a user |
+|---|---|---|
+| `MCP_JIRA=true` | `MCP_JIRA_URL`, `MCP_JIRA_AUTH_MODE` (`cloud` or `dc`), `MCP_JIRA_CLOUD_ID` for Cloud | OAuth 2.0 (3LO) of Atlassian Cloud or a personal access token of Data Center |
+| `MCP_CONFLUENCE=true` | `MCP_CONFLUENCE_URL`, `MCP_CONFLUENCE_AUTH_MODE`, `MCP_CONFLUENCE_CLOUD_ID` | the same |
+| `MCP_GITLAB=true` | `MCP_GITLAB_URL`, for example `https://gitlab.company.ru` | a personal access token with the scope `read_api` |
+| `MCP_CLICKHOUSE=true` | `MCP_CLICKHOUSE_HOST`, `MCP_CLICKHOUSE_PORT` (8443 for HTTPS, 8123 for HTTP), `MCP_CLICKHOUSE_SCHEME` | the login and password of a ClickHouse user, entered as `login:password` |
+
+The systems are usually inside the company network, whose ranges are closed to the servers: list their
+networks in `MCP_EGRESS_ALLOW`, as for a site of the company network. A private certificate of the company CA
+goes into a Secret of the namespace `mcp` with the key `ca.crt`; name it in `MCP_CA_SECRET`, and the servers
+mount it and trust it.
+
+For Atlassian Cloud, an administrator registers one OAuth 2.0 (3LO) app per stand at
+[developer.atlassian.com](https://developer.atlassian.com/console/myapps/): *Create → OAuth 2.0 integration*,
+then *Authorization → Callback URL* is `https://<Nabu api>/api/v1/oauth/callback/<entry id>` of the catalog
+entry, and the permissions are the read scopes of Jira and Confluence. The *cloud id* of the site is on
+`https://<site>.atlassian.net/_edge/tenant_info`. `./installer creds` prints the authorize and token addresses
+and the scopes; the client id and secret go to the catalog entry, as for Yandex Mail. For Data Center the
+users paste their personal access tokens and no app is needed.
+
+For ClickHouse, make a user for the agents that may only read: `CREATE SETTINGS PROFILE ro SETTINGS readonly = 1,
+max_execution_time = 30, max_result_rows = 10000, result_overflow_mode = 'break'`, then
+`GRANT SELECT ON <database>.* TO <user>` and `ALTER USER <user> SETTINGS PROFILE ro`. The server adds
+`readonly=1` and the limits of the chart to every query anyway, so even a user with the right to write cannot
+change data.
 
 ## Parameters
 
@@ -49,6 +90,20 @@ On minikube the node is a container of `MK_MEMORY`: it reports the memory of the
 
   The file limit is 25 MB and the result limit is 50 MB. Mark all six tools as writing only to the space: in mail threads they run without a confirmation (overwriting a file asks for one).
 - **Web search**: `http://search.mcp.svc:3000/mcp`, platform, `Authorization: Bearer <key>`.
+- **Jira**: `http://jira.mcp.svc:8000/mcp`, personal. For Cloud — OAuth: authorize and token addresses from
+  `creds`, the client id and secret of the Atlassian app, the cloud id from the app page, the read scopes. For
+  Data Center — the kind of access «token», the hint of `creds` says what to paste. After the check, allow the
+  read tools `creds` prints (the `jira_get_*` and `jira_search*` set).
+- **Confluence**: `http://confluence.mcp.svc:8000/mcp`, personal, as Jira: the same app of Atlassian Cloud or a
+  personal access token of Data Center. Allow the `confluence_get_*`, `confluence_search*` and
+  `confluence_list_page_templates` set.
+- **GitLab**: `http://gitlab.mcp.svc:8000/mcp`, personal, the kind of access «token», header `Private-Token`
+  and an empty prefix: the token is sent as it is. Each user makes a personal access token with the scope
+  `read_api` in *User settings → Access tokens*. Allow the read tools of the server: `creds` and the catalog
+  print none, the item is marked read-only and the server hides the write tools itself.
+- **ClickHouse**: `http://clickhouse.mcp.svc:8000/mcp`, personal, the kind of access «token»: the users paste
+  `login:password` of their ClickHouse user in one field. The server has `run_query`, `list_databases` and
+  `list_tables`.
 - **Yandex Mail**: `http://yandex-mail.mcp.svc:8000/mcp`, personal, OAuth: authorize `https://oauth.yandex.ru/authorize`, token `https://oauth.yandex.ru/token`, the ClientID and Client secret of the Yandex app, scopes `mail:imap_ro login:email`. All tools of this server only read. The entry is checked with the administrator's personal access, so connect it under Connections first. To make Yandex Mail a source of the communications memory, in the Nabu admin area → Communications memory, choose the adapter `mail` for the entry and turn on Source. The entry must allow `list_folders`, `search_messages` and `read_thread`. The `mail` adapter is common for IMAP mail: another provider with OAuth for IMAP is another deployment of `imap-mcp` with its own `IMAP_HOST`, `USERINFO_*` and `WEB_LINK`.
 
 ## The Yandex OAuth app for Yandex Mail

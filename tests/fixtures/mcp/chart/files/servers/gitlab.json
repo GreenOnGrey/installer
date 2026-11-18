@@ -1,0 +1,16 @@
+{
+  "name": "gitlab",
+  "valuesKey": "gitlab",
+  "service": "gitlab:8000",
+  "deployments": ["gitlab"],
+  "secrets": [],
+  "keySecret": null,
+  "wantTools": [],
+  "oauth": null,
+  "token": {
+    "hint": "a personal access token of GitLab with the read_api scope",
+    "header": "Private-Token",
+    "prefix": ""
+  },
+  "catalogHint": null
+}

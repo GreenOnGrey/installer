@@ -1,0 +1,16 @@
+{
+  "name": "clickhouse",
+  "valuesKey": "clickhouse",
+  "service": "clickhouse:8000",
+  "deployments": ["clickhouse"],
+  "secrets": [],
+  "keySecret": null,
+  "wantTools": [],
+  "oauth": null,
+  "token": {
+    "hint": "login:password of your ClickHouse user, for example anna:secret",
+    "header": "Authorization",
+    "prefix": "Bearer "
+  },
+  "catalogHint": null
+}

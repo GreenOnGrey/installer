@@ -5,3 +5,7 @@ docgen	896	documents: generates office files, converts them, previews them on th
 docling	1552	document conversion: PDF, office files and scans to text
 search	384	web search through SearXNG
 yandex-mail	64	read-only Yandex Mail: each user connects a mailbox through Yandex OAuth
+jira	512	read-only Jira: each user connects with OAuth of Cloud or a token of Data Center
+confluence	512	read-only Confluence: each user connects with OAuth of Cloud or a token of Data Center
+gitlab	256	read-only GitLab: each user connects a personal access token with the read_api scope
+clickhouse	256	read-only ClickHouse: each user connects the login and password of a ClickHouse user
