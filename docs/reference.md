@@ -177,7 +177,7 @@ Built-in or external, each on its own ([resources.md](resources.md)).
 | `MCP_YANDEX_MAIL` | `false` | Read-only Yandex Mail |
 | `MCP_DOCGEN` | `false` | Creating and converting documents, office file preview |
 | `MCP_DOCLING_MAX_MB` | `25` | Largest document of `docling-serve`, MB |
-| `MCP_SEARCH_ENGINES` | `duckduckgo,bing,brave,wikipedia,github,stackoverflow,arxiv` | SearXNG engines |
+| `MCP_SEARCH_ENGINES` | `duckduckgo,bing,wikipedia,github,stackoverflow,arxiv` | SearXNG engines |
 | `MCP_EGRESS_ALLOW` | empty | Networks of the company the MCP servers reach besides the internet, comma-separated CIDRs. The private ranges are closed to them, and the search refuses a private URL itself: the list opens the networks in the network policy and turns that refusal off |
 
 ## Exit codes
