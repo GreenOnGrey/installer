@@ -152,9 +152,11 @@ mcp_helm_args() {
     --set-json "search.engines=$engines" \
     --set-string "s3.namespace=$NS_STORAGES"
   # FTR.INFRA.INST-0001 R21: the networks of the company besides the internet — the private ranges are closed to
-  # the servers, so the web search opens a site of the company network only when its network is here.
+  # the servers, so the web search opens a site of the company network only when its network is here. The policy is
+  # not enough: web_url_read of the search refuses a private address itself, so the same list turns that off.
   if [[ -n ${MCP_EGRESS_ALLOW:-} ]]; then
-    printf '%s\n' --set-json "egressAllow=$(tr ',' '\n' <<<"$MCP_EGRESS_ALLOW" | sed '/^$/d' | jq -Rnc '[inputs]')"
+    printf '%s\n' --set-json "egressAllow=$(tr ',' '\n' <<<"$MCP_EGRESS_ALLOW" | sed '/^$/d' | jq -Rnc '[inputs]')" \
+      --set search.allowPrivateUrls=true
   fi
 }
 

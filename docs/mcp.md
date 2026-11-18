@@ -17,6 +17,10 @@ Servers are installed by the release `mcp-servers` in the namespace `mcp` and ar
 
 A server enabled on a running stand is deployed by `update mcp-servers` alone, without the rest of the install. The checks of the stand that `update` runs first treat servers that are enabled but not rolled out yet as a warning, not a failure, so the first enable needs no `install`.
 
+## A site of the company network
+
+The servers reach the internet only, and the web search refuses a URL whose address is private by itself. A page of the company network needs both, and `MCP_EGRESS_ALLOW` sets both: it opens the listed networks in the network policy and turns the refusal of the search off (`search.allowPrivateUrls` of the chart). Give the networks of the pages the agents must read, not the whole company network.
+
 ## Memory
 
 Before the deploy, `install` checks the memory budget (two thirds of the node memory, like the `resources` check). If the servers do not fit, it exits with code 2 before anything changes and says which `MK_MEMORY` is needed; on an existing cluster, how much memory is missing. The minikube profile with new memory is created anew (`uninstall`, then `install`).

@@ -161,6 +161,11 @@ esac'
   run mcp_helm_args
   [ "$status" -eq 0 ]
   [[ $output == *'egressAllow=["10.20.30.0/24","10.20.31.5/32"]'* ]]
+  # The policy is not enough: web_url_read of the search refuses a private address itself.
+  [[ $output == *"search.allowPrivateUrls=true"* ]]
+  MCP_EGRESS_ALLOW=""
+  run mcp_helm_args
+  [[ $output != *allowPrivateUrls* ]]
 }
 
 @test "R21 (MCP-09): MCP_EGRESS_ALLOW takes CIDRs separated by commas and nothing else" {
