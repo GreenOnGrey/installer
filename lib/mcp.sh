@@ -1,11 +1,14 @@
 # shellcheck shell=bash disable=SC2016
 # SC2016: probe scripts are in single quotes on purpose: they run inside containers.
-# MCP servers of the stand (FTR.NAB.CMN-0006, tech §2): document conversion, web search,
-# read-only Yandex Mail. Each is enabled by its own option; namespace $NS_MCP,
+# MCP servers of the stand (FTR.NAB.CMN-0006, FTR.INFRA.MCPS-0001, tech §2): document conversion, web search,
+# read-only Yandex Mail, and the personal servers of the company systems — Jira, Confluence, GitLab,
+# ClickHouse. Each is enabled by its own option; namespace $NS_MCP,
 # one release mcp-servers: the chart and server descriptions come from a release of mcps. Keys are generated on the first `up` and kept only
 # in secrets of the namespace.
 
 MCP_RELEASE=mcp-servers
+# The address of a company system: one regular expression for the checks of install and the questions of the wizard.
+MCP_URL_RE='^https?://[^/[:space:]]+(/[^[:space:]]*)?$'
 
 # --- Server properties: descriptions from the chart mcp-servers of repository mcps ---
 
@@ -16,8 +19,8 @@ declare -gA MCP_VALUES_KEY=() MCP_SERVICE=() MCP_DEPLOYMENTS=()
 declare -gA MCP_SECRETS=() MCP_KEY_SECRET=()
 # tools the check expects in tools/list
 declare -gA MCP_WANT_TOOLS=()
-# OAuth of personal servers and hints for the Nabu catalog entry (creds)
-declare -gA MCP_OAUTH=() MCP_CATALOG_HINT=()
+# OAuth of personal servers, their personal token and hints for the Nabu catalog entry (creds)
+declare -gA MCP_OAUTH=() MCP_TOKEN=() MCP_CATALOG_HINT=()
 # number of tools from the check results (status)
 declare -gA MCP_TOOL_COUNT=()
 MCP_LOADED=0
@@ -90,6 +93,7 @@ mcp_try_load() {
     MCP_KEY_SECRET[$srv]=$(jq -r '.keySecret // empty' "$f")
     MCP_WANT_TOOLS[$srv]=$(jq -r '.wantTools | join(" ")' "$f")
     MCP_OAUTH[$srv]=$(jq -c '.oauth // empty' "$f")
+    MCP_TOKEN[$srv]=$(jq -c '.token // empty' "$f")
     MCP_CATALOG_HINT[$srv]=$(jq -c '.catalogHint // empty' "$f")
   done
   # An enabled option without a server is a typo, or the server left the chart.
@@ -135,6 +139,39 @@ validate_mcp_config() {
   local cidr='([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}'
   [[ -z ${MCP_EGRESS_ALLOW:-} || ${MCP_EGRESS_ALLOW} =~ ^$cidr(,$cidr)*$ ]] ||
     die "$E_USAGE" "MCP_EGRESS_ALLOW: CIDRs separated by commas, such as 10.20.30.0/24, not '$MCP_EGRESS_ALLOW'"
+  validate_personal_mcp
+}
+
+# validate_personal_mcp — the settings of the personal servers (FTR.INFRA.MCPS-0001 R4): an enabled server
+# needs the address of its system; Cloud of Atlassian needs the cloud id of the site.
+validate_personal_mcp() {
+  local srv param url mode cloud_id
+  for srv in jira confluence; do
+    param="MCP_${srv^^}"
+    [[ ${!param:-false} == true ]] || continue
+    url="MCP_${srv^^}_URL" mode="MCP_${srv^^}_AUTH_MODE" cloud_id="MCP_${srv^^}_CLOUD_ID"
+    [[ ${!url} =~ $MCP_URL_RE ]] || die "$E_USAGE" "$url: the http(s):// address of ${srv}, not '${!url}'"
+    [[ ${!mode} == cloud || ${!mode} == dc ]] || die "$E_USAGE" "$mode must be cloud or dc, not '${!mode}'"
+    [[ ${!mode} != cloud || -n ${!cloud_id} ]] ||
+      die "$E_USAGE" "$cloud_id: the cloud id of the Atlassian site, it is required for auth mode cloud"
+  done
+  if [[ ${MCP_GITLAB:-false} == true ]]; then
+    [[ ${MCP_GITLAB_URL} =~ $MCP_URL_RE ]] ||
+      die "$E_USAGE" "MCP_GITLAB_URL: the http(s):// address of GitLab, not '$MCP_GITLAB_URL'"
+  fi
+  if [[ ${MCP_CLICKHOUSE:-false} == true ]]; then
+    [[ -n ${MCP_CLICKHOUSE_HOST} ]] || die "$E_USAGE" "MCP_CLICKHOUSE_HOST: the host of ClickHouse is required"
+    [[ ${MCP_CLICKHOUSE_HOST} =~ ^[A-Za-z0-9._-]+$ ]] ||
+      die "$E_USAGE" "MCP_CLICKHOUSE_HOST: a host name or an address, not '$MCP_CLICKHOUSE_HOST'"
+    if ! [[ ${MCP_CLICKHOUSE_PORT} =~ ^[0-9]+$ ]] || ((MCP_CLICKHOUSE_PORT < 1 || MCP_CLICKHOUSE_PORT > 65535)); then
+      die "$E_USAGE" "MCP_CLICKHOUSE_PORT: a port from 1 to 65535, not '$MCP_CLICKHOUSE_PORT'"
+    fi
+    # a boolean MCP_* key would read as a server option: the scheme is a word, not a flag
+    [[ ${MCP_CLICKHOUSE_SCHEME} == https || ${MCP_CLICKHOUSE_SCHEME} == http ]] ||
+      die "$E_USAGE" "MCP_CLICKHOUSE_SCHEME must be https or http, not '$MCP_CLICKHOUSE_SCHEME'"
+  fi
+  [[ -z ${MCP_CA_SECRET:-} || ${MCP_CA_SECRET} =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] ||
+    die "$E_USAGE" "MCP_CA_SECRET: the name of a Secret of the namespace $NS_MCP, not '$MCP_CA_SECRET'"
 }
 
 # mcp_helm_args — enabling servers and configuration parameters. Images and their versions
@@ -157,6 +194,38 @@ mcp_helm_args() {
   if [[ -n ${MCP_EGRESS_ALLOW:-} ]]; then
     printf '%s\n' --set-json "egressAllow=$(tr ',' '\n' <<<"$MCP_EGRESS_ALLOW" | sed '/^$/d' | jq -Rnc '[inputs]')" \
       --set search.allowPrivateUrls=true
+  fi
+  # FTR.INFRA.MCPS-0001 R4: the address of a company system is a setting of the stand, not of a user.
+  mcp_personal_args
+}
+
+# mcp_ca_arg <valuesKey> — the Secret of the company CA, when the operator named one.
+mcp_ca_arg() { [[ -z ${MCP_CA_SECRET:-} ]] || printf '%s\n' --set-string "$1.caSecret=$MCP_CA_SECRET"; }
+
+# mcp_atlassian_arg <server> <valuesKey> — the values of Jira or Confluence: address, mode of access, cloud id.
+mcp_atlassian_arg() {
+  local srv=$1 key=$2 url mode cloud_id
+  url="MCP_${srv^^}_URL" mode="MCP_${srv^^}_AUTH_MODE" cloud_id="MCP_${srv^^}_CLOUD_ID"
+  printf '%s\n' --set-string "$key.url=${!url}" --set-string "$key.authMode=${!mode}" --set-string "$key.cloudId=${!cloud_id}"
+  mcp_ca_arg "$key"
+}
+
+# mcp_personal_args — values of the personal servers: the address of a system and the certificate of a private CA.
+mcp_personal_args() {
+  local srv
+  for srv in jira confluence; do
+    mcp_on "$srv" && mcp_atlassian_arg "$srv" "${MCP_VALUES_KEY[$srv]}"
+  done
+  if mcp_on gitlab; then
+    printf '%s\n' --set-string "gitlab.url=$MCP_GITLAB_URL"
+    mcp_ca_arg gitlab
+  fi
+  if mcp_on clickhouse; then
+    local secure=false
+    [[ $MCP_CLICKHOUSE_SCHEME == https ]] && secure=true
+    printf '%s\n' --set-string "clickhouse.host=$MCP_CLICKHOUSE_HOST" --set-string "clickhouse.port=$MCP_CLICKHOUSE_PORT" \
+      --set-string "clickhouse.secure=$secure"
+    mcp_ca_arg clickhouse
   fi
 }
 
@@ -347,6 +416,9 @@ mcp_creds_json() {
     if [[ -n ${MCP_OAUTH[$srv]:-} ]]; then
       entry=$(jq -c --argjson o "${MCP_OAUTH[$srv]}" '. + {oauth: $o}' <<<"$entry")
     fi
+    if [[ -n ${MCP_TOKEN[$srv]:-} ]]; then
+      entry=$(jq -c --argjson t "${MCP_TOKEN[$srv]}" '. + {token: $t}' <<<"$entry")
+    fi
     if [[ -n ${MCP_CATALOG_HINT[$srv]:-} ]]; then
       entry=$(jq -c --argjson h "${MCP_CATALOG_HINT[$srv]}" '. + $h' <<<"$entry")
     fi
@@ -363,6 +435,7 @@ mcp_creds_text() {
     "  \($s | .[0:11] | . + (" " * (12 - length)))\(.url)   \(if .mode == "platform" then "platform" else "personal" end)",
     (if .value then "              Authorization: \(.value)" else empty end),
     (if .oauth then "              OAuth: authorize \(.oauth.authorizeUrl), token \(.oauth.tokenUrl), scope \(.oauth.scopes | join(" "))\(if .oauth.clientId then ", client_id \(.oauth.clientId)" else "" end)" else empty end),
+    (if .token then "              Token: \(.token.hint) (header \(.token.header), prefix \"\(.token.prefix)\")" else empty end),
     (if .fileArgs then "              file arguments: \(.fileArgs | map("\(.tool).\(.arg)") | join(", "))" else empty end),
     (if .resultArgs then "              result paths: \(.resultArgs | map("\(.tool).\(.arg)") | join(", ")); writes only to the space: \(.spaceOnlyTools // [] | join(", "))" else empty end)' \
     <<<"$(mcp_creds_json)"
