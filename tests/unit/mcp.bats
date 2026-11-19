@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# shellcheck disable=SC2034,SC2016,SC2030,SC2031,SC2153,SC2329
+# shellcheck disable=SC2034,SC2016,SC2030,SC2031,SC2153,SC2329,SC2154
 # FTR.NAB.CMN-0006: MCP servers of the stand: options, memory budget, keys, removal of the
 # release, addresses for the Nabu catalog.
 
@@ -481,7 +481,7 @@ esac'
   # Other servers of the release are already deployed: the check of the stand goes on and meets this one.
   MCP_DOCGEN=true
   mcp_try_load() { return 0; }
-  MCP_DEPLOYMENTS[docgen]="docgen doc-convert"
+  MCP_DEPLOYMENTS["docgen"]="docgen doc-convert"
   stub kubectl '
 case "$*" in
   *"get deploy docgen"*) exit 1 ;;
