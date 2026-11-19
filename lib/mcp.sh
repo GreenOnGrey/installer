@@ -289,6 +289,23 @@ drop_disabled_secrets() {
   done
 }
 
+# drop_disabled_workloads — Deployments and Services of servers the configuration turned off. Helm edits only
+# what its manifest describes, so an object of an earlier, failed revision stays in the namespace: it keeps
+# running (or keeps crashing) and the check of the stand waits for its pods. Removing it is idempotent, and an
+# enabled server is never touched.
+drop_disabled_workloads() {
+  local srv dep svc
+  mcp_load
+  for srv in "${MCP_SERVERS[@]}"; do
+    mcp_on "$srv" && continue
+    for dep in ${MCP_DEPLOYMENTS[$srv]:-}; do
+      kc -n "$NS_MCP" delete deployment "$dep" --ignore-not-found >/dev/null 2>&1 || true
+    done
+    svc=${MCP_SERVICE[$srv]%%:*}
+    [[ -n $svc ]] && { kc -n "$NS_MCP" delete service "$svc" --ignore-not-found >/dev/null 2>&1 || true; }
+  done
+}
+
 # copy_pull_secret — ghcr-pull from the Nabu namespace: built images are in
 # ghcr.io/greenongrey, like the images of Nabu.
 copy_pull_secret() {
@@ -398,6 +415,7 @@ deploy_mcp() {
   RELEASES[-1]="$MCP_RELEASE $MCP_CHART_VERSION"
   sync_preview_secret
   drop_disabled_secrets
+  drop_disabled_workloads
   ok "MCP servers: $(mcp_enabled_list | paste -sd, -)"
 }
 
@@ -629,6 +647,22 @@ check_mcp_docgen() {
   fi
 }
 
+# wait_mcp_deployments — every Deployment of every enabled server is ready (R21). Pods of a server the
+# configuration turned off are not waited for: they belong to no manifest, they may be Terminating or
+# crash-looping, and a pod on its way out never becomes Ready.
+wait_mcp_deployments() {
+  local srv dep
+  while read -r srv; do
+    for dep in ${MCP_DEPLOYMENTS[$srv]:-}; do
+      if ! kc -n "$NS_MCP" rollout status "deployment/$dep" --timeout="$CHECK_TIMEOUT" >/dev/null 2>&1; then
+        record mcp fail "deployment $dep of $srv is not ready"
+        return 1
+      fi
+    done
+  done < <(mcp_enabled_list)
+  return 0
+}
+
 # check_mcp — readiness of pods and checks of enabled servers.
 check_mcp() {
   # Component rollouts check only the stand (see cmd_status).
@@ -647,10 +681,8 @@ check_mcp() {
     record mcp warn "enabled, not rolled out yet: install or update mcp-servers deploys them"
     return
   fi
-  if ! out=$(kc -n "$NS_MCP" wait --for=condition=Ready pod -l 'app.kubernetes.io/part-of=mcp-servers' --timeout="$CHECK_TIMEOUT" 2>&1); then
-    record mcp fail "not all pods of $NS_MCP are ready: $(echo "$out" | grep -v 'condition met' | head -2 | tr '\n' ' ')"
-    return
-  fi
+  # a recorded failure is enough: the caller reads CHECK_RESULTS, and this function never stops the run
+  wait_mcp_deployments || return 0
   kc -n "$NS_MCP" delete pod "mcp-probe-$PROBE_RUN" --ignore-not-found --wait=true >/dev/null 2>&1 || true
   if ! mcp_probe_manifest | kc create -f - >/dev/null; then
     record mcp fail "the probe pod mcp-probe was not created"

@@ -137,19 +137,21 @@ esac'
   not_called "create -f -"
 }
 
-@test "R21 (MCP-07): a release that is rolled out is still checked: pods that are not ready are a failure" {
+@test "R21 (MCP-07): a release that is rolled out is still checked: a Deployment that is not ready is a failure" {
   MCP_SEARCH=true
+  MCP_OPTIONS=(MCP_SEARCH)
+  MCP_SERVERS=(search)
+  MCP_DEPLOYMENTS[search]="search"
   mcp_try_load() { return 0; }
   stub kubectl '
 case "$*" in
   *"get deploy -l app.kubernetes.io/part-of=mcp-servers -o name"*) echo "deployment.apps/search" ;;
-  *"wait --for=condition=Ready pod"*) echo "error: timed out waiting for the condition" >&2; exit 1 ;;
+  *"rollout status deployment/search"*) echo "error: timed out waiting for the condition" >&2; exit 1 ;;
   *) exit 0 ;;
 esac'
   CHECK_RESULTS=()
   check_mcp
-  [[ ${CHECK_RESULTS[*]} == *"mcp|fail|not all pods of mcp are ready: error: timed out waiting for the condition"* ]]
-  called "wait --for=condition=Ready pod"
+  [[ ${CHECK_RESULTS[*]} == *"mcp|fail|deployment search of search is not ready"* ]]
 }
 
 @test "R21 (MCP-09): the networks of the company reach the chart, and nothing when there are none" {
@@ -491,4 +493,44 @@ esac'
   check_mcp_server docgen
   [ "${CHECK_RESULTS[*]}" = "mcp-docgen-auth|warn|enabled, not rolled out yet: install or update mcp-servers deploys it" ]
   not_called "exec"
+}
+
+@test "R21: the check waits for the Deployments of the enabled servers, not for every pod of the namespace" {
+  MCP_SEARCH=true MCP_DOCGEN=true MCP_DOCLING=false
+  MCP_OPTIONS=(MCP_SEARCH MCP_DOCGEN MCP_DOCLING)
+  MCP_SERVERS=(search docgen docling)
+  MCP_DEPLOYMENTS[search]="search"
+  MCP_DEPLOYMENTS[docgen]="docconly"
+  MCP_DEPLOYMENTS[docling]="docling-mcp docling-serve"
+  mcp_try_load() { return 0; }
+  # docgen is not ready: the check names it and stops; a pod of the disabled docling is never awaited
+  stub kubectl '
+case "$*" in
+  *"rollout status deployment/docconly"*) exit 1 ;;
+  *) exit 0 ;;
+esac'
+  CHECK_RESULTS=()
+  wait_mcp_deployments && status_ok=1 || status_ok=0
+  [ "$status_ok" -eq 0 ]
+  [[ ${CHECK_RESULTS[*]} == *"mcp|fail|deployment docconly of docgen is not ready"* ]]
+  called "rollout status deployment/search"
+  not_called "rollout status deployment/docling-mcp"
+  not_called "wait --for=condition=Ready pod"
+}
+
+@test "R21: Deployments and Services of a disabled server are removed, those of an enabled one stay" {
+  MCP_SEARCH=false MCP_DOCLING=true
+  MCP_OPTIONS=(MCP_SEARCH MCP_DOCLING)
+  MCP_SERVERS=(search docling)
+  MCP_DEPLOYMENTS[search]="search"
+  MCP_DEPLOYMENTS[docling]="docling-mcp docling-serve"
+  MCP_SERVICE[search]="search:3000"
+  MCP_SERVICE[docling]="docling-mcp:8080"
+  mcp_try_load() { return 0; }
+  stub kubectl 'exit 0'
+  drop_disabled_workloads
+  called "delete deployment search"
+  called "delete service search"
+  not_called "delete deployment docling-mcp"
+  not_called "delete service docling-mcp"
 }
