@@ -521,8 +521,17 @@ mcp_tools() { jq -r '.result.tools[]?.name' 2>/dev/null <<<"$1" | sort | tr '\n'
 # check_mcp_server <server> — the checks of tech §2.6, each with its own record:
 # mcp-<server>-tools, -auth; mcp-search-query; mcp-docling-serve-auth, mcp-docling-convert.
 check_mcp_server() {
-  local srv=$1 url out names
+  local srv=$1 url out names dep
   mcp_load
+  # R21, MCP-07: a server enabled in the config but not rolled out yet — the first enable on a stand where other
+  # servers already run, or a chart that removed it. Its Service does not exist, so there is nothing to check and
+  # nothing is wrong: install and update mcp-servers deploy it after the checks.
+  for dep in ${MCP_DEPLOYMENTS[$srv]:-}; do
+    if ! kc -n "$NS_MCP" get deploy "$dep" >/dev/null 2>&1; then
+      record "mcp-$srv-auth" warn "enabled, not rolled out yet: install or update mcp-servers deploys it"
+      return 0
+    fi
+  done
   url=$(mcp_url "$srv")
   # R6, R21: without a key or token: 401
   out=$(mcp_rpc "$url" - tools/list '{}')
