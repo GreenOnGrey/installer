@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# shellcheck disable=SC2034,SC2016,SC2030,SC2031,SC2153,SC2329
+# shellcheck disable=SC2034,SC2016,SC2030,SC2031,SC2153,SC2329,SC2154
 # FTR.NAB.CMN-0006: MCP servers of the stand: options, memory budget, keys, removal of the
 # release, addresses for the Nabu catalog.
 
@@ -475,4 +475,20 @@ esac'
     and .gitlab.token.prefix == "" and (.gitlab.token.hint | test("read_api"))' <<<"$output"
   run mcp_creds_text
   [[ $output == *'Token: a personal access token of GitLab with the read_api scope (header Private-Token, prefix "")'* ]]
+}
+
+@test "R21 (MCP-07): a server that is enabled but not rolled out on a running stand is a warning" {
+  # Other servers of the release are already deployed: the check of the stand goes on and meets this one.
+  MCP_DOCGEN=true
+  mcp_try_load() { return 0; }
+  MCP_DEPLOYMENTS["docgen"]="docgen doc-convert"
+  stub kubectl '
+case "$*" in
+  *"get deploy docgen"*) exit 1 ;;
+  *) exit 0 ;;
+esac'
+  CHECK_RESULTS=()
+  check_mcp_server docgen
+  [ "${CHECK_RESULTS[*]}" = "mcp-docgen-auth|warn|enabled, not rolled out yet: install or update mcp-servers deploys it" ]
+  not_called "exec"
 }
