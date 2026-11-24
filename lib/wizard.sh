@@ -585,8 +585,8 @@ wizard_personal_mcp() {
   local http_re=$MCP_URL_RE
   local srv
   if [[ ${MCP_JIRA:-false} == true || ${MCP_CONFLUENCE:-false} == true || ${MCP_GITLAB:-false} == true \
-    || ${MCP_CLICKHOUSE:-false} == true ]]; then
-    say "Jira, Confluence, GitLab and ClickHouse are already in the company network: give their addresses." \
+    || ${MCP_CLICKHOUSE:-false} == true || ${MCP_GREENPLUM:-false} == true ]]; then
+    say "Jira, Confluence, GitLab, ClickHouse and Greenplum are already in the company network: give their addresses." \
       "The users connect them in Nabu with their own account, so no token is asked here."
   fi
   for srv in jira confluence; do
@@ -608,8 +608,16 @@ wizard_personal_mcp() {
     ask MCP_CLICKHOUSE_PORT "The HTTP port of ClickHouse (8443 for HTTPS, 8123 for HTTP)" '^[0-9]+$' "a port"
     ask MCP_CLICKHOUSE_SCHEME "The scheme of that interface: https or http" '^(https|http)$' "https or http"
   fi
+  # FTR.INFRA.MCPS-0002: the master of Greenplum, its database and the mode of SSL.
+  if [[ ${MCP_GREENPLUM:-false} == true ]]; then
+    ask MCP_GREENPLUM_HOST "The master of Greenplum" '^[A-Za-z0-9._-]+$' "a host name or an address"
+    ask MCP_GREENPLUM_PORT "The port of the PostgreSQL protocol of that master (5432)" '^[0-9]+$' "a port"
+    ask MCP_GREENPLUM_DATABASE "The database of Greenplum (citydrive_db)" '^[A-Za-z0-9_]+$' "a database name"
+    ask MCP_GREENPLUM_SSLMODE "SSL to the master: prefer for the company CA seen by the image, verify-full for a check" \
+      '^(disable|allow|prefer|require|verify-ca|verify-full)$' "a mode of SSL"
+  fi
   if [[ ${MCP_JIRA:-false} == true || ${MCP_CONFLUENCE:-false} == true || ${MCP_GITLAB:-false} == true \
-    || ${MCP_CLICKHOUSE:-false} == true ]]; then
+    || ${MCP_CLICKHOUSE:-false} == true || ${MCP_GREENPLUM:-false} == true ]]; then
     ask MCP_CA_SECRET "Secret of the namespace mcp with ca.crt of the company CA, Enter for a public certificate" \
       '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$' "the name of a Secret"
   fi

@@ -172,9 +172,10 @@ mcp_chart() {
   printf '\nMCP servers\n'
   local f=$OUT/mcp-servers.yaml args=() deps want srv
   MCP_DOCLING=true MCP_SEARCH=true MCP_YANDEX_MAIL=true MCP_DOCGEN=true
-  MCP_JIRA=true MCP_CONFLUENCE=true MCP_GITLAB=true MCP_CLICKHOUSE=true
+  MCP_JIRA=true MCP_CONFLUENCE=true MCP_GITLAB=true MCP_CLICKHOUSE=true MCP_GREENPLUM=true
   MCP_JIRA_URL=https://jira.example.com MCP_CONFLUENCE_URL=https://confluence.example.com
   MCP_GITLAB_URL=https://gitlab.example.com MCP_CLICKHOUSE_HOST=clickhouse.example.com
+  MCP_GREENPLUM_HOST=gp-master.example.com
   mcp_load
   mapfile -t args < <(mcp_helm_args)
   if ! helm template "$MCP_RELEASE" "$MCP_CHART_DIR" -n mcp --kube-version "$KUBE_VERSION" "${args[@]}" >"$f" 2>&1; then
@@ -191,7 +192,7 @@ mcp_chart() {
   fi
   mcp_wizard_list
   MCP_DOCLING=false MCP_SEARCH=false MCP_YANDEX_MAIL=false MCP_DOCGEN=false
-  MCP_JIRA=false MCP_CONFLUENCE=false MCP_GITLAB=false MCP_CLICKHOUSE=false
+  MCP_JIRA=false MCP_CONFLUENCE=false MCP_GITLAB=false MCP_CLICKHOUSE=false MCP_GREENPLUM=false
 }
 
 # mcp_wizard_list — config/mcp-servers.tsv, which the wizard reads without Helm, names the servers of the
