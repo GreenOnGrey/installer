@@ -41,8 +41,11 @@ spec:
             - { name: MODEL_IDLE_TIMEOUT, value: "0" }
           ports: [{ name: http, containerPort: 9000 }]
           readinessProbe:
+            # the first page of the API is the only cheap answer of the image; every ten seconds it filled half of
+            # the log of the stand with access lines (FTR.NAB.CHAT-0001 R22)
             httpGet: { path: /docs, port: http }
-            periodSeconds: 10
+            periodSeconds: 60
+            timeoutSeconds: 5
             failureThreshold: 3
           startupProbe:
             httpGet: { path: /docs, port: http }
