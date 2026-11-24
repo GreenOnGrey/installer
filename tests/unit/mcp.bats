@@ -452,6 +452,31 @@ esac'
   [ "$status" -eq 0 ]
 }
 
+@test "FTR.INFRA.MCPS-0002 R10: Greenplum needs a master, a database and a known mode of SSL" {
+  MCP_GREENPLUM=true
+  run validate_mcp_config
+  [ "$status" -eq 2 ]
+  [[ $output == *MCP_GREENPLUM_HOST* ]]
+  MCP_GREENPLUM_HOST=gp-master.company.ru
+  MCP_GREENPLUM_SSLMODE=secure
+  run validate_mcp_config
+  [ "$status" -eq 2 ]
+  [[ $output == *MCP_GREENPLUM_SSLMODE* ]]
+  MCP_GREENPLUM_SSLMODE=verify-full
+  MCP_GREENPLUM_PORT=70000
+  run validate_mcp_config
+  [ "$status" -eq 2 ]
+  [[ $output == *MCP_GREENPLUM_PORT* ]]
+  MCP_GREENPLUM_PORT=5432
+  MCP_GREENPLUM_DATABASE="bad;name"
+  run validate_mcp_config
+  [ "$status" -eq 2 ]
+  [[ $output == *MCP_GREENPLUM_DATABASE* ]]
+  MCP_GREENPLUM_DATABASE=citydrive_db
+  run validate_mcp_config
+  [ "$status" -eq 0 ]
+}
+
 @test "FTR.INFRA.MCPS-0001 R10: the values of a personal server reach the chart" {
   MCP_JIRA=true MCP_JIRA_URL=https://jira.company.ru MCP_JIRA_AUTH_MODE=cloud MCP_JIRA_CLOUD_ID=site-1
   MCP_GITLAB=true MCP_GITLAB_URL=https://gitlab.company.ru

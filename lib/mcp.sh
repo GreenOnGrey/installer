@@ -170,6 +170,22 @@ validate_personal_mcp() {
     [[ ${MCP_CLICKHOUSE_SCHEME} == https || ${MCP_CLICKHOUSE_SCHEME} == http ]] ||
       die "$E_USAGE" "MCP_CLICKHOUSE_SCHEME must be https or http, not '$MCP_CLICKHOUSE_SCHEME'"
   fi
+  # FTR.INFRA.MCPS-0002: the master of Greenplum, its database and the mode of SSL.
+  if [[ ${MCP_GREENPLUM:-false} == true ]]; then
+    [[ -n ${MCP_GREENPLUM_HOST} ]] || die "$E_USAGE" "MCP_GREENPLUM_HOST: the master of Greenplum is required"
+    [[ ${MCP_GREENPLUM_HOST} =~ ^[A-Za-z0-9._-]+$ ]] ||
+      die "$E_USAGE" "MCP_GREENPLUM_HOST: a host name or an address, not '$MCP_GREENPLUM_HOST'"
+    if ! [[ ${MCP_GREENPLUM_PORT} =~ ^[0-9]+$ ]] || ((MCP_GREENPLUM_PORT < 1 || MCP_GREENPLUM_PORT > 65535)); then
+      die "$E_USAGE" "MCP_GREENPLUM_PORT: a port from 1 to 65535, not '$MCP_GREENPLUM_PORT'"
+    fi
+    [[ -n ${MCP_GREENPLUM_DATABASE} ]] || die "$E_USAGE" "MCP_GREENPLUM_DATABASE: the database of Greenplum is required"
+    [[ ${MCP_GREENPLUM_DATABASE} =~ ^[A-Za-z0-9_]+$ ]] ||
+      die "$E_USAGE" "MCP_GREENPLUM_DATABASE: a database name, not '$MCP_GREENPLUM_DATABASE'"
+    case ${MCP_GREENPLUM_SSLMODE} in
+      disable|allow|prefer|require|verify-ca|verify-full) ;;
+      *) die "$E_USAGE" "MCP_GREENPLUM_SSLMODE must be disable, allow, prefer, require, verify-ca or verify-full, not '$MCP_GREENPLUM_SSLMODE'" ;;
+    esac
+  fi
   [[ -z ${MCP_CA_SECRET:-} || ${MCP_CA_SECRET} =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] ||
     die "$E_USAGE" "MCP_CA_SECRET: the name of a Secret of the namespace $NS_MCP, not '$MCP_CA_SECRET'"
 }
@@ -226,6 +242,12 @@ mcp_personal_args() {
     printf '%s\n' --set-string "clickhouse.host=$MCP_CLICKHOUSE_HOST" --set-string "clickhouse.port=$MCP_CLICKHOUSE_PORT" \
       --set-string "clickhouse.secure=$secure"
     mcp_ca_arg clickhouse
+  fi
+  # FTR.INFRA.MCPS-0002: the master, the database and the mode of SSL of Greenplum.
+  if mcp_on greenplum; then
+    printf '%s\n' --set-string "greenplum.host=$MCP_GREENPLUM_HOST" --set-string "greenplum.port=$MCP_GREENPLUM_PORT" \
+      --set-string "greenplum.database=$MCP_GREENPLUM_DATABASE" --set-string "greenplum.sslmode=$MCP_GREENPLUM_SSLMODE"
+    mcp_ca_arg greenplum
   fi
 }
 

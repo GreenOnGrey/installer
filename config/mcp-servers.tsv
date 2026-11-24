@@ -9,3 +9,4 @@ jira	512	read-only Jira: each user connects with OAuth of Cloud or a token of Da
 confluence	512	read-only Confluence: each user connects with OAuth of Cloud or a token of Data Center
 gitlab	256	read-only GitLab: each user connects a personal access token with the read_api scope
 clickhouse	256	read-only ClickHouse: each user connects the login and password of a ClickHouse user
+greenplum	256	read-only Greenplum: each user connects the login and password of a Greenplum user

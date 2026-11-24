@@ -193,6 +193,11 @@ Built-in or external, each on its own ([resources.md](resources.md)).
 | `MCP_CLICKHOUSE_HOST` | empty | The host of the ClickHouse HTTP interface, required when `MCP_CLICKHOUSE=true` |
 | `MCP_CLICKHOUSE_PORT` | `8443` | The HTTP port of ClickHouse: `8443` for HTTPS, `8123` for HTTP |
 | `MCP_CLICKHOUSE_SCHEME` | `https` | The scheme of that interface: `https` or `http` |
+| `MCP_GREENPLUM` | `false` | Read-only Greenplum (`FTR.INFRA.MCPS-0002`): `SELECT`, the schema and the definition of a view, the login and password of each user |
+| `MCP_GREENPLUM_HOST` | empty | The master of Greenplum, required when `MCP_GREENPLUM=true` |
+| `MCP_GREENPLUM_PORT` | `5432` | The port of the PostgreSQL protocol of that master |
+| `MCP_GREENPLUM_DATABASE` | `citydrive_db` | The database Greenplum serves |
+| `MCP_GREENPLUM_SSLMODE` | `prefer` | `disable`, `allow`, `prefer`, `require`, `verify-ca` or `verify-full`; the last two need `MCP_CA_SECRET` |
 | `MCP_CA_SECRET` | empty | Secret of the namespace `mcp` with `ca.crt` of the company CA, mounted into the personal servers |
 
 ## Exit codes

@@ -14,6 +14,7 @@ Servers are installed by the release `mcp-servers` in the namespace `mcp` and ar
 | `MCP_CONFLUENCE=true` | Read-only Confluence: pages, spaces, attachments and comments, each user with their own access | ~0.5 / 1 GiB | ~0.4 GB |
 | `MCP_GITLAB=true` | Read-only GitLab: projects, merge requests, issues, pipelines and files, a personal access token of each user | ~0.25 / 0.5 GiB | ~0.3 GB |
 | `MCP_CLICKHOUSE=true` | Read-only ClickHouse: `SELECT` through the HTTP interface with the login and password of each user | ~0.25 / 0.5 GiB | ~0.3 GB |
+| `MCP_GREENPLUM=true` | Read-only Greenplum (`FTR.INFRA.MCPS-0002`): `SELECT`, schemas, tables, columns and view definitions, with the login and password of each user | ~0.25 / 0.5 GiB | ~0.35 GB |
 
 ## Turning a server on and off
 
@@ -48,6 +49,22 @@ token could be sent to a stranger's host. One system of one product per stand.
 | `MCP_CONFLUENCE=true` | `MCP_CONFLUENCE_URL`, `MCP_CONFLUENCE_AUTH_MODE`, `MCP_CONFLUENCE_CLOUD_ID` | the same |
 | `MCP_GITLAB=true` | `MCP_GITLAB_URL`, for example `https://gitlab.company.ru` | a personal access token with the scope `read_api` |
 | `MCP_CLICKHOUSE=true` | `MCP_CLICKHOUSE_HOST`, `MCP_CLICKHOUSE_PORT` (8443 for HTTPS, 8123 for HTTP), `MCP_CLICKHOUSE_SCHEME` | the login and password of a ClickHouse user, entered as `login:password` |
+| `MCP_GREENPLUM=true` | `MCP_GREENPLUM_HOST`, `MCP_GREENPLUM_PORT` (5432), `MCP_GREENPLUM_DATABASE`, `MCP_GREENPLUM_SSLMODE` | the login and password of a Greenplum user, entered as `login:password` |
+
+### Greenplum: a user for reading
+
+The server works only for reading, but the account should be read-only as well: two lines of defence cost
+nothing. Create a role that can read the schemas an analyst needs and nothing else:
+
+```sql
+create role analyst_readonly login password '<password>';
+grant usage on schema mart to analyst_readonly;
+grant select on all tables in schema mart to analyst_readonly;
+alter default privileges in schema mart grant select on tables to analyst_readonly;
+```
+
+Check that the role cannot write (`has_schema_privilege` must answer `false` for `CREATE`), and hand the pair
+`analyst_readonly:<password>` to the analyst: it goes into the item of the catalog as `login:password`.
 
 The systems are usually inside the company network, whose ranges are closed to the servers: list their
 networks in `MCP_EGRESS_ALLOW`, as for a site of the company network. A private certificate of the company CA
