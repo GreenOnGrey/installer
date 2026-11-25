@@ -24,6 +24,21 @@ customConfig:
         .node = .kubernetes.pod_node_name
         del(.kubernetes)
         del(.file)
+        # The level of a line is a field of its own: VictoriaLogs keeps the line as
+        # `_msg` and does not parse it, while the «Log level rules» of the Grafana
+        # datasource classify by a field (FTR.INFRA.INST-0001 R36).
+        parsed = parse_json(.message) ?? null
+        if is_object(parsed) {
+          lvl, err = to_string(parsed.level)
+          if err == null && lvl != "" {
+            .level = downcase(lvl)
+          }
+        } else {
+          found = parse_regex(.message, r'^(?P<lvl>TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)\b') ?? null
+          if found != null {
+            .level = downcase(to_string(found.lvl))
+          }
+        }
   sinks:
     victorialogs:
       type: elasticsearch
