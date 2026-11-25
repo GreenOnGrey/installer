@@ -20,7 +20,11 @@ state_version() { state_data "$STATE_VERSION_CM" "$NS_OBSERVABILITY" hammurapi-i
 
 # config_storable <key> — the key is kept in the cluster: only options and parameters of MCP servers,
 # because a manual `up` would delete the servers without them. The config file sets everything else.
-config_storable() { [[ $1 =~ ^MCP_[A-Z0-9_]+$ && $1 != MCP_CHART_* ]]; }
+# A secret (SECRET_KEYS, for example MCP_SEARCH_KEY) is never kept: it lives in the Secret of the namespace,
+# and a ConfigMap is readable by anyone who may read the namespace (FTR.INFRA.MCPS-0003 R2).
+config_storable() {
+  [[ $1 =~ ^MCP_[A-Z0-9_]+$ && $1 != MCP_CHART_* ]] && [[ " ${SECRET_KEYS[*]} " != *" $1 "* ]]
+}
 
 # write_config — stores MCP settings in the cluster, only values that differ from the defaults: otherwise
 # new defaults of a release would never reach this install.

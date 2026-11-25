@@ -60,6 +60,17 @@ put_cm() { jq -n --argjson d "$3" '{data: $d}' >"$CM_DIR/$1_$2.json"; }
   jq -e '.data == {MCP_SEARCH: "true"}' "$CM_DIR/installer_installer-config.json"
 }
 
+@test "CFG-11: a secret is not kept in the cluster configuration (FTR.INFRA.MCPS-0003 R2)" {
+  MCP_SEARCH=true MCP_SEARCH_KEY=sk-secret-of-deepseek
+  write_config
+  jq -e '.data == {MCP_SEARCH: "true"}' "$CM_DIR/installer_installer-config.json"
+  # and it is not taken from there either
+  put_cm installer installer-config '{"MCP_SEARCH":"true","MCP_SEARCH_KEY":"sk-from-configmap"}'
+  unset MCP_SEARCH_KEY
+  restore_config
+  [ -z "${MCP_SEARCH_KEY:-}" ]
+}
+
 @test "CFG-03: a run without MCP options takes them from the cluster, so a manual up keeps the servers" {
   put_cm installer installer-config '{"MCP_DOCGEN":"true","MCP_DOCLING_MAX_MB":"50"}'
   [ "$MCP_DOCGEN" = false ]
