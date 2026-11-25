@@ -573,6 +573,17 @@ main() {
   vl=$(docs_json "$OUT/retention/helm-victoria-logs.log" | jq -r 'select(.kind == "StatefulSet") | .spec.template.spec.containers[0].args[]' | grep -c -- '-retentionPeriod=1d' || true)
   if [[ $vm == 1 && $vl == 1 ]]; then pass "OBS-02: values from the configuration apply"; else fail "OBS-02: VM_RETENTION/VL_RETENTION did not apply"; fi
 
+  printf '\nRES-13: built-in Postgres\n'
+  local pg_limit pg_params
+  pg_limit=$(docs_json "$OUT/iii/helm-storages.log" | jq -r 'select(.kind == "Cluster") | .spec.resources.limits.memory' | head -1)
+  pg_params=$(docs_json "$OUT/iii/helm-storages.log" | jq -r 'select(.kind == "Cluster")
+      | [.spec.postgresql.parameters.shared_buffers, .spec.postgresql.parameters.max_connections, .spec.postgresql.parameters.work_mem] | join(" ")' | head -1)
+  if [[ $pg_limit == 2Gi && $pg_params == "512MB 50 8MB" ]] && grep -q 'stand-postgres-restarts' "$OUT/iii/helm-grafana.log"; then
+    pass "RES-13: Postgres 2Gi with the parameters of the limit, the alert about restarts is provisioned"
+  else
+    fail "RES-13: Postgres limit '$pg_limit', parameters '$pg_params', the alert rule is missing or not rendered"
+  fi
+
   printf '\nlocal charts\n'
   if helm lint "$ROOT/charts/hammurapi-storages" --set kafka.version=4 --set postgres.image=x >/dev/null &&
     helm lint "$OUT/iii/work/hammurapi-dashboards" >/dev/null; then pass "QUAL-02: helm lint of local charts"; else fail "QUAL-02: helm lint"; fi

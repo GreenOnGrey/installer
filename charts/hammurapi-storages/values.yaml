@@ -7,7 +7,19 @@ postgres:
   storage: 10Gi
   database: hammurapi
   owner: hammurapi
-  resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 512Mi } }
+  # One instance under this limit: both products share it. The collector of Nabu writes
+  # notes and vectors in bulk, and with 512Mi the kubelet killed Postgres with OOMKilled
+  # every half an hour of such a load (FTR.INFRA.INST-0001 R35).
+  resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { cpu: "1", memory: 2Gi } }
+  # Tuned for the limit above: the defaults of Postgres 18 (shared_buffers 128MB,
+  # max_connections 100, maintenance_work_mem 64MB, three autovacuum workers) do not
+  # fit 512Mi, and a single connection of the collector may sort a batch of notes.
+  parameters:
+    shared_buffers: "512MB"
+    effective_cache_size: "1536MB"
+    work_mem: "8MB"
+    maintenance_work_mem: "128MB"
+    max_connections: "50"
 
 kafka:
   mode: internal

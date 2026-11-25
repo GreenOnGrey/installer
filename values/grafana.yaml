@@ -60,6 +60,33 @@ alerting:
               summary: Sandboxes of a custom profile do not start
               # the chart passes alerting through tpl: the Grafana template is escaped from Helm
               description: 'Start failures of a profile with kind=custom in 10 minutes: {{ "{{" }} $values.A {{ "}}" }}. See the dashboard Nabu sandboxes and the section Sandbox images in the Nabu admin area.'
+      - orgId: 1
+        name: stand-storages
+        folder: Storages
+        interval: 1m
+        rules:
+          # FTR.INFRA.INST-0001 R35: a restart of the one instance loses the events and the
+          # writes of both products. The container must never restart: an OOMKilled one
+          # means the memory limit or the parameters are wrong for the stand.
+          - uid: stand-postgres-restarts
+            title: StandPostgresRestarted
+            condition: C
+            data:
+              - refId: A
+                relativeTimeRange: { from: 600, to: 0 }
+                datasourceUid: victoriametrics
+                model: { refId: A, instant: true, expr: 'increase(kube_pod_container_status_restarts_total{namespace="storages", container="postgres"}[10m])' }
+              - refId: C
+                datasourceUid: __expr__
+                model: { refId: C, type: threshold, expression: A, conditions: [{ evaluator: { type: gt, params: [0] } }] }
+            for: 0s
+            noDataState: OK
+            execErrState: Error
+            labels: { severity: critical }
+            annotations:
+              summary: The Postgres of the stand restarted
+              # the chart passes alerting through tpl: the Grafana template is escaped from Helm
+              description: 'Restarts of the container postgres in 10 minutes: {{ "{{" }} $values.A {{ "}}" }}. Check the reason and the memory limit: kubectl -n storages describe pod -l cnpg.io/cluster=hammurapi-pg.'
 sidecar:
   dashboards:
     enabled: true
