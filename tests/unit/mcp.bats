@@ -16,7 +16,7 @@ setup() {
 case "$*" in
   *"get secret "*" -o jsonpath"*) n=$(sed "s/.*get secret \([^ ]*\).*/\1/" <<<"$*"); [[ -f $KUBE_SECRETS/$n ]] && base64 <"$KUBE_SECRETS/$n" ;;
   *"get secret "*) n=$(sed "s/.*get secret \([^ ]*\).*/\1/" <<<"$*"); [[ -f $KUBE_SECRETS/$n ]] ;;
-  *"create -f -"*) m=$(cat); n=$(awk "/^  name:/ {print \$2; exit}" <<<"$m"); v=$(awk "/^  key:/ {print \$2}" <<<"$m" | base64 -d); printf "%s" "$v" >"$KUBE_SECRETS/$n" ;;
+  *"create -f -"*|*"apply -f -"*) m=$(cat); n=$(awk "/^  name:/ {print \$2; exit}" <<<"$m"); v=$(awk "/^  key:/ {print \$2}" <<<"$m" | base64 -d); printf "%s" "$v" >"$KUBE_SECRETS/$n" ;;
   *"delete secret "*) n=$(sed "s/.*delete secret \([^ ]*\).*/\1/" <<<"$*"); rm -f "$KUBE_SECRETS/$n" ;;
   *) exit 0 ;;
 esac'
@@ -155,7 +155,7 @@ esac'
 }
 
 @test "R21 (MCP-09): the networks of the company reach the chart, and nothing when there are none" {
-  MCP_SEARCH=true
+  MCP_SEARCH=true MCP_SEARCH_KEY=k-search
   MCP_EGRESS_ALLOW=""
   run mcp_helm_args
   [ "$status" -eq 0 ]
@@ -164,8 +164,8 @@ esac'
   run mcp_helm_args
   [ "$status" -eq 0 ]
   [[ $output == *'egressAllow=["10.20.30.0/24","10.20.31.5/32"]'* ]]
-  # The policy is not enough: web_url_read of the search refuses a private address itself.
-  [[ $output == *"search.allowPrivateUrls=true"* ]]
+  # FTR.INFRA.MCPS-0003 R7: the search goes through DeepSeek, so the list only opens the policy.
+  [[ $output != *allowPrivateUrls* ]]
   MCP_EGRESS_ALLOW=""
   run mcp_helm_args
   [[ $output != *allowPrivateUrls* ]]
@@ -191,10 +191,54 @@ esac'
   [[ $output == *"MCP_DOCLING must be true or false"* ]]
 }
 
-@test "a wrong list of search engines: code 2" {
-  MCP_SEARCH_ENGINES='bing; rm -rf'
+@test "FTR.INFRA.MCPS-0003 R2, R3: the search needs its key and an https address" {
+  MCP_SEARCH=true
+  # the key may live in the cluster already: a repeated up without it keeps working
+  MCP_SEARCH_KEY=
+  run require_mcp_secrets
+  [ "$status" -eq 2 ]
+  [[ $output == *MCP_SEARCH_KEY* ]]
+  printf 'k-deepseek' >"$KUBE_SECRETS/mcp-deepseek-key"
+  run require_mcp_secrets
+  [ "$status" -eq 0 ]
+  rm -f "$KUBE_SECRETS/mcp-deepseek-key"
+  # a file keeps the key out of the environment of every command
+  printf 'k-from-file' >"$BATS_TEST_TMPDIR/deepseek"
+  MCP_SEARCH_KEY_FILE="$BATS_TEST_TMPDIR/deepseek"
+  run require_mcp_secrets
+  [ "$status" -eq 0 ]
+  MCP_SEARCH_KEY_FILE=
+  # the same key reaches the Secret
+  MCP_SEARCH_KEY="k-search"
+  ensure_mcp_secrets
+  [ "$(cat "$KUBE_SECRETS/mcp-deepseek-key")" = "k-search" ]
+  MCP_SEARCH_KEY="key with spaces"
   run validate_mcp_config
   [ "$status" -eq 2 ]
+  MCP_SEARCH_KEY=k-search
+  run validate_mcp_config
+  [ "$status" -eq 0 ]
+  MCP_SEARCH_URL=http://api.deepseek.com
+  run validate_mcp_config
+  [ "$status" -eq 2 ]
+  [[ $output == *MCP_SEARCH_URL* ]]
+  MCP_SEARCH_URL=https://api.deepseek.com
+  run validate_mcp_config
+  [ "$status" -eq 0 ]
+  # off: neither the key nor the address is needed
+  MCP_SEARCH=false MCP_SEARCH_KEY="" MCP_SEARCH_URL="http://example.com"
+  run validate_mcp_config
+  [ "$status" -eq 0 ]
+}
+
+@test "FTR.INFRA.MCPS-0003 R14: an old MCP_SEARCH_ENGINES does not stop the stand" {
+  MCP_SEARCH=true MCP_SEARCH_KEY=k-search
+  MCP_SEARCH_ENGINES=duckduckgo,bing
+  run validate_mcp_config
+  [ "$status" -eq 0 ]
+  run mcp_helm_args
+  [ "$status" -eq 0 ]
+  [[ $output != *engines* ]]
 }
 
 @test "STD-09: the budget fits" {
@@ -221,20 +265,34 @@ esac'
 }
 
 @test "STD-11, STD-12, STD-03: keys are created once, and those of disabled servers go after the release" {
-  MCP_DOCLING=true MCP_SEARCH=true
+  MCP_DOCLING=true MCP_SEARCH=true MCP_SEARCH_KEY=k-deepseek
   ensure_mcp_secrets
-  [ -f "$KUBE_SECRETS/mcp-docling-key" ] && [ -f "$KUBE_SECRETS/mcp-search-key" ] && [ -f "$KUBE_SECRETS/mcp-searxng-secret" ]
-  [[ $(cat "$KUBE_SECRETS/mcp-search-key") =~ ^[0-9a-f]{64}$ ]]
-  first=$(cat "$KUBE_SECRETS/mcp-search-key")
+  [ -f "$KUBE_SECRETS/mcp-docling-key" ] && [ -f "$KUBE_SECRETS/mcp-deepseek-key" ]
+  # FTR.INFRA.MCPS-0003 R2: the vendor key comes from the configuration, not from openssl
+  [ "$(cat "$KUBE_SECRETS/mcp-deepseek-key")" = "k-deepseek" ]
+  [[ $(cat "$KUBE_SECRETS/mcp-docling-key") =~ ^[0-9a-f]{64}$ ]]
+  first=$(cat "$KUBE_SECRETS/mcp-deepseek-key")
+  : >"$CALLS"
   ensure_mcp_secrets
-  [ "$(cat "$KUBE_SECRETS/mcp-search-key")" = "$first" ]
+  [ "$(cat "$KUBE_SECRETS/mcp-deepseek-key")" = "$first" ]
+  not_called "rollout restart deploy/search"
+  # a changed key is written and the Deployment restarts, so the pod picks it up
+  MCP_SEARCH_KEY=k-new
+  : >"$CALLS"
+  ensure_mcp_secrets
+  [ "$(cat "$KUBE_SECRETS/mcp-deepseek-key")" = "k-new" ]
+  called "rollout restart deploy/search"
   MCP_DOCLING=false
   ensure_mcp_secrets
   # ensure_mcp_secrets deletes nothing: the release still references the keys
   [ -f "$KUBE_SECRETS/mcp-docling-key" ]
   drop_disabled_secrets
   [ ! -f "$KUBE_SECRETS/mcp-docling-key" ] && [ ! -f "$KUBE_SECRETS/mcp-docling-serve-key" ]
-  [ -f "$KUBE_SECRETS/mcp-search-key" ]
+  [ -f "$KUBE_SECRETS/mcp-deepseek-key" ]
+  # FTR.INFRA.MCPS-0003 R1: the secret of a disabled server goes too
+  MCP_SEARCH=false
+  drop_disabled_secrets
+  [ ! -f "$KUBE_SECRETS/mcp-deepseek-key" ]
 }
 
 @test "STD-08 (R3): the budget is exceeded: up stops before any change to the stand" {
@@ -277,9 +335,9 @@ esac'
 }
 
 @test "STD-13: keys reach neither argv nor the log" {
-  MCP_SEARCH=true
+  MCP_SEARCH=true MCP_SEARCH_KEY=k-secret-deepseek
   ensure_mcp_secrets 2>"$BATS_TEST_TMPDIR/log"
-  key=$(cat "$KUBE_SECRETS/mcp-search-key")
+  key=$(cat "$KUBE_SECRETS/mcp-deepseek-key")
   not_grep -F "$key" "$CALLS"
   not_grep -F "$key" "$BATS_TEST_TMPDIR/log"
 }
@@ -298,18 +356,19 @@ esac'
 }
 
 @test "chart values: enabling and configuration; the chart itself sets images" {
-  MCP_DOCLING=true
+  MCP_DOCLING=true MCP_SEARCH_KEY=k-search
   mcp_load
   run mcp_helm_args
   [[ $output == *"docling.enabled=true"* ]]
   [[ $output == *"yandexMail.enabled=false"* ]]
   [[ $output != *image* ]]
-  [[ $output == *"search.engines=[\"duckduckgo\""* ]]
+  # FTR.INFRA.MCPS-0003 R3: the address of the API is a setting of the stand
+  [[ $output == *"search.url=https://api.deepseek.com"* ]]
 }
 
 @test "STD-17, MCP-06: creds: addresses and access mode of enabled servers only" {
-  MCP_SEARCH=true MCP_YANDEX_MAIL=true
-  printf 'k-search' >"$KUBE_SECRETS/mcp-search-key"
+  MCP_SEARCH=true MCP_YANDEX_MAIL=true MCP_SEARCH_KEY=k-search
+  printf 'k-search' >"$KUBE_SECRETS/mcp-deepseek-key"
   run mcp_creds_json
   [ "$(jq -r '.search.url' <<<"$output")" = "http://search.mcp.svc:3000/mcp" ]
   [ "$(jq -r '.search.value' <<<"$output")" = "Bearer k-search" ]
@@ -343,7 +402,7 @@ esac'
   mcp_rpc() {
     case "$2 $3" in
       "- tools/list") echo "HTTP 401" ;;
-      "SEARCH_KEY tools/list") echo '{"result":{"tools":[{"name":"searxng_web_search"},{"name":"web_url_read"}]}}' ;;
+      "SEARCH_KEY tools/list") echo '{"result":{"tools":[{"name":"web_search"},{"name":"web_fetch"}]}}' ;;
       "SEARCH_KEY tools/call") echo '{"result":{"content":[{"text":"https://kubernetes.io"}]}}' ;;
     esac
   }
@@ -355,19 +414,22 @@ esac'
   [ "${MCP_TOOL_COUNT[search]}" = 2 ]
 }
 
-@test "R6: search engines that refuse the server by their limits are a warning; anything else is a failure" {
+@test "R6: a refused or unavailable vendor is a warning; a wrong key or balance is a failure" {
   MCP_SEARCH=true
   CHECK_RESULTS=()
-  mcp_rpc() { echo '{"result":{"content":[{"type":"text","text":"Search Degraded: No results for \"kubernetes\", and these engines failed: brave (too many requests)"}]}}'; }
+  mcp_rpc() { echo '{"result":{"isError":true,"content":[{"type":"text","text":"the search rate limit is exhausted: retry later"}]}}'; }
   check_mcp_search_query http://search.mcp.svc:3000/mcp SEARCH_KEY
   [[ ${CHECK_RESULTS[0]} == "mcp-search-query|warn|the server answers"* ]]
   mcp_rpc() { echo "curl: (7) Failed to connect"; }
   check_mcp_search_query http://search.mcp.svc:3000/mcp SEARCH_KEY
   [[ ${CHECK_RESULTS[1]} == "mcp-search-query|fail|"* ]]
-  # An engine that does not answer at all may be the network of the stand: a failure.
-  mcp_rpc() { echo '{"result":{"content":[{"type":"text","text":"No results, and these engines failed: brave (too many requests), bing (timeout)"}]}}'; }
+  # FTR.INFRA.MCPS-0003 R10: a wrong key or an empty balance never fixes itself.
+  mcp_rpc() { echo '{"result":{"isError":true,"content":[{"type":"text","text":"the balance of the search account ran out: ask the operator of the stand"}]}}'; }
   check_mcp_search_query http://search.mcp.svc:3000/mcp SEARCH_KEY
-  [[ ${CHECK_RESULTS[2]} == "mcp-search-query|fail|"* ]]
+  [[ ${CHECK_RESULTS[2]} == "mcp-search-query|fail|the key or the balance"* ]]
+  mcp_rpc() { echo "HTTP 401"; }
+  check_mcp_search_query http://search.mcp.svc:3000/mcp SEARCH_KEY
+  [[ ${CHECK_RESULTS[3]} == "mcp-search-query|fail|"* ]]
 }
 
 @test "R6: a warning does not fail the checks; status shows it and its JSON keeps ok" {

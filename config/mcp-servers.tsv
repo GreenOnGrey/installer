@@ -3,7 +3,7 @@
 # against the chart; a server missing here still installs by its MCP_<NAME>=true in the config file.
 docgen	896	documents: generates office files, converts them, previews them on the site of Nabu
 docling	1552	document conversion: PDF, office files and scans to text
-search	384	web search through SearXNG
+search	128	web search through DeepSeek Search and Fetch
 yandex-mail	64	read-only Yandex Mail: each user connects a mailbox through Yandex OAuth
 jira	512	read-only Jira: each user connects with OAuth of Cloud or a token of Data Center
 confluence	512	read-only Confluence: each user connects with OAuth of Cloud or a token of Data Center

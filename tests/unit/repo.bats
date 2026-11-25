@@ -136,11 +136,11 @@ fake_release() {
 @test "FTR.NAB.CMN-0006: MCP server options from GitHub go to the environment of up" {
   local d=$BATS_TEST_TMPDIR/prod
   mkdir -p "$d/releases/v1.0.0" "$d/logs"
-  printf '#!/usr/bin/env bash\necho "mcp=${MCP_DOCLING:-}/${MCP_YANDEX_MAIL:-}/${MCP_DOCGEN:-} engines=${MCP_SEARCH_ENGINES:-}"\n' >"$d/releases/v1.0.0/installer"
+  printf '#!/usr/bin/env bash\necho "mcp=${MCP_DOCLING:-}/${MCP_YANDEX_MAIL:-}/${MCP_DOCGEN:-} url=${MCP_SEARCH_URL:-}"\n' >"$d/releases/v1.0.0/installer"
   run bash "$ROOT/.github/scripts/deploy-remote.sh" up "$d" v1.0.0 abc anna \
-    <<<$'MCP_DOCLING=true\nMCP_YANDEX_MAIL=true\nMCP_DOCGEN=true\nMCP_SEARCH_ENGINES=bing,mojeek\n'
+    <<<$'MCP_DOCLING=true\nMCP_YANDEX_MAIL=true\nMCP_DOCGEN=true\nMCP_SEARCH_URL=https://api.deepseek.com\n'
   [ "$status" -eq 0 ]
-  [[ $output == *"mcp=true/true/true engines=bing,mojeek"* ]]
+  [[ $output == *"mcp=true/true/true url=https://api.deepseek.com"* ]]
 }
 
 @test "PUB-15: a foreign parameter from GitHub: code 2, up does not start" {

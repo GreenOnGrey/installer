@@ -177,8 +177,10 @@ Built-in or external, each on its own ([resources.md](resources.md)).
 | `MCP_YANDEX_MAIL` | `false` | Read-only Yandex Mail |
 | `MCP_DOCGEN` | `false` | Creating and converting documents, office file preview |
 | `MCP_DOCLING_MAX_MB` | `25` | Largest document of `docling-serve`, MB |
-| `MCP_SEARCH_ENGINES` | `duckduckgo,bing,wikipedia,github,stackoverflow,arxiv` | SearXNG engines |
-| `MCP_EGRESS_ALLOW` | empty | Networks of the company the MCP servers reach besides the internet, comma-separated CIDRs. The private ranges are closed to them, and the search refuses a private URL itself: the list opens the networks in the network policy and turns that refusal off |
+| `MCP_SEARCH_ENGINES` | — | Removed with SearXNG (`FTR.INFRA.MCPS-0003` R14): the key in an old `local.env` is ignored |
+| `MCP_SEARCH_KEY` | empty | DeepSeek key of the web search, required when `MCP_SEARCH=true`; a secret, so it comes from the environment or `MCP_SEARCH_KEY_FILE` |
+| `MCP_SEARCH_URL` | `https://api.deepseek.com` | Address of the DeepSeek API, `https://` only |
+| `MCP_EGRESS_ALLOW` | empty | Networks of the company the MCP servers reach besides the internet, comma-separated CIDRs. The private ranges are closed to them: the list opens the networks in the network policy. The web search reads pages through DeepSeek and does not use the list |
 | `MCP_JIRA` | `false` | Read-only Jira, personal access of each user |
 | `MCP_JIRA_URL` | empty | The address of Jira, required when `MCP_JIRA=true` |
 | `MCP_JIRA_AUTH_MODE` | `cloud` | `cloud` — users sign in through OAuth 2.0 (3LO); `dc` — Server/Data Center, a personal access token |

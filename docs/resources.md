@@ -73,4 +73,4 @@ At the end of `install` and in `status`:
 - the images of the probes are pulled before the checks, and a probe that does not start names the waiting reason (`ImagePullBackOff`, `ContainerCreating`);
 - public access, the products and the MCP servers answer.
 
-A failure ends with code `15` and names the check. A check that depends on a service outside the install only warns: when the search engines refuse SearXNG, `mcp-search-query` shows `!`, and the run goes on.
+A failure ends with code `15` and names the check. A check that depends on a service outside the install only warns: when DeepSeek answers with a rate limit or is unavailable, `mcp-search-query` shows `!`, and the run goes on. A wrong search key or an empty balance of the search account is a failure: it never fixes itself.

@@ -562,13 +562,14 @@ wizard_mcp() {
   if [[ ${MCP_DOCLING:-false} == true ]]; then
     say_warn "  docling is the heaviest server (limit about 5 GiB): with the stand it can exhaust a 15 GB machine; 16 GB with a 12g profile are the practical minimum."
   fi
-  # R21: the web search opens a site of the company network only when its network is open to the servers.
+  # FTR.INFRA.MCPS-0003 R2: the web search is a paid API of DeepSeek with a key of the stand.
   if [[ ${MCP_SEARCH:-false} == true ]]; then
-    say "The servers reach the internet only: the private ranges of the company network are closed to them." \
-      "If the search must open a site of that network, give its networks — the installer opens them to the servers."
-    ask MCP_EGRESS_ALLOW "Networks of the company for the search, Enter for none" \
-      '^(([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}(,([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2})*)?$' \
-      "CIDRs separated by commas, such as 10.20.30.0/24"
+    say "Web search: the agent searches through DeepSeek Search and Fetch, a paid API — a successful call costs" \
+      "\$0.00075. The key of the stand is needed (a default or svip key of platform.deepseek.com);" \
+      "  it goes to the secret mcp-deepseek-key and is never written to a file of the stand."
+    ask_secret MCP_SEARCH_KEY "The DeepSeek key of the web search"
+    ask MCP_SEARCH_URL "The address of the DeepSeek API" '^https://[^/[:space:]]+(/[^[:space:]]*)?$' \
+      "an https:// address, such as https://api.deepseek.com" "https://api.deepseek.com"
   fi
   if [[ ${MCP_YANDEX_MAIL:-false} == true ]]; then
     say "Yandex Mail: after the install, add the server to the catalog of Nabu (./installer creds shows its address)," \
@@ -588,6 +589,13 @@ wizard_personal_mcp() {
     || ${MCP_CLICKHOUSE:-false} == true || ${MCP_GREENPLUM:-false} == true ]]; then
     say "Jira, Confluence, GitLab, ClickHouse and Greenplum are already in the company network: give their addresses." \
       "The users connect them in Nabu with their own account, so no token is asked here."
+    # FTR.INFRA.INST-0001 R21: the private ranges are closed to the servers; the networks of the company
+    # systems open them one by one. The web search does not use this list (FTR.INFRA.MCPS-0003 R7).
+    say "The private ranges of the company network are closed to the servers: give the networks of the systems." \
+      "The installer opens exactly these networks to the servers."
+    ask MCP_EGRESS_ALLOW "Networks of the company systems, Enter for none" \
+      '^(([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}(,([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2})*)?$' \
+      "CIDRs separated by commas, such as 10.20.30.0/24"
   fi
   for srv in jira confluence; do
     local opt="MCP_${srv^^}" url mode cloud_id
