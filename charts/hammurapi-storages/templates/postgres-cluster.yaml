@@ -16,4 +16,8 @@ spec:
       secret: { name: postgres-credentials }
   storage: { size: {{ .Values.postgres.storage }} }
   resources: {{- toYaml .Values.postgres.resources | nindent 4 }}
+  {{- with .Values.postgres.parameters }}
+  postgresql:
+    parameters: {{- toYaml . | nindent 6 }}
+  {{- end }}
 {{- end }}

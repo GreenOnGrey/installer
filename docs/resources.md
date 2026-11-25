@@ -16,6 +16,8 @@ Consumers see the same stable addresses and secrets in the namespace `storages` 
 
 Postgres 18 (CloudNativePG, one instance), Kafka 4 (Strimzi, KRaft, one broker) and SeaweedFS (S3, one pod) run in the cluster with volumes of `PG_STORAGE`, `KAFKA_STORAGE` and `S3_STORAGE`. Their passwords are generated on the first `install` and kept only in Kubernetes secrets.
 
+The built-in Postgres gets 2 GiB of memory with its parameters tuned for that limit (FTR.INFRA.INST-0001 R35): the default 512 MiB killed the container with `OOMKilled` under the writes of the memory collector of Nabu. A restart of the container raises the Grafana alert `StandPostgresRestarted`.
+
 They are single instances without high availability and without backups of their own.
 
 ## Backups
