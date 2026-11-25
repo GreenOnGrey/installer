@@ -135,7 +135,8 @@ jobs:
           MCP_YANDEX_MAIL: ${{ vars.MCP_YANDEX_MAIL }}
           MCP_DOCGEN: ${{ vars.MCP_DOCGEN }}
           MCP_DOCLING_MAX_MB: ${{ vars.MCP_DOCLING_MAX_MB }}
-          MCP_SEARCH_ENGINES: ${{ vars.MCP_SEARCH_ENGINES }}
+          MCP_SEARCH_URL: ${{ vars.MCP_SEARCH_URL }}
+          MCP_SEARCH_KEY: ${{ secrets.MCP_SEARCH_KEY }}
         # The production machine needs no access to GitHub (deploy keys are forbidden by the
         # organization's policy): the runner passes it the tag export over the same SSH.
         run: |
@@ -149,7 +150,7 @@ jobs:
           # Set parameters go to the stdin of the rollout (a secret reaches neither argv nor disk).
           for k in PUBLIC_ACCESS ACME_EMAIL ACME_ISSUER PUBLIC_BASE_DOMAIN PUBLIC_IP \
             GRAFANA_GITHUB_CLIENT_ID GRAFANA_GITHUB_ORG GRAFANA_GITHUB_CLIENT_SECRET \
-            MCP_DOCLING MCP_SEARCH MCP_YANDEX_MAIL MCP_DOCGEN MCP_DOCLING_MAX_MB MCP_SEARCH_ENGINES; do
+            MCP_DOCLING MCP_SEARCH MCP_YANDEX_MAIL MCP_DOCGEN MCP_DOCLING_MAX_MB MCP_SEARCH_URL MCP_SEARCH_KEY; do
             if [[ -n ${!k} ]]; then printf '%s=%s\n' "$k" "$(printf '%s' "${!k}" | tr -d '\r\n')"; fi
           done | remote "bash $PROD_DIR/deploy-remote.sh up $PROD_DIR $TAG $SHA $ACTOR"
 

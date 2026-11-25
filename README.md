@@ -56,7 +56,7 @@ Settings of the GitHub environment `production`:
 | `GRAFANA_GITHUB_CLIENT_ID`, `GRAFANA_GITHUB_ORG` | variables | Grafana sign-in through GitHub | The organization's OAuth app; the default organization is `GreenOnGrey` ([docs/hammurapi.md](docs/hammurapi.md#12-github-oauth-app-for-grafana)) |
 | `GRAFANA_GITHUB_CLIENT_SECRET` | secret | Grafana sign-in through GitHub | Client secret of the OAuth app |
 | `MCP_DOCLING`, `MCP_SEARCH`, `MCP_YANDEX_MAIL`, `MCP_DOCGEN` | variables | MCP servers | `true` enables a server, `false` disables it; an unset variable keeps the value from `local.env` or the cluster |
-| `MCP_DOCLING_MAX_MB`, `MCP_SEARCH_ENGINES` | variables | MCP servers | Server parameters |
+| `MCP_DOCLING_MAX_MB`, `MCP_SEARCH_KEY`, `MCP_SEARCH_URL` | variables, secrets | MCP servers | Server parameters; the DeepSeek key of the web search is a secret |
 
 Preparing the production machine is described in [docs/gcp.md](docs/gcp.md#production-machine).
 

@@ -15,8 +15,9 @@ MCP_URL_RE='^https?://[^/[:space:]]+(/[^[:space:]]*)?$'
 MCP_SERVERS=()
 # chart value enabling a server; MCP service and port; Deployments (readiness in status)
 declare -gA MCP_VALUES_KEY=() MCP_SERVICE=() MCP_DEPLOYMENTS=()
-# secrets `up` creates for a server; the platform access key, only for platform servers
-declare -gA MCP_SECRETS=() MCP_KEY_SECRET=()
+# secrets `up` creates for a server; their values come from the configuration (`configSecrets` of the description);
+# the platform access key, only for platform servers
+declare -gA MCP_SECRETS=() MCP_CONFIG_SECRETS=() MCP_KEY_SECRET=()
 # tools the check expects in tools/list
 declare -gA MCP_WANT_TOOLS=()
 # OAuth of personal servers, their personal token and hints for the Nabu catalog entry (creds)
@@ -90,6 +91,7 @@ mcp_try_load() {
     MCP_SERVICE[$srv]=$(jq -r .service "$f")
     MCP_DEPLOYMENTS[$srv]=$(jq -r '.deployments | join(" ")' "$f")
     MCP_SECRETS[$srv]=$(jq -r '.secrets | join(" ")' "$f")
+    MCP_CONFIG_SECRETS[$srv]=$(jq -c '.configSecrets // []' "$f")
     MCP_KEY_SECRET[$srv]=$(jq -r '.keySecret // empty' "$f")
     MCP_WANT_TOOLS[$srv]=$(jq -r '.wantTools | join(" ")' "$f")
     MCP_OAUTH[$srv]=$(jq -c '.oauth // empty' "$f")
@@ -133,8 +135,14 @@ validate_mcp_config() {
   if ! [[ $MCP_DOCLING_MAX_MB =~ ^[0-9]+$ ]] || ((MCP_DOCLING_MAX_MB < 1 || MCP_DOCLING_MAX_MB > 200)); then
     die "$E_USAGE" "MCP_DOCLING_MAX_MB: a whole number of megabytes from 1 to 200"
   fi
-  [[ $MCP_SEARCH_ENGINES =~ ^[a-z0-9_]+(,[a-z0-9_]+)*$ ]] ||
-    die "$E_USAGE" "MCP_SEARCH_ENGINES: comma-separated SearXNG engine names, such as duckduckgo,bing"
+  # FTR.INFRA.MCPS-0003 R2, R3: the address of the DeepSeek API. The key itself is a secret: it comes from the
+  # environment or MCP_SEARCH_KEY_FILE (secret_value), never from the config file (SECRET_KEYS).
+  if [[ ${MCP_SEARCH:-false} == true ]]; then
+    [[ -z ${MCP_SEARCH_KEY:-} || ${MCP_SEARCH_KEY} != *[[:space:]]* ]] ||
+      die "$E_USAGE" "MCP_SEARCH_KEY: the key must not contain spaces"
+    [[ -z ${MCP_SEARCH_URL:-} || ${MCP_SEARCH_URL} =~ ^https://[^/[:space:]]+(/[^[:space:]]*)?$ ]] ||
+      die "$E_USAGE" "MCP_SEARCH_URL: an https:// address of the DeepSeek API, such as https://api.deepseek.com"
+  fi
   # R21: the networks of the company the servers reach besides the internet (a site of the company network).
   local cidr='([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}'
   [[ -z ${MCP_EGRESS_ALLOW:-} || ${MCP_EGRESS_ALLOW} =~ ^$cidr(,$cidr)*$ ]] ||
@@ -190,26 +198,40 @@ validate_personal_mcp() {
     die "$E_USAGE" "MCP_CA_SECRET: the name of a Secret of the namespace $NS_MCP, not '$MCP_CA_SECRET'"
 }
 
+# require_mcp_secrets — a secret whose value comes from the configuration must have that value or already exist
+# in the cluster: a repeated `up` without the parameter keeps the key, as every other secret does. Runs before the
+# namespace is created, so a missing key changes nothing (FTR.INFRA.MCPS-0003 R2).
+require_mcp_secrets() {
+  local srv name key option value
+  mcp_load
+  while read -r srv; do
+    while IFS=$'\t' read -r name key option; do
+      [[ -n $name ]] || continue
+      value=$(secret_value "$option")
+      [[ -n $value ]] && continue
+      kc -n "$NS_MCP" get secret "$name" >/dev/null 2>&1 && continue
+      die "$E_USAGE" "$option: $(mcp_opt "$srv")=true needs the key of secret $name: set $option or ${option}_FILE"
+    done < <(jq -r '.[] | [.secret, .key, .option] | @tsv' <<<"${MCP_CONFIG_SECRETS[$srv]:-[]}")
+  done < <(mcp_enabled_list)
+}
+
 # mcp_helm_args — enabling servers and configuration parameters. Images and their versions
 # are in the values of the chart pinned by MCP_CHART_VERSION.
 mcp_helm_args() {
-  local engines srv
+  local srv args=()
   mcp_load
-  engines=$(tr ',' '\n' <<<"$MCP_SEARCH_ENGINES" | jq -Rnc '[inputs | select(length > 0)]' 2>/dev/null ||
-    printf '[]')
   for srv in "${MCP_SERVERS[@]}"; do
     printf '%s\n' --set "${MCP_VALUES_KEY[$srv]}.enabled=$(mcp_on "$srv" && echo true || echo false)"
   done
-  printf '%s\n' \
-    --set "docling.serve.maxFileMB=$MCP_DOCLING_MAX_MB" \
-    --set-json "search.engines=$engines" \
-    --set-string "s3.namespace=$NS_STORAGES"
+  args=(--set "docling.serve.maxFileMB=$MCP_DOCLING_MAX_MB")
+  # an empty address keeps the default of the chart; validate_mcp_config checked the scheme
+  [[ -z ${MCP_SEARCH_URL:-} ]] || args+=(--set-string "search.url=$MCP_SEARCH_URL")
+  printf '%s\n' "${args[@]}" --set-string "s3.namespace=$NS_STORAGES"
   # FTR.INFRA.INST-0001 R21: the networks of the company besides the internet — the private ranges are closed to
-  # the servers, so the web search opens a site of the company network only when its network is here. The policy is
-  # not enough: web_url_read of the search refuses a private address itself, so the same list turns that off.
+  # the servers. The web search of FTR.INFRA.MCPS-0003 does not read such networks: it goes through DeepSeek, so
+  # the list only opens the policy and no longer changes the search.
   if [[ -n ${MCP_EGRESS_ALLOW:-} ]]; then
-    printf '%s\n' --set-json "egressAllow=$(tr ',' '\n' <<<"$MCP_EGRESS_ALLOW" | sed '/^$/d' | jq -Rnc '[inputs]')" \
-      --set search.allowPrivateUrls=true
+    printf '%s\n' --set-json "egressAllow=$(tr ',' '\n' <<<"$MCP_EGRESS_ALLOW" | sed '/^$/d' | jq -Rnc '[inputs]')"
   fi
   # FTR.INFRA.MCPS-0001 R4: the address of a company system is a setting of the stand, not of a user.
   mcp_personal_args
@@ -253,9 +275,11 @@ mcp_personal_args() {
 
 gen_key() { openssl rand -hex 32; }
 
-# ensure_mcp_secrets — keys of enabled servers; existing ones stay (STD-12).
+# ensure_mcp_secrets — keys of enabled servers; existing ones stay (STD-12). A secret of `configSecrets` takes its
+# value from the configuration of the stand (FTR.INFRA.MCPS-0003 R2): a changed value is written and the
+# Deployment of the server restarts, because an environment variable of a Secret reaches a pod only on restart.
 ensure_mcp_secrets() {
-  local srv name
+  local srv name changed
   mcp_load
   while read -r srv; do
     for name in ${MCP_SECRETS[$srv]:-}; do
@@ -266,7 +290,33 @@ ensure_mcp_secrets() {
         ensure_secret "$NS_MCP" "$name" Opaque key "$(gen_key)"
       fi
     done
+    changed=$(mcp_config_secrets "$srv")
+    if [[ -n $changed ]]; then
+      local dep
+      for dep in ${MCP_DEPLOYMENTS[$srv]:-}; do
+        kc -n "$NS_MCP" get deploy "$dep" >/dev/null 2>&1 || continue
+        kc -n "$NS_MCP" rollout restart "deploy/$dep" >/dev/null && log "$srv restarted: its key changed"
+      done
+    fi
   done < <(mcp_enabled_list)
+}
+
+# mcp_config_secrets <server> — creates or updates the secrets whose value comes from the configuration; prints the
+# names whose value changed. An empty parameter is skipped: validate_mcp_config refused an enabled server without it.
+mcp_config_secrets() {
+  local srv=$1 json name key option value before
+  json=${MCP_CONFIG_SECRETS[$srv]:-[]}
+  [[ $json != "[]" ]] || return 0
+  while IFS=$'\t' read -r name key option; do
+    [[ -n $name ]] || continue
+    value=$(secret_value "$option")
+    [[ -n $value ]] || continue
+    before=$(secret_key "$NS_MCP" "$name" "$key" 2>/dev/null || true)
+    if [[ $before != "$value" ]]; then
+      put_secret "$NS_MCP" "$name" Opaque "$key" "$value"
+      printf '%s\n' "$name"
+    fi
+  done < <(jq -r '.[] | [.secret, .key, .option] | @tsv' <<<"$json")
 }
 
 # sync_preview_secret — the secret nabu-docs-preview for the Nabu api (FTR.NAB.CHAT-0003
@@ -301,13 +351,17 @@ sync_preview_secret() {
 # drop_disabled_secrets — keys of disabled servers (STD-03); only after a
 # release that no longer references them.
 drop_disabled_secrets() {
-  local srv name
+  local srv name changed
   mcp_load
   for srv in "${MCP_SERVERS[@]}"; do
     mcp_on "$srv" && continue
     for name in ${MCP_SECRETS[$srv]:-}; do
       kc -n "$NS_MCP" delete secret "$name" --ignore-not-found >/dev/null
     done
+    # the secret of a disabled server whose value came from the configuration (FTR.INFRA.MCPS-0003 R1)
+    while read -r name; do
+      [[ -n $name ]] && kc -n "$NS_MCP" delete secret "$name" --ignore-not-found >/dev/null
+    done < <(jq -r '.[] | .secret' <<<"${MCP_CONFIG_SECRETS[$srv]:-[]}")
   done
 }
 
@@ -428,6 +482,7 @@ deploy_mcp() {
     return
   fi
   mcp_load
+  require_mcp_secrets
   ensure_namespace "$NS_MCP"
   ensure_mcp_secrets
   copy_pull_secret
@@ -600,24 +655,20 @@ check_mcp_server() {
   esac
 }
 
-# search_refusals <answer> — "limits" when SearXNG names the engines that failed and each of them refused by its
-# limits (too many requests, CAPTCHA, access denied, suspended); nothing otherwise.
-search_refusals() {
-  local reasons
-  reasons=$(jq -r '.result.content[0].text // ""' 2>/dev/null <<<"$1" | grep -o 'engines failed:.*' | grep -oE '\([^)]*\)' || true)
-  [[ -n $reasons ]] || return 0
-  grep -viqE 'too many requests|captcha|access denied|suspended' <<<"$reasons" || echo limits
-}
-
+# check_mcp_search_query — one live web_search (FTR.INFRA.MCPS-0003 R10). It is the only paid call of the stand
+# checks: it proves the key and the balance of DeepSeek. A wrong key or an empty balance never fixes itself, so it
+# is a failure; an exhausted rate limit or an unavailable vendor is a warning, and the install goes on.
 check_mcp_search_query() {
-  local out
-  out=$(mcp_rpc "$1" "$2" tools/call '{"name":"searxng_web_search","arguments":{"query":"kubernetes"}}')
+  local out text
+  out=$(mcp_rpc "$1" "$2" tools/call '{"name":"web_search","arguments":{"query":"kubernetes"}}')
+  text=$(jq -r '.result.content[0].text // ""' 2>/dev/null <<<"$out" || true)
   if jq -e '.result.isError != true and ((.result.content[0].text // "") | test("http"))' >/dev/null 2>&1 <<<"$out"; then
     record mcp-search-query ok "the query kubernetes found pages"
-  elif [[ $(search_refusals "$out") == limits ]]; then
-    # The server works, and every engine that failed refused it by its limits (data center addresses). An engine
-    # that does not answer at all stays a failure: then the network of the stand may be broken.
-    record mcp-search-query warn "the server answers, but the search engines refused it: ${out:0:160}"
+  elif [[ $out == "HTTP 401" || $out == "HTTP 402" ]] ||
+    grep -qiE 'not accepted|balance|not configured|MCP_SEARCH_KEY' <<<"$text"; then
+    record mcp-search-query fail "the key or the balance of DeepSeek: ${out:0:160}"
+  elif grep -qiE 'rate limit|unavailable|no results|retry later' <<<"$text"; then
+    record mcp-search-query warn "the server answers, DeepSeek refused or is unavailable: ${out:0:160}"
   else
     record mcp-search-query fail "the query kubernetes found nothing: ${out:0:160}"
   fi

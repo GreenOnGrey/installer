@@ -7,7 +7,7 @@ Servers are installed by the release `mcp-servers` in the namespace `mcp` and ar
 | Option | Server | Memory (request / limit) | Image, disk |
 |---|---|---|---|
 | `MCP_DOCLING=true` | Document conversion: `docling-serve` (CPU, OCR `ru`, `en`) and `docling-mcp` | ~1.5 / 5 GiB | ~4.4 GB |
-| `MCP_SEARCH=true` | Web search: SearXNG and `mcp-searxng` | ~0.4 / 0.8 GiB | ~0.3 GB |
+| `MCP_SEARCH=true` | Web search (`FTR.INFRA.MCPS-0003`): our own server `search-mcp` over the DeepSeek Search and Fetch APIs | ~0.13 / 0.25 GiB | ~0.2 GB |
 | `MCP_YANDEX_MAIL=true` | Read-only Yandex Mail: our own server `imap-mcp` | ~0.06 / 0.25 GiB | ~0.1 GB |
 | `MCP_DOCGEN=true` | Creating, editing and converting documents (`FTR.NAB.CHAT-0003`): our own server `docgen-mcp` and `doc-convert` (Gotenberg, which is LibreOffice and Chromium without network, and the `legacy` sidecar); it also turns on the DOCX/XLSX/PPTX preview in Nabu | ~0.9 / 4 GiB | ~2.5 GB |
 | `MCP_JIRA=true` | Read-only Jira (`FTR.INFRA.MCPS-0001`): issues, projects, sprints and comments, each user with their own access | ~0.5 / 1 GiB | ~0.4 GB |
@@ -24,7 +24,7 @@ A server enabled on a running stand is deployed by `update mcp-servers` alone, w
 
 ## A site of the company network
 
-The servers reach the internet only, and the web search refuses a URL whose address is private by itself. A page of the company network needs both, and `MCP_EGRESS_ALLOW` sets both: it opens the listed networks in the network policy and turns the refusal of the search off (`search.allowPrivateUrls` of the chart). Give the networks of the pages the agents must read, not the whole company network.
+The servers reach the internet and, besides it, the networks of `MCP_EGRESS_ALLOW`: the private ranges are closed to them, and the list opens the listed networks in the network policy. Give the networks of the systems the servers must reach, not the whole company network. The web search does not use the list: it reads pages through DeepSeek, and an address of the company network stays unreadable (`FTR.INFRA.MCPS-0003` R7).
 
 ## Memory
 
@@ -87,7 +87,9 @@ change data.
 
 ## Parameters
 
-`MCP_DOCLING_MAX_MB` is the document size limit of `docling-serve`, and `MCP_SEARCH_ENGINES` lists the SearXNG engines. Access keys are generated on the first `install` and kept in secrets of the namespace `mcp`. With `MCP_DOCGEN=true`, `install` creates the secret `nabu-docs-preview` in the namespace `nabu` (addresses and keys of `doc-convert` and `docgen`) and restarts the Nabu `api` if the secret changed. Without it the office file preview is off.
+`MCP_DOCLING_MAX_MB` is the document size limit of `docling-serve`. The web search needs a DeepSeek key: `MCP_SEARCH_KEY` (a key of the `default` or `svip` group of `platform.deepseek.com`, an APIYI-like mirror works too) and `MCP_SEARCH_URL` (an `https://` address, `https://api.deepseek.com` by default). The key is a secret: it comes from the environment of the installer or from `MCP_SEARCH_KEY_FILE`, never as a line of `local.env` (that is refused), and never reaches the values or the logs. While `MCP_SEARCH=true` and neither the variable nor the Secret `mcp-deepseek-key` exists, `install` exits with code 2 before anything changes; a repeated `install` without the variable keeps the key of the cluster. A changed key is written to the Secret on the next `install`, and the server restarts. Access keys of the other servers are generated on the first `install` and kept in secrets of the namespace `mcp`. With `MCP_DOCGEN=true`, `install` creates the secret `nabu-docs-preview` in the namespace `nabu` (addresses and keys of `doc-convert` and `docgen`) and restarts the Nabu `api` if the secret changed. Without it the office file preview is off.
+
+Two tools of the search are allowed by default: `web_search` (a query up to 128 characters with the operators `site:`, `lang:`, `after:` inside; `count` 1–50; `need_content` for the page body) and `web_fetch` (one public page as Markdown). Every successful call costs $0.00075 at DeepSeek; a refused call costs nothing. After upgrading the chart from the SearXNG version, press **Check** on the catalog item and save it: the item still lists `searxng_web_search` and `web_url_read`, and until it is saved the agent sees no search tools at all.
 
 ## Adding to the Nabu catalog
 
@@ -106,7 +108,7 @@ change data.
   | `pdf_tools` | PDF: merging, splitting into parts (`.zip`), rotating and extracting pages | `sources` (list) | `dest` |
 
   The file limit is 25 MB and the result limit is 50 MB. Mark all six tools as writing only to the space: in mail threads they run without a confirmation (overwriting a file asks for one).
-- **Web search**: `http://search.mcp.svc:3000/mcp`, platform, `Authorization: Bearer <key>`.
+- **Web search**: `http://search.mcp.svc:3000/mcp`, platform, `Authorization: Bearer <key>` (the same key is the DeepSeek key). After the check, allow `web_search` and `web_fetch`; an item saved before the update still lists the old tools, so press **Check** and save it again.
 - **Jira**: `http://jira.mcp.svc:8000/mcp`, personal. For Cloud — OAuth: authorize and token addresses from
   `creds`, the client id and secret of the Atlassian app, the cloud id from the app page, the read scopes. For
   Data Center — the kind of access «token», the hint of `creds` says what to paste. After the check, allow the
