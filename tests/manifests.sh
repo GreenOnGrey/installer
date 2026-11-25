@@ -584,6 +584,13 @@ main() {
     fail "RES-13: Postgres limit '$pg_limit', parameters '$pg_params', the alert rule is missing or not rendered"
   fi
 
+  printf '\nRES-14: log level\n'
+  if grep -q 'parse_json(.message)' "$OUT/iii/helm-vector.log" && grep -q 'logLevelRules' "$OUT/iii/helm-grafana.log"; then
+    pass "RES-14: the level is a field of Vector and a rule of the Grafana datasource"
+  else
+    fail "RES-14: no level extraction in Vector or no logLevelRules in the datasource"
+  fi
+
   printf '\nlocal charts\n'
   if helm lint "$ROOT/charts/hammurapi-storages" --set kafka.version=4 --set postgres.image=x >/dev/null &&
     helm lint "$OUT/iii/work/hammurapi-dashboards" >/dev/null; then pass "QUAL-02: helm lint of local charts"; else fail "QUAL-02: helm lint"; fi

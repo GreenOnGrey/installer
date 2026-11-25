@@ -56,7 +56,7 @@ An example with Google Cloud (Cloud SQL, Managed Service for Apache Kafka, Cloud
 - VictoriaMetrics, keeping metrics for `VM_RETENTION`;
 - VictoriaLogs, keeping logs for `VL_RETENTION`;
 - vmagent with kube-state-metrics and node-exporter;
-- Vector, which collects the logs of all pods;
+- Vector, which collects the logs of all pods; the level of a line (`level`) is a field of its own, so the Grafana datasource classifies and filters by it (FTR.INFRA.INST-0001 R36);
 - Grafana, with its dashboards and alert rules.
 
 `OBSERVABILITY=false` installs none of them and removes them if they are installed. The volumes of metrics and logs stay; the data of Grafana is deleted.

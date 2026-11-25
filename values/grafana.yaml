@@ -28,6 +28,16 @@ datasources:
         access: proxy
         url: http://victoria-logs-victoria-logs-single-server:9428
         editable: false
+        jsonData:
+          # FTR.INFRA.INST-0001 R36: the plugin classifies a line by rules over a
+          # field, and without a rule every line is «unknown». The field `level`
+          # comes from Vector (values/vector.yaml); the first match wins.
+          logLevelRules:
+            - { field: level, operator: regex, value: "^(fatal|critical|panic)$", level: critical, enabled: true }
+            - { field: level, operator: equals, value: "error", level: error, enabled: true }
+            - { field: level, operator: equals, value: "warn", level: warning, enabled: true }
+            - { field: level, operator: equals, value: "info", level: info, enabled: true }
+            - { field: level, operator: equals, value: "debug", level: debug, enabled: true }
 # Grafana alert rules (unified alerting; Grafana 11+ does not support rules in
 # panels). See the state in Alerting → Alert rules; the stand sets up no
 # notification channels.
