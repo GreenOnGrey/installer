@@ -432,6 +432,22 @@ esac'
   [[ ${CHECK_RESULTS[3]} == "mcp-search-query|fail|"* ]]
 }
 
+@test "R6: an SSE answer gives each tool once (the probe used to print a data line twice)" {
+  cat >"$STUBS/curl" <<'EOF'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'HTTP/1.1 200 OK\r\nmcp-session-id: s1\r\n\r\n' >/tmp/hdr
+printf 'event: message\r\ndata: {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"web_search"},{"name":"web_fetch"}]}}\r\n\r\n'
+EOF
+  chmod +x "$STUBS/curl"
+  mcp_probe() { bash -c "$1" 2>/dev/null; }
+  local out names
+  out=$(mcp_rpc http://search.mcp.svc:3000/mcp SEARCH_KEY tools/list '{}')
+  names=$(mcp_tools "$out")
+  [ "$(wc -w <<<"$names" | tr -d ' ')" = 2 ]
+  [ "$names" = "web_fetch web_search " ]
+}
+
 @test "R6: a warning does not fail the checks; status shows it and its JSON keeps ok" {
   check_pods() { record pods ok "ready"; }
   check_storages() { record mcp-search-query warn "engines failed"; }

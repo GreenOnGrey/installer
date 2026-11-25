@@ -604,7 +604,8 @@ CODE=\$(head -1 /tmp/hdr | cut -d" " -f2)
 if [ "\$CODE" != "200" ]; then echo "HTTP \$CODE"; exit 0; fi
 SID=\$(grep -i "^mcp-session-id:" /tmp/hdr | cut -d" " -f2 | tr -d "\\r")
 call -d '{"jsonrpc":"2.0","method":"notifications/initialized"}' >/dev/null
-call -d '{"jsonrpc":"2.0","id":2,"method":"$method","params":$params}' | sed -n "s/^data: //p;/^{/p"
+call -d '{"jsonrpc":"2.0","id":2,"method":"$method","params":$params}' |
+  awk '/^data: /{sub(/^data: /,""); print; next} /^\{/{print}'
 EOF
 }
 
