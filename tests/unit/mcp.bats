@@ -137,6 +137,18 @@ esac'
   not_called "create -f -"
 }
 
+@test "R21 (MCP-07): a chart other than the pinned one: a warning, the update rolls it out itself" {
+  MCP_SEARCH=true MCP_CHART_VERSION=0.5.2
+  mcp_try_load() { return 0; }
+  printf '{"chart":{"metadata":{"version":"0.5.1"}}}\n' >"$BATS_TEST_TMPDIR/status.json"
+  stub helm "cat $BATS_TEST_TMPDIR/status.json"
+  CHECK_RESULTS=()
+  check_mcp
+  [ "${CHECK_RESULTS[*]}" = "mcp|warn|chart 0.5.1 is deployed, 0.5.2 is pinned: install or update mcp-servers rolls it out" ]
+  # the old server is not probed: its tools belong to the previous chart
+  not_called "get deploy -l app.kubernetes.io/part-of=mcp-servers"
+}
+
 @test "R21 (MCP-07): a release that is rolled out is still checked: a Deployment that is not ready is a failure" {
   MCP_SEARCH=true
   MCP_OPTIONS=(MCP_SEARCH)
@@ -392,6 +404,17 @@ esac'
   MCP_YANDEX_MAIL=maybe
   run validate_mcp_config
   [ "$status" -eq 2 ]
+}
+
+@test "R6: the probe pod starts before the key Secrets exist (a server enabled for the first time)" {
+  MCP_SEARCH=true MCP_SEARCH_KEY=k-vendor MCP_DOCLING=true MCP_DOCGEN=true
+  mcp_load
+  run mcp_probe_manifest
+  [ "$status" -eq 0 ]
+  # FTR.INFRA.MCPS-0003 R2, R2a: mcp-search-key is created by the rollout itself, the checks run before it
+  [[ $output == *"name: mcp-search-key, key: key, optional: true"* ]]
+  [[ $output == *"name: mcp-docling-key, key: key, optional: true"* ]]
+  [[ $output == *"name: mcp-doc-convert-auth, key: username, optional: true"* ]]
 }
 
 @test "R6: the probe script takes the key from the pod's environment and passes it to curl through stdin" {

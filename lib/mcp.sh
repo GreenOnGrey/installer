@@ -557,17 +557,19 @@ spec:
       env:
         - { name: PROBE, value: "1" }
 EOF
+  # optional: the key Secret appears on the first rollout of its server, and the checks run before it, so a missing
+  # Secret must not keep the probe pod from starting (an enabled server that is not rolled out is a warning anyway).
   local srv
   while read -r srv; do
     [[ -n ${MCP_KEY_SECRET[$srv]:-} ]] &&
-      printf '        - { name: %s, valueFrom: { secretKeyRef: { name: %s, key: key } } }\n' "$(mcp_key_var "$srv")" "${MCP_KEY_SECRET[$srv]}"
+      printf '        - { name: %s, valueFrom: { secretKeyRef: { name: %s, key: key, optional: true } } }\n' "$(mcp_key_var "$srv")" "${MCP_KEY_SECRET[$srv]}"
   done < <(mcp_enabled_list)
   if mcp_on docling; then
-    printf '        - { name: DOCLING_SERVE_KEY, valueFrom: { secretKeyRef: { name: mcp-docling-serve-key, key: key } } }\n'
+    printf '        - { name: DOCLING_SERVE_KEY, valueFrom: { secretKeyRef: { name: mcp-docling-serve-key, key: key, optional: true } } }\n'
   fi
   if mcp_on docgen; then
-    printf '        - { name: DOC_CONVERT_USER, valueFrom: { secretKeyRef: { name: mcp-doc-convert-auth, key: username } } }\n'
-    printf '        - { name: DOC_CONVERT_PASSWORD, valueFrom: { secretKeyRef: { name: mcp-doc-convert-auth, key: password } } }\n'
+    printf '        - { name: DOC_CONVERT_USER, valueFrom: { secretKeyRef: { name: mcp-doc-convert-auth, key: username, optional: true } } }\n'
+    printf '        - { name: DOC_CONVERT_PASSWORD, valueFrom: { secretKeyRef: { name: mcp-doc-convert-auth, key: password, optional: true } } }\n'
   fi
   cat <<EOF
       resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { cpu: 200m, memory: 128Mi } }
@@ -746,7 +748,15 @@ check_mcp() {
     record mcp fail "$MCP_FETCH_ERROR"
     return
   fi
-  local out deploys
+  local out deploys deployed
+  # A chart other than the pinned one is a rollout the update performs itself: the old server may answer with other
+  # tools (SearXNG before the DeepSeek search of FTR.INFRA.MCPS-0003), and `update` runs the checks before it
+  # changes anything (R24). The checks after the rollout judge the new chart.
+  deployed=$(hm status "$MCP_RELEASE" -n "$NS_MCP" -o json 2>/dev/null | jq -r '.chart.metadata.version // empty' 2>/dev/null || true)
+  if [[ -n $deployed && $deployed != "$MCP_CHART_VERSION" ]]; then
+    record mcp warn "chart $deployed is deployed, $MCP_CHART_VERSION is pinned: install or update mcp-servers rolls it out"
+    return
+  fi
   # Servers enabled but not rolled out yet: the first enable on a running stand, or a stand whose release was
   # removed. Nothing to wait for, and nothing is wrong — `install` and `update mcp-servers` deploy them after the
   # checks. `update` runs the checks before it changes anything (R24), so a pending rollout must not stop it.
