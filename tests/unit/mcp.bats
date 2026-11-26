@@ -267,10 +267,12 @@ esac'
 @test "STD-11, STD-12, STD-03: keys are created once, and those of disabled servers go after the release" {
   MCP_DOCLING=true MCP_SEARCH=true MCP_SEARCH_KEY=k-deepseek
   ensure_mcp_secrets
-  [ -f "$KUBE_SECRETS/mcp-docling-key" ] && [ -f "$KUBE_SECRETS/mcp-deepseek-key" ]
-  # FTR.INFRA.MCPS-0003 R2: the vendor key comes from the configuration, not from openssl
+  [ -f "$KUBE_SECRETS/mcp-docling-key" ] && [ -f "$KUBE_SECRETS/mcp-deepseek-key" ] && [ -f "$KUBE_SECRETS/mcp-search-key" ]
+  # FTR.INFRA.MCPS-0003 R2, R2a: the vendor key comes from the configuration, the platform key is generated
   [ "$(cat "$KUBE_SECRETS/mcp-deepseek-key")" = "k-deepseek" ]
+  [[ $(cat "$KUBE_SECRETS/mcp-search-key") =~ ^[0-9a-f]{64}$ ]]
   [[ $(cat "$KUBE_SECRETS/mcp-docling-key") =~ ^[0-9a-f]{64}$ ]]
+  [ "$(cat "$KUBE_SECRETS/mcp-search-key")" != "$(cat "$KUBE_SECRETS/mcp-deepseek-key")" ]
   first=$(cat "$KUBE_SECRETS/mcp-deepseek-key")
   : >"$CALLS"
   ensure_mcp_secrets
@@ -367,11 +369,14 @@ esac'
 }
 
 @test "STD-17, MCP-06: creds: addresses and access mode of enabled servers only" {
-  MCP_SEARCH=true MCP_YANDEX_MAIL=true MCP_SEARCH_KEY=k-search
-  printf 'k-search' >"$KUBE_SECRETS/mcp-deepseek-key"
+  MCP_SEARCH=true MCP_YANDEX_MAIL=true MCP_SEARCH_KEY=k-vendor
+  printf 'k-platform' >"$KUBE_SECRETS/mcp-search-key"
+  printf 'k-vendor' >"$KUBE_SECRETS/mcp-deepseek-key"
   run mcp_creds_json
   [ "$(jq -r '.search.url' <<<"$output")" = "http://search.mcp.svc:3000/mcp" ]
-  [ "$(jq -r '.search.value' <<<"$output")" = "Bearer k-search" ]
+  # FTR.INFRA.MCPS-0003 R2a: creds prints the platform key, never the DeepSeek key
+  [ "$(jq -r '.search.value' <<<"$output")" = "Bearer k-platform" ]
+  [[ $output != *k-vendor* ]]
   [ "$(jq -r 'has("docling")' <<<"$output")" = false ]
   [ "$(jq -r '."yandex-mail".url' <<<"$output")" = "http://yandex-mail.mcp.svc:8000/mcp" ]
   [ "$(jq -c '."yandex-mail".oauth.scopes' <<<"$output")" = '["mail:imap_ro","login:email"]' ]
