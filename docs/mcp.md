@@ -20,7 +20,7 @@ Servers are installed by the release `mcp-servers` in the namespace `mcp` and ar
 
 `install` stores the MCP settings in the ConfigMap `installer/installer-config`, so a later `install` without them keeps the servers. Removing an option from the file does not turn a server off. Set `MCP_<NAME>=false` explicitly, and the next `install` removes the server.
 
-A server enabled on a running stand is deployed by `update mcp-servers` alone, without the rest of the install. The checks of the stand that `update` runs first treat servers that are enabled but not rolled out yet as a warning, not a failure, so the first enable needs no `install`.
+A server enabled on a running stand is deployed by `update mcp-servers` alone, without the rest of the install. The checks of the stand that `update` runs first treat servers that are enabled but not rolled out yet as a warning, not a failure, so the first enable needs no `install`. A chart of `mcp-servers` other than the one the installer pins is a warning too: the old server may answer with other tools, and `update` rolls the new chart out itself.
 
 ## A site of the company network
 
