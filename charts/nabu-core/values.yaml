@@ -125,7 +125,7 @@ cleaner:
 # small on CPU with int8; large-v3-turbo is more accurate on Russian but heavier.
 whisper:
   enabled: false
-  image: onerahmet/openai-whisper-asr-webservice:v1.10.0
+  image: onerahmet/openai-whisper-asr-webservice:v2.0.0
   model: small
   quantization: int8
   storage: 2Gi
