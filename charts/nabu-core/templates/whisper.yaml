@@ -41,16 +41,16 @@ spec:
             - { name: MODEL_IDLE_TIMEOUT, value: "0" }
           ports: [{ name: http, containerPort: 9000 }]
           readinessProbe:
-            # the first page of the API is the only cheap answer of the image; every ten seconds it filled half of
-            # the log of the stand with access lines (FTR.NAB.CHAT-0001 R22)
-            httpGet: { path: /docs, port: http }
-            periodSeconds: 60
+            # the recognizer has a health answer of its own since v1.11: 503 while the model loads, 200 after, and
+            # the image keeps /health out of its access log (FTR.NAB.CHAT-0001 R22)
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
           startupProbe:
-            httpGet: { path: /docs, port: http }
+            httpGet: { path: /health, port: http }
             periodSeconds: 10
-            failureThreshold: 60   # the first start downloads the model
+            failureThreshold: 180   # the first start downloads the model; /health answers 503 until it is ready
           resources: {{- toYaml .Values.whisper.resources | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
